@@ -1,0 +1,28 @@
+# poe2-arb configuration — copy to poe2arb.toml and edit.
+# Every key is optional; these are the defaults.
+
+# League name as poe.ninja spells it. Omit to auto-detect the current temp league
+# from /poe2/api/economy/leagues (league names rotate — prefer auto-detect).
+#league = "Runes of Aldur"
+
+# --- signal filtering ---
+profit_threshold_pct = 3.0        # min net profit per loop to report
+fee_pct = 1.5                     # haircut per hop: exchange gold fee + fill slippage
+liquidity_floor_divines = 20.0    # ignore currencies under this daily volume (poe.ninja)
+max_currencies = 10               # graph size cap, top-N by volume (main request-budget knob)
+max_cycle_len = 4                 # 3 or 4 (2-cycles are always scanned)
+
+# --- order-book pricing ---
+depth_divines = 5.0               # edge rate = marginal rate to fill this much value
+bait_filter_ratio = 1.10          # drop offers better than consensus * this (scam bait)
+min_accounts = 2                  # fill must span >= this many lister accounts (anti fake-wall)
+have_chunk = 6                    # currencies per `have` list per exchange request
+
+# --- politeness / caching ---
+refresh_minutes = 10              # min age before any remote re-fetch
+request_interval_s = 10.0         # spacing between GGG requests (limits: 5/15s, 10/90s, 30/300s)
+#user_agent = "poe2-arb/0.1 (contact: you@example.com)"
+
+# --- paths ---
+#cache_dir = "~/.cache/poe2-arb"
+#history_path = "~/.cache/poe2-arb/history.jsonl"

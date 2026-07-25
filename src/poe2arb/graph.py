@@ -1,0 +1,204 @@
+"""Directed exchange graph + arbitrage cycle detection.
+
+Edge A->B answers: "if I pay 1 A into the order book right now, how many B do I
+actually receive?" — priced by walking the book to a configurable fill depth
+(marginal rate, not top-of-book, which is bait-listing territory), then applying
+a per-hop fee haircut.
+
+Detection runs two ways and cross-checks:
+  1. Bellman-Ford on -log(rate) weights: a negative cycle == a profitable loop.
+  2. Brute-force enumeration of all 3- and 4-cycles (node count is small).
+"""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+from itertools import permutations
+
+from .client import Offer
+
+
+@dataclass(frozen=True)
+class Edge:
+    src: str
+    dst: str
+    rate: float       # effective dst per 1 src, after fee haircut
+    raw_rate: float   # marginal book rate before haircut
+    depth_filled_divines: float  # book depth actually available at <= raw_rate
+
+
+@dataclass(frozen=True)
+class Opportunity:
+    cycle: tuple[str, ...]   # e.g. ("exalted", "chaos", "divine") — closes back to first
+    profit_pct: float        # (product of effective rates - 1) * 100
+    min_depth_divines: float  # bottleneck edge depth — max size this loop supports
+
+    @property
+    def key(self) -> tuple[str, ...]:
+        return self.cycle
+
+
+def effective_rate(
+    offers: list[Offer],
+    *,
+    fair_rate: float | None,
+    depth_divines: float,
+    get_value_divines: float,
+    bait_filter_ratio: float,
+    min_accounts: int = 1,
+) -> tuple[float, float] | None:
+    """Marginal rate to fill `depth_divines` of value from an order book.
+
+    offers: all offers for one directed pair (pay X -> get Y).
+    fair_rate: consensus rate (poe.ninja) used to discard bait listings that
+        are implausibly better than fair. None disables the filter.
+    get_value_divines: divine value of 1 unit of the get-currency, to convert
+        stock into fill depth.
+    min_accounts: keep walking the book until the fill spans at least this many
+        distinct lister accounts — one account posting a huge fake wall at a
+        too-good rate (price-fixing bait) then can't set the rate on its own.
+    Returns (marginal_rate, depth_filled_divines), or None if the book can't
+    fill the requested depth (illiquid edge — dropped from the graph).
+    """
+    usable = [
+        o
+        for o in offers
+        if o.stock > 0
+        and not (fair_rate is not None and o.rate > fair_rate * bait_filter_ratio)
+    ]
+    usable.sort(key=lambda o: o.rate, reverse=True)  # best rate first
+    filled = 0.0
+    accounts: set[str | None] = set()
+    for o in usable:
+        filled += o.stock * get_value_divines
+        accounts.add(o.account)
+        if filled >= depth_divines and len(accounts) >= min_accounts:
+            return o.rate, filled
+    return None  # book exhausted before reaching target depth
+
+
+def build_graph(
+    offers: list[Offer],
+    values: dict[str, float],
+    nodes: list[str],
+    *,
+    fee_pct: float,
+    depth_divines: float,
+    bait_filter_ratio: float,
+    min_accounts: int = 1,
+) -> dict[tuple[str, str], Edge]:
+    """Build directed edges between `nodes` from raw order-book offers."""
+    node_set = set(nodes)
+    by_pair: dict[tuple[str, str], list[Offer]] = {}
+    for o in offers:
+        if o.pay_currency in node_set and o.get_currency in node_set:
+            by_pair.setdefault((o.pay_currency, o.get_currency), []).append(o)
+
+    haircut = 1.0 - fee_pct / 100.0
+    edges: dict[tuple[str, str], Edge] = {}
+    for (src, dst), pair_offers in by_pair.items():
+        src_v, dst_v = values.get(src), values.get(dst)
+        if not src_v or not dst_v:
+            continue
+        fair = src_v / dst_v  # consensus dst per src
+        priced = effective_rate(
+            pair_offers,
+            fair_rate=fair,
+            depth_divines=depth_divines,
+            get_value_divines=dst_v,
+            bait_filter_ratio=bait_filter_ratio,
+            min_accounts=min_accounts,
+        )
+        if priced is None:
+            continue
+        raw_rate, depth = priced
+        edges[(src, dst)] = Edge(
+            src=src, dst=dst, rate=raw_rate * haircut, raw_rate=raw_rate,
+            depth_filled_divines=depth,
+        )
+    return edges
+
+
+def _canonical(cycle: tuple[str, ...]) -> tuple[str, ...]:
+    """Rotate so the lexicographically smallest node comes first (dedup rotations)."""
+    i = cycle.index(min(cycle))
+    return cycle[i:] + cycle[:i]
+
+
+def brute_force_cycles(
+    edges: dict[tuple[str, str], Edge],
+    *,
+    max_len: int,
+    min_profit_pct: float,
+) -> list[Opportunity]:
+    """Enumerate all simple 2..max_len cycles; report those above the threshold.
+
+    2-cycles are included deliberately: a "crossed book" on a single pair
+    (A->B->A multiplying above 1 despite the fee) is the most common real
+    arbitrage, and Bellman-Ford would flag it anyway.
+    """
+    nodes = sorted({n for e in edges for n in e})
+    found: dict[tuple[str, ...], Opportunity] = {}
+    for length in range(2, max_len + 1):
+        for combo in permutations(nodes, length):
+            if combo != _canonical(combo):
+                continue  # each rotation class visited exactly once
+            product = 1.0
+            min_depth = math.inf
+            ok = True
+            for i, src in enumerate(combo):
+                edge = edges.get((src, combo[(i + 1) % length]))
+                if edge is None:
+                    ok = False
+                    break
+                product *= edge.rate
+                min_depth = min(min_depth, edge.depth_filled_divines)
+            if not ok:
+                continue
+            profit_pct = (product - 1.0) * 100.0
+            if profit_pct >= min_profit_pct:
+                found[combo] = Opportunity(
+                    cycle=combo, profit_pct=profit_pct, min_depth_divines=min_depth
+                )
+    return sorted(found.values(), key=lambda op: op.profit_pct, reverse=True)
+
+
+def bellman_ford_has_negative_cycle(edges: dict[tuple[str, str], Edge]) -> bool:
+    """True iff any profitable cycle (of any length) exists.
+
+    Runs on -log(rate) weights from a virtual source connected to every node,
+    so disconnected components are covered.
+    """
+    nodes = sorted({n for e in edges for n in e})
+    if not nodes:
+        return False
+    dist = {n: 0.0 for n in nodes}  # virtual source: dist 0 to all
+    weighted = [(src, dst, -math.log(e.rate)) for (src, dst), e in edges.items() if e.rate > 0]
+    for _ in range(len(nodes) - 1):
+        changed = False
+        for src, dst, w in weighted:
+            if dist[src] + w < dist[dst] - 1e-12:
+                dist[dst] = dist[src] + w
+                changed = True
+        if not changed:
+            break
+    return any(dist[src] + w < dist[dst] - 1e-12 for src, dst, w in weighted)
+
+
+def find_opportunities(
+    edges: dict[tuple[str, str], Edge],
+    *,
+    max_cycle_len: int,
+    min_profit_pct: float,
+) -> tuple[list[Opportunity], bool]:
+    """Returns (ranked opportunities, longer_cycle_hint).
+
+    longer_cycle_hint is True when Bellman-Ford proves a profitable cycle exists
+    but brute force found nothing above threshold within max_cycle_len — i.e.
+    the profit lives in a longer loop or below the reporting threshold.
+    """
+    ops = brute_force_cycles(edges, max_len=max_cycle_len, min_profit_pct=min_profit_pct)
+    bf = bellman_ford_has_negative_cycle(edges)
+    hint = bf and not ops
+    return ops, hint
