@@ -18,6 +18,8 @@ from PySide6.QtWidgets import (
 )
 
 from ..config import Config
+from ..market import BASE_CURRENCY_CHOICES
+from .item_picker import ExclusionPicker
 from ..rate_limit import (
     Severity,
     check_pacing,
@@ -29,10 +31,22 @@ from ..rate_limit import (
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, cfg: Config, parent=None):
+    def __init__(
+        self,
+        cfg: Config,
+        parent=None,
+        known_currencies: dict[str, str] | None = None,
+        currency_values: dict[str, float] | None = None,
+        universe=None,
+    ):
         super().__init__(parent)
         self.setWindowTitle("Settings")
         self._cfg = cfg
+        # id -> display name and id -> divine value, both from the last scan,
+        # so the exclusion dropdown can list real currencies with their prices.
+        self._known = known_currencies or {}
+        self._values = currency_values or {}
+        self._universe = universe
 
         layout = QVBoxLayout(self)
         form = QFormLayout()
@@ -42,16 +56,15 @@ class SettingsDialog(QDialog):
         self.league.setPlaceholderText("blank = auto-detect current league")
         form.addRow("League", self.league)
 
-        self.threshold = self._dspin(cfg.profit_threshold_pct, 0.0, 100.0, 0.5, "%")
+        self.threshold = self._dspin(cfg.profit_threshold_pct, 0.0, 100.0, 0.1, "%")
         form.addRow("Profit threshold", self.threshold)
 
         self.fee = self._dspin(cfg.fee_pct, 0.0, 20.0, 0.1, "%")
         form.addRow("Fee haircut per hop", self.fee)
 
-        self.interval = QSpinBox()
-        self.interval.setRange(5, 240)
-        self.interval.setSuffix(" min")
-        self.interval.setValue(cfg.watch_interval_minutes)
+        self.interval = self._dspin(
+            cfg.watch_interval_minutes, 0.5, 240.0, 0.5, " min", decimals=1
+        )
         form.addRow("Watch interval", self.interval)
 
         self.max_currencies = QSpinBox()
@@ -64,23 +77,25 @@ class SettingsDialog(QDialog):
         self.max_cycle_len.setCurrentText(str(cfg.max_cycle_len))
         form.addRow("Max loop length", self.max_cycle_len)
 
-        self.liquidity = self._dspin(cfg.liquidity_floor_divines, 0.0, 100000.0, 5.0, " div")
+        self.liquidity = self._dspin(
+            cfg.liquidity_floor_divines, 0.0, 100000.0, 1.0, " div", decimals=0
+        )
         self.liquidity.setToolTip(
             "Ignore currencies that trade less than this much per day. Quiet "
             "markets show tempting prices that never actually fill."
         )
         form.addRow("Liquidity floor (daily volume)", self.liquidity)
 
-        self.exclusions = QLineEdit(", ".join(cfg.exclude_currencies))
-        self.exclusions.setPlaceholderText("e.g. mirror, hinekoras-lock")
+        self.exclusions = ExclusionPicker(cfg.exclude_currencies, self._universe)
         self.exclusions.setToolTip(
-            "Comma-separated currency ids to keep out of the search entirely.\n"
-            "Use this for currencies you'd never realistically trade."
+            "Tick anything to keep out of the search, and out of the\n"
+            "Market and Book edges tabs. Grouped by category — hover a\n"
+            "category to see what's in it."
         )
         form.addRow("Exclude currencies", self.exclusions)
 
         self.max_value = self._dspin(
-            cfg.max_currency_value_divines, 0.0, 1_000_000.0, 10.0, " div"
+            cfg.max_currency_value_divines, 0.0, 1_000_000.0, 5.0, " div", decimals=0
         )
         self.max_value.setSpecialValueText("no limit")
         self.max_value.setToolTip(
@@ -89,17 +104,29 @@ class SettingsDialog(QDialog):
         )
         form.addRow("Skip currencies worth over", self.max_value)
 
-        self.depth = self._dspin(cfg.depth_divines, 0.5, 1000.0, 0.5, " div")
+        self.depth = self._dspin(cfg.depth_divines, 0.5, 1000.0, 0.5, " div", decimals=1)
         form.addRow("Fill depth per edge", self.depth)
 
         self.request_interval = self._dspin(
-            cfg.request_interval_s, 1.0, 120.0, 0.5, " s"
+            cfg.request_interval_s, 1.0, 120.0, 0.1, " s", decimals=1
         )
         self.request_interval.setToolTip(
             "How long to wait between requests to the official trade API.\n"
             "Lower is faster but risks a rate-limit ban on your whole IP."
         )
         form.addRow("Seconds between requests", self.request_interval)
+
+        self.safety = QSpinBox()
+        self.safety.setRange(20, 100)
+        self.safety.setSingleStep(10)
+        self.safety.setSuffix(" %")
+        self.safety.setValue(round(cfg.rate_limit_safety_fraction * 100))
+        self.safety.setToolTip(
+            "How much of GGG's rate limit this app is allowed to use.\n"
+            "Lower it if you run other trade tools on the same connection —\n"
+            "the limit is per IP address, so everything shares one budget."
+        )
+        form.addRow("Share of rate limit to use", self.safety)
 
         self.sound = QCheckBox("Play sound with notifications")
         self.sound.setChecked(cfg.alert_sound)
@@ -116,7 +143,9 @@ class SettingsDialog(QDialog):
         self.buttons.rejected.connect(self.reject)
         layout.addWidget(self.buttons)
 
-        for widget in (self.request_interval, self.max_currencies, self.interval):
+        for widget in (
+            self.request_interval, self.max_currencies, self.interval, self.safety
+        ):
             widget.valueChanged.connect(self._revalidate)
         self._revalidate()
 
@@ -130,7 +159,8 @@ class SettingsDialog(QDialog):
         merely warned about.
         """
         interval = self.request_interval.value()
-        issues = check_pacing(interval, safety_fraction=self._cfg.rate_limit_safety_fraction)
+        fraction = self.safety.value() / 100.0
+        issues = check_pacing(interval, safety_fraction=fraction)
         severity = worst_severity(issues)
 
         n = requests_per_scan(self.max_currencies.value(), self._cfg.have_chunk)
@@ -149,7 +179,7 @@ class SettingsDialog(QDialog):
             )
 
         if severity is Severity.ERROR:
-            safe = min_safe_interval(safety_fraction=self._cfg.rate_limit_safety_fraction)
+            safe = min_safe_interval(safety_fraction=fraction)
             detail = " ".join(i.message for i in issues if i.severity is Severity.ERROR)
             self.budget_label.setText(
                 f"<b>Too fast — this would get your IP banned.</b><br>{detail}<br>"
@@ -179,30 +209,24 @@ class SettingsDialog(QDialog):
         )
 
     @staticmethod
-    def _dspin(value: float, lo: float, hi: float, step: float, suffix: str) -> QDoubleSpinBox:
+    def _dspin(
+        value: float, lo: float, hi: float, step: float, suffix: str,
+        decimals: int = 2,
+    ) -> QDoubleSpinBox:
         s = QDoubleSpinBox()
+        s.setDecimals(decimals)
         s.setRange(lo, hi)
         s.setSingleStep(step)
         s.setSuffix(suffix)
         s.setValue(value)
         return s
 
-    @staticmethod
-    def _parse_exclusions(text: str) -> list[str]:
-        """Accept comma- or space-separated ids, tolerating stray whitespace."""
-        raw = text.replace(",", " ").split()
-        seen: list[str] = []
-        for item in raw:
-            cid = item.strip().lower()
-            if cid and cid not in seen:
-                seen.append(cid)
-        return seen
-
     def result_config(self) -> Config:
         return replace(
             self._cfg,
-            exclude_currencies=self._parse_exclusions(self.exclusions.text()),
+            exclude_currencies=self.exclusions.selected_ids(),
             max_currency_value_divines=self.max_value.value(),
+            rate_limit_safety_fraction=self.safety.value() / 100.0,
             league=self.league.text().strip() or None,
             profit_threshold_pct=self.threshold.value(),
             fee_pct=self.fee.value(),

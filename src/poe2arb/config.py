@@ -76,11 +76,10 @@ class Config:
     max_currencies: int = 10            # top-N by volume included in the graph
     max_cycle_len: int = 4              # 3 or 4
 
-    # Currencies to keep out of the graph regardless of how liquid they look.
-    # Mirrors are excluded by default: a single one costs thousands of divines,
-    # so any "opportunity" through one is unreachable for most players and just
-    # crowds out loops they could actually trade.
-    exclude_currencies: list[str] = field(default_factory=lambda: ["mirror"])
+    # Items kept out of the graph, and hidden from the Market and Book edges
+    # views, regardless of how liquid they look. Empty by default — excluding
+    # anything is the user's call, not ours.
+    exclude_currencies: list[str] = field(default_factory=list)
     # Also drop anything worth more than this many divines per unit (0 = off).
     max_currency_value_divines: float = 0.0
 
@@ -90,9 +89,14 @@ class Config:
     min_accounts: int = 2               # fill must span this many lister accounts
     have_chunk: int = 6                 # currencies per `have` list in one exchange request
 
+    # The currency prices are displayed in. Internal maths stays in divines;
+    # this only affects what the UI shows.
+    base_currency: str = "divine"
+
     # Watch / GUI
-    watch_interval_minutes: int = 10    # re-scan cadence for watch mode and the GUI
+    watch_interval_minutes: float = 10.0  # re-scan cadence for watch mode and the GUI
     alert_sound: bool = True            # GUI: play a sound with the toast notification
+    skip_install_prompt: bool = False   # set once the user declines the install offer
 
     # Politeness / caching
     refresh_minutes: int = 10           # min age before re-fetching any remote data
@@ -132,7 +136,25 @@ def load_config(path: Path | None = None) -> Config:
     unknown = set(data) - known
     if unknown:
         raise ValueError(f"unknown config keys in {path}: {sorted(unknown)}")
+    _unpin_legacy_paths(data)
     return Config(**data)
+
+
+def _unpin_legacy_paths(data: dict) -> None:
+    """Drop stored paths that merely repeat the old built-in default.
+
+    Versions before 0.2.2 wrote every field out, so a config can pin
+    ~/.cache/poe2-arb even though the user never chose it. Left in place that
+    pin silently defeats the move to the platform-native location — the
+    migration runs, then the config drags the app back to the old path.
+    """
+    legacy = legacy_cache_path()
+    if "cache_dir" in data and Path(data["cache_dir"]).expanduser() == legacy:
+        del data["cache_dir"]
+        if "history_path" in data and (
+            Path(data["history_path"]).expanduser() == legacy / "history.jsonl"
+        ):
+            del data["history_path"]
 
 
 def _toml_value(v: object) -> str:

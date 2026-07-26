@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Callable
 
 from .client import PRIMARY, GggExchangeClient, NinjaClient, NinjaOverview, Offer
@@ -120,3 +121,56 @@ def run_scan(
     finally:
         ninja.close()
         ggg.close()
+
+
+def result_from_history_record(record: dict, names: dict[str, str]) -> ScanResult:
+    """Rebuild a ScanResult from a logged scan, for repopulating the UI.
+
+    History stores currency ids but not display names — those come from
+    poe.ninja separately, so callers pass whatever they have and can rebuild
+    with better names once the currency list arrives.
+    """
+    values = {k: float(v) for k, v in record.get("ninja_values_divine", {}).items()}
+    volumes = {k: float(v) for k, v in record.get("ninja_volumes_divine", {}).items()}
+    overview = NinjaOverview(
+        league=record.get("league", "?"),
+        fetched_at=datetime.fromisoformat(record["ts"]),
+        values=values,
+        volumes=volumes,
+        names={cid: names.get(cid, cid) for cid in values},
+    )
+    edges: dict[tuple[str, str], Edge] = {}
+    for e in record.get("book_edges", []):
+        try:
+            edge = Edge(
+                src=e["src"],
+                dst=e["dst"],
+                rate=float(e["effective_rate"]),
+                raw_rate=float(e["raw_rate"]),
+                depth_filled_divines=float(e["depth_divines"]),
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+        edges[(edge.src, edge.dst)] = edge
+    ops: list[Opportunity] = []
+    for o in record.get("opportunities", []):
+        try:
+            ops.append(
+                Opportunity(
+                    cycle=tuple(o["cycle"]),
+                    profit_pct=float(o["profit_pct"]),
+                    min_depth_divines=float(o["min_depth_divines"]),
+                )
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+    ops.sort(key=lambda op: op.profit_pct, reverse=True)
+    nodes = sorted({n for pair in edges for n in pair})
+    return ScanResult(
+        league=overview.league,
+        overview=overview,
+        nodes=nodes,
+        edges=edges,
+        opportunities=ops,
+        longer_cycle_hint=False,
+    )

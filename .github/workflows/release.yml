@@ -27,11 +27,14 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e ".[gui]" pyinstaller
+      - name: Generate Windows version resource
+        run: python packaging/make_version_file.py version_info.txt
       - name: Build exe
         run: >
           pyinstaller --noconfirm --clean --onefile --windowed
           --name poe2-arb
           --icon src/poe2arb/gui/divine_orb_icon.ico
+          --version-file version_info.txt
           --collect-submodules poe2arb
           --collect-data poe2arb
           packaging/gui_entry.py

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import NamedTuple
 
-from PySide6.QtCore import QTimer, QUrl
+from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
@@ -17,7 +18,10 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
+    QComboBox,
     QPushButton,
+    QSizePolicy,
+    QSplitter,
     QSystemTrayIcon,
     QTableWidget,
     QTableWidgetItem,
@@ -28,6 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import __version__
+from ..client import NinjaOverview
 from ..config import (
     Config,
     load_config,
@@ -36,14 +41,23 @@ from ..config import (
     user_config_path,
 )
 from ..format import fmt_depth, fmt_pct, fmt_rate, fmt_value, fmt_volume
+from ..history import read_recent
+from ..market import BASE_CURRENCY_CHOICES, Universe
 from ..rate_limit import Severity, check_pacing, min_safe_interval, worst_severity
 from ..report import route_str
-from ..scan import ScanResult
+from ..scan import ScanResult, result_from_history_record
 from .icon import make_app_icon
 from .settings_dialog import SettingsDialog
 from .table_items import NumericItem, TextItem
 from .updates import RELEASES_PAGE
-from .worker import ScanWorker, UpdateCheckWorker, stop_thread
+from .lookup import QuickLookup
+from .worker import ScanWorker, UniverseWorker, UpdateCheckWorker, stop_thread
+
+
+log = logging.getLogger(__name__)
+
+# How far back the log and tables are repopulated on launch.
+BACKLOAD_HOURS = 8.0
 
 
 class Column(NamedTuple):
@@ -147,6 +161,13 @@ class MainWindow(QMainWindow):
         self._worker: ScanWorker | None = None
         self._known: dict[tuple[str, ...], float] = {}
         self._first_seen: dict[tuple[str, ...], str] = {}
+        # id -> display name from the last scan, so Settings can accept
+        # in-game currency names and flag typos.
+        self._known_currencies: dict[str, str] = {}
+        self._currency_values: dict[str, float] = {}
+        self._universe: Universe | None = None
+        self._last_result: ScanResult | None = None
+        self._backload_record: dict | None = None
         self._next_scan_at: float | None = None
         self._quitting = False
 
@@ -157,9 +178,14 @@ class MainWindow(QMainWindow):
         self._pending_log.clear()
         self._build_tray()
         self._build_timers()
+        self._backload_from_history()
         self._check_updates()
+        self._preload_currencies()
 
-        self.statusBar().showMessage("Ready — press Scan now, or Watch to scan continuously")
+        if not self.statusBar().currentMessage():
+            self.statusBar().showMessage(
+                "Ready — press Scan now, or Watch to scan continuously"
+            )
 
     # ------------------------------------------------------------------ setup
 
@@ -205,9 +231,35 @@ class MainWindow(QMainWindow):
         self.watch_action.toggled.connect(self._watch_toggled)
         tb.addAction(self.watch_action)
 
+        self.stop_action = QAction("Stop", self)
+        self.stop_action.setToolTip(
+            "Cancel the scan in progress and stop watching. A scan can take "
+            "several minutes, so this is how you get out of one early."
+        )
+        self.stop_action.setEnabled(False)
+        self.stop_action.triggered.connect(self.stop_scan)
+        tb.addAction(self.stop_action)
+
         settings_action = QAction("Settings", self)
         settings_action.triggered.connect(self.open_settings)
         tb.addAction(settings_action)
+
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        tb.addWidget(spacer)
+
+        tb.addWidget(QLabel("Show prices in "))
+        self.base_currency_box = QComboBox()
+        for cid, label in BASE_CURRENCY_CHOICES:
+            self.base_currency_box.addItem(label, cid)
+        index = self.base_currency_box.findData(self.cfg.base_currency)
+        self.base_currency_box.setCurrentIndex(max(0, index))
+        self.base_currency_box.setToolTip(
+            "The currency every price in the app is shown in.\n"
+            "Display only — the maths always works in Divine Orbs."
+        )
+        self.base_currency_box.currentIndexChanged.connect(self._base_currency_changed)
+        tb.addWidget(self.base_currency_box)
 
     def _build_central(self) -> None:
         central = QWidget()
@@ -231,13 +283,26 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs)
 
-        self.ops_table = self._make_table(OPS_COLUMNS)
-        self.tabs.addTab(self.ops_table, "Opportunities")
+        self.ops_table = self._make_table(
+            OPS_COLUMNS, 1, Qt.SortOrder.DescendingOrder  # biggest profit first
+        )
+        self.lookup = QuickLookup()
+        ops_split = QSplitter(Qt.Orientation.Vertical)
+        ops_split.addWidget(self.ops_table)
+        ops_split.addWidget(self.lookup)
+        ops_split.setStretchFactor(0, 3)
+        ops_split.setStretchFactor(1, 2)
+        self.tabs.addTab(ops_split, "Opportunities")
 
-        self.market_table = self._make_table(MARKET_COLUMNS)
+        self.market_table = self._make_table(
+            MARKET_COLUMNS, 1, Qt.SortOrder.DescendingOrder  # most valuable first
+        )
+        self._update_market_header()
         self.tabs.addTab(self.market_table, "Market")
 
-        self.edges_table = self._make_table(EDGE_COLUMNS)
+        self.edges_table = self._make_table(
+            EDGE_COLUMNS, 4, Qt.SortOrder.DescendingOrder  # deepest books first
+        )
         self.tabs.addTab(self.edges_table, "Book edges")
 
         self.log_view = QPlainTextEdit()
@@ -248,7 +313,8 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
 
     @staticmethod
-    def _make_table(columns: list[Column]) -> QTableWidget:
+    def _make_table(columns: list[Column], sort_column: int = 0,
+                    sort_order: Qt.SortOrder = Qt.SortOrder.AscendingOrder) -> QTableWidget:
         """Table whose first column absorbs slack and whose numbers stay compact."""
         t = QTableWidget(0, len(columns))
         t.setHorizontalHeaderLabels([c.title for c in columns])
@@ -266,7 +332,40 @@ class MainWindow(QMainWindow):
         t.setSortingEnabled(True)
         t.setAlternatingRowColors(True)
         t.verticalHeader().hide()
+        # Without an explicit default Qt sorts by column 0, which buries the
+        # interesting rows (biggest profit, most valuable) at the bottom.
+        t.sortByColumn(sort_column, sort_order)
         return t
+
+    def _base_currency_changed(self) -> None:
+        """Switch display currency from the toolbar, everywhere at once."""
+        # Some platforms (WSLg in particular) leave the popup open after a
+        # click, so it needs dismissing explicitly rather than relying on the
+        # combo box to close itself.
+        self.base_currency_box.hidePopup()
+        chosen = self.base_currency_box.currentData()
+        if not chosen or chosen == self.cfg.base_currency:
+            return
+        self.cfg.base_currency = chosen
+        self._update_market_header()
+        self._reapply_view_settings()
+        self.lookup.set_base_currency(chosen)
+        try:
+            save_config(self.cfg, user_config_path())
+        except OSError:
+            log.warning("could not save base currency", exc_info=True)
+        self._log(f"showing prices in {self._universe.name(chosen) if self._universe else chosen}")
+
+    def _update_market_header(self) -> None:
+        """Market value column names whichever currency the user picked."""
+        label = dict(BASE_CURRENCY_CHOICES).get(self.cfg.base_currency, "Divine Orb")
+        short = label.split()[0].lower()
+        item = self.market_table.horizontalHeaderItem(1)
+        item.setText(f"Value ({short})")
+        item.setToolTip(
+            f"What one of these is worth in {label}s, according to poe.ninja's "
+            f"market data. Change the unit in Settings."
+        )
 
     def _build_tray(self) -> None:
         # No tray on some Linux desktops and under WSLg (no StatusNotifierWatcher).
@@ -310,6 +409,117 @@ class MainWindow(QMainWindow):
         self.countdown_timer.timeout.connect(self._tick_countdown)
         self.countdown_timer.start()
 
+    def _backload_from_history(self) -> None:
+        """Repopulate the log and tables from recent scans on disk.
+
+        A restart otherwise looks like a blank slate even though the app has
+        hours of results banked. Only the last BACKLOAD_HOURS are replayed —
+        older readings describe a market that has since moved on.
+        """
+        records = read_recent(self.cfg.history_path, BACKLOAD_HOURS)
+        if not records:
+            return
+
+        seen: dict[tuple[str, ...], float] = {}
+        for record in records:
+            ts = datetime.fromisoformat(record["ts"]).astimezone()
+            current = {
+                tuple(o["cycle"]): float(o["profit_pct"])
+                for o in record.get("opportunities", [])
+            }
+            for key, profit in current.items():
+                if key not in seen:
+                    route = " → ".join(key) + f" → {key[0]}"
+                    self._log(f"NEW  {route}: +{profit:.2f}%", ts=ts)
+                    self._first_seen.setdefault(key, ts.strftime("%H:%M:%S"))
+            for key in set(seen) - set(current):
+                route = " → ".join(key) + f" → {key[0]}"
+                self._log(f"gone  {route} (was +{seen[key]:.2f}%)", ts=ts)
+                self._first_seen.pop(key, None)
+            seen = current
+
+        latest = records[-1]
+        latest_ts = datetime.fromisoformat(latest["ts"]).astimezone()
+        self._backload_record = latest
+        self._refresh_tables(result_from_history_record(latest, self._known_currencies))
+        self._log(
+            f"restored {len(records)} scan(s) from the last "
+            f"{BACKLOAD_HOURS:g}h — newest {latest_ts.strftime('%H:%M:%S')}"
+        )
+        self.statusBar().showMessage(
+            f"Showing saved results from {latest_ts.strftime('%H:%M:%S')} — "
+            f"press Scan now to refresh"
+        )
+
+    def _preload_currencies(self) -> None:
+        """Populate the currency list before any scan has run.
+
+        Settings' exclusion list would otherwise be empty on a fresh install,
+        with no way to pick anything until a multi-minute scan finished.
+        """
+        self._currency_worker = UniverseWorker(self.cfg, self)
+        self._currency_worker.loaded.connect(self._universe_loaded)
+        self._currency_worker.start()
+
+    def _universe_loaded(self, universe: Universe) -> None:
+        """Full economy data arrived: feed the pickers and the lookup tool."""
+        self._universe = universe
+        self.lookup.set_universe(universe)
+        self.lookup.set_base_currency(self.cfg.base_currency)
+        self._log(
+            f"loaded {len(universe)} items across "
+            f"{len(universe.by_category())} categories from poe.ninja"
+        )
+        names = universe.names()
+        values = universe.values()
+        volumes = {i.id: i.volume_divine for i in universe.items.values()}
+        self._currencies_loaded(names, values, volumes)
+
+    def _currencies_loaded(self, names: dict, values: dict, volumes: dict) -> None:
+        # A completed scan is a better source; don't overwrite it.
+        if self._known_currencies:
+            return
+        self._known_currencies = names
+        self._currency_values = values
+        if self._worker is not None and self._worker.isRunning():
+            return  # a live scan is about to replace these tables anyway
+        self._render_market_only(names, values, volumes)
+
+    def _render_market_only(self, names: dict, values: dict, volumes: dict) -> None:
+        """Show fresh poe.ninja prices without disturbing restored scan data.
+
+        Rebuilds the Market tab from the newer figures while keeping whatever
+        Opportunities and Book edges were restored from history — those need a
+        real scan (order books) and can't come from poe.ninja alone.
+        """
+        base = self._backload_record
+        if base is not None:
+            record = dict(base)
+            ninja_ts = datetime.now(timezone.utc).isoformat()
+            # Use whichever price snapshot is newer for the Market tab.
+            if record["ts"] < ninja_ts:
+                record["ninja_values_divine"] = values
+                record["ninja_volumes_divine"] = volumes
+            self._refresh_tables(result_from_history_record(record, names))
+            return
+        overview = NinjaOverview(
+            league=self.cfg.league or "?",
+            fetched_at=datetime.now(timezone.utc),
+            values=values,
+            volumes=volumes,
+            names=names,
+        )
+        self._refresh_tables(
+            ScanResult(
+                league=overview.league,
+                overview=overview,
+                nodes=[],
+                edges={},
+                opportunities=[],
+                longer_cycle_hint=False,
+            )
+        )
+
     def _check_updates(self) -> None:
         self._update_worker = UpdateCheckWorker(__version__, self)
         self._update_worker.update_available.connect(self._show_update_banner)
@@ -321,6 +531,7 @@ class MainWindow(QMainWindow):
         if self._worker is not None and self._worker.isRunning():
             return
         self.scan_action.setEnabled(False)
+        self.stop_action.setEnabled(True)
         self.statusBar().showMessage("Scanning — fetching order books…")
         self._worker = ScanWorker(self.cfg, self)
         self._worker.progress.connect(
@@ -328,10 +539,35 @@ class MainWindow(QMainWindow):
         )
         self._worker.finished_ok.connect(self._scan_done)
         self._worker.failed.connect(self._scan_failed)
+        # Runs on every exit path, including cancellation — which emits no
+        # result signal at all, so the buttons would otherwise stay disabled.
+        self._worker.finished.connect(self._scan_thread_finished)
         self._worker.start()
 
-    def _scan_done(self, result: ScanResult) -> None:
+    def stop_scan(self) -> None:
+        """Cancel the running scan and stop watching."""
+        now = datetime.now().strftime("%H:%M:%S")
+        was_watching = self.watch_action.isChecked()
+        if was_watching:
+            self.watch_action.setChecked(False)  # also stops the timer
+        if self._worker is not None and self._worker.isRunning():
+            self._worker.cancel()
+            self._log("stopping scan…")
+            self.statusBar().showMessage("Stopping…")
+        elif was_watching:
+            self._log("watch stopped")
+        self.watch_timer.stop()
+        self._next_scan_at = None
+
+    def _scan_thread_finished(self) -> None:
         self.scan_action.setEnabled(True)
+        self.stop_action.setEnabled(self.watch_action.isChecked())
+        if self._worker is not None and self._worker.was_cancelled:
+            now = datetime.now().strftime("%H:%M:%S")
+            self._log("scan stopped")
+            self.statusBar().showMessage("Scan stopped")
+
+    def _scan_done(self, result: ScanResult) -> None:
         now = datetime.now().strftime("%H:%M:%S")
         names = result.overview.names
 
@@ -341,17 +577,20 @@ class MainWindow(QMainWindow):
 
         for k in new_keys:
             op = current[k]
-            self._first_seen[k] = now
+            self._first_seen.setdefault(k, now)
             msg = f"NEW  {route_str(op, names)}: +{op.profit_pct:.2f}% (depth {op.min_depth_divines:.1f} div)"
-            self._log(f"[{now}] {msg}")
+            self._log(msg)
             self._notify("Arbitrage opportunity", msg)
         for k in gone_keys:
-            self._log(f"[{now}] gone  {' → '.join(k)} (was +{self._known[k]:.2f}%)")
+            self._log(f"gone  {' → '.join(k)} (was +{self._known[k]:.2f}%)")
             self._first_seen.pop(k, None)
         if not new_keys and not gone_keys:
-            self._log(f"[{now}] scan complete — {len(current)} above threshold, no changes")
+            self._log(f"scan complete — {len(current)} above threshold, no changes")
 
         self._known = {k: op.profit_pct for k, op in current.items()}
+        self._backload_record = None
+        self._known_currencies = dict(names)
+        self._currency_values = dict(result.overview.values)
         self._refresh_tables(result)
 
         hint = " (longer/deeper loop exists below reporting window)" if result.longer_cycle_hint else ""
@@ -362,14 +601,14 @@ class MainWindow(QMainWindow):
             self._schedule_next()
 
     def _scan_failed(self, message: str) -> None:
-        self.scan_action.setEnabled(True)
         now = datetime.now().strftime("%H:%M:%S")
-        self._log(f"[{now}] scan failed: {message}")
+        self._log(f"scan failed: {message}")
         self.statusBar().showMessage(f"Scan failed: {message}")
         if self.watch_action.isChecked():
             self._schedule_next()  # keep watching; next interval may succeed
 
     def _refresh_tables(self, result: ScanResult) -> None:
+        self._last_result = result
         names = result.overview.names
 
         ops = result.opportunities
@@ -389,13 +628,21 @@ class MainWindow(QMainWindow):
         self.ops_table.setSortingEnabled(True)
 
         overview = result.overview
-        rows = sorted(overview.values, key=lambda c: -overview.values[c])
+        # Excluded items stay cached and logged, they're just not shown — the
+        # point of excluding something is to stop having to look at it.
+        excluded = {c.strip().lower() for c in self.cfg.exclude_currencies}
+        rows = sorted(
+            (c for c in overview.values if c not in excluded),
+            key=lambda c: -overview.values[c],
+        )
         self.market_table.setSortingEnabled(False)
         self.market_table.setRowCount(len(rows))
         in_graph = set(result.nodes)
+        base_rate = overview.values.get(self.cfg.base_currency) or 1.0
         for r, cid in enumerate(rows):
             vol = overview.volumes.get(cid, 0.0)
-            value = overview.values[cid]
+            # Stored in divines; shown in whatever unit the user picked.
+            value = overview.values[cid] / base_rate
             self._set_row(
                 self.market_table,
                 r,
@@ -408,7 +655,13 @@ class MainWindow(QMainWindow):
             )
         self.market_table.setSortingEnabled(True)
 
-        edges = sorted(result.edges.values(), key=lambda e: (e.src, e.dst))
+        edges = sorted(
+            (
+                e for e in result.edges.values()
+                if e.src not in excluded and e.dst not in excluded
+            ),
+            key=lambda e: (e.src, e.dst),
+        )
         self.edges_table.setSortingEnabled(False)
         self.edges_table.setRowCount(len(edges))
         for r, e in enumerate(edges):
@@ -435,6 +688,7 @@ class MainWindow(QMainWindow):
     def _watch_toggled(self, on: bool) -> None:
         if on:
             self._log("watch started")
+            self.stop_action.setEnabled(True)
             self.start_scan()
         else:
             self._log("watch stopped")
@@ -442,7 +696,7 @@ class MainWindow(QMainWindow):
             self._next_scan_at = None
 
     def _schedule_next(self) -> None:
-        interval_ms = self.cfg.watch_interval_minutes * 60_000
+        interval_ms = int(self.cfg.watch_interval_minutes * 60_000)
         self.watch_timer.start(interval_ms)
         self._next_scan_at = time.monotonic() + interval_ms / 1000
 
@@ -460,11 +714,24 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ misc
 
     def open_settings(self) -> None:
-        dlg = SettingsDialog(self.cfg, self)
+        dlg = SettingsDialog(
+            self.cfg,
+            self,
+            known_currencies=self._known_currencies,
+            currency_values=self._currency_values,
+            universe=self._universe,
+        )
         if dlg.exec():
             self.cfg = dlg.result_config()
             save_config(self.cfg, user_config_path())
             self._log(f"settings saved to {user_config_path()}")
+            self._update_market_header()
+            self._reapply_view_settings()
+
+    def _reapply_view_settings(self) -> None:
+        """Re-render tables after a settings change, without a fresh scan."""
+        if self._last_result is not None:
+            self._refresh_tables(self._last_result)
 
     def _notify(self, title: str, message: str) -> None:
         if self.tray is not None and self.tray.isVisible():
@@ -479,8 +746,10 @@ class MainWindow(QMainWindow):
         )
         self.update_banner.show()
 
-    def _log(self, line: str) -> None:
-        self.log_view.appendPlainText(line)
+    def _log(self, line: str, ts: datetime | None = None) -> None:
+        """Append a log line, timestamped. `ts` overrides for replayed history."""
+        stamp = (ts or datetime.now()).strftime("%H:%M:%S")
+        self.log_view.appendPlainText(f"[{stamp}] {line}")
 
     def _show_from_tray(self) -> None:
         self.showNormal()
@@ -497,6 +766,7 @@ class MainWindow(QMainWindow):
         self.countdown_timer.stop()
         stop_thread(self._worker)
         stop_thread(getattr(self, "_update_worker", None), timeout_ms=2000)
+        stop_thread(getattr(self, "_currency_worker", None), timeout_ms=2000)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         # While watching, closing hides to tray so alerts keep coming — but only

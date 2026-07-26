@@ -7,10 +7,40 @@ cycles) so a later trend-analysis phase has full data to work from.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .graph import Edge, Opportunity
+
+
+def read_recent(path: Path, max_age_hours: float) -> list[dict]:
+    """Scan records from the last `max_age_hours`, oldest first.
+
+    Used to repopulate the app's log and tables on startup so a restart
+    doesn't look like a blank slate. Best-effort: a corrupt line is skipped
+    rather than allowed to break launch.
+    """
+    if not path.exists():
+        return []
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
+    records: list[dict] = []
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                    ts = datetime.fromisoformat(record["ts"])
+                except (json.JSONDecodeError, KeyError, ValueError):
+                    continue
+                if ts >= cutoff:
+                    records.append(record)
+    except OSError:
+        return []
+    records.sort(key=lambda r: r["ts"])
+    return records
 
 
 def append_scan(

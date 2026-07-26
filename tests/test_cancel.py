@@ -66,3 +66,69 @@ class TestExceptionTaxonomy:
         from poe2arb.client import ClientError
 
         assert not issubclass(ScanCancelled, ClientError)
+
+
+class TestInterruptibleSleep:
+    """A rate-limit Retry-After can be minutes long; Stop must still work."""
+
+    def test_returns_promptly_when_cancelled(self):
+        from poe2arb.client import interruptible_sleep
+
+        started = time.monotonic()
+        with pytest.raises(ScanCancelled):
+            interruptible_sleep(300.0, lambda: True)
+        assert time.monotonic() - started < 1.0
+
+    def test_sleeps_fully_when_not_cancelled(self):
+        from poe2arb.client import interruptible_sleep
+
+        started = time.monotonic()
+        interruptible_sleep(0.3, lambda: False)
+        assert time.monotonic() - started >= 0.25
+
+    def test_no_callback_still_sleeps(self):
+        from poe2arb.client import interruptible_sleep
+
+        started = time.monotonic()
+        interruptible_sleep(0.2, None)
+        assert time.monotonic() - started >= 0.15
+
+    def test_cancel_midway_is_noticed(self):
+        from poe2arb.client import interruptible_sleep
+
+        deadline = time.monotonic() + 0.3
+        with pytest.raises(ScanCancelled):
+            interruptible_sleep(60.0, lambda: time.monotonic() > deadline)
+
+
+class TestBackoffCancellation:
+    def test_429_retry_wait_is_cancellable(self, tmp_path):
+        """The exact case that made Stop hang: a 141s Retry-After."""
+        import httpx
+
+        from poe2arb.client import _request_with_backoff
+
+        def handler(request):
+            return httpx.Response(429, headers={"Retry-After": "300"})
+
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        started = time.monotonic()
+        with pytest.raises(ScanCancelled):
+            _request_with_backoff(client, "GET", "https://x.test", should_cancel=lambda: True)
+        assert time.monotonic() - started < 1.0
+
+    def test_cancel_checked_before_issuing_request(self, tmp_path):
+        import httpx
+
+        from poe2arb.client import _request_with_backoff
+
+        calls = []
+
+        def handler(request):
+            calls.append(request)
+            return httpx.Response(200)
+
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        with pytest.raises(ScanCancelled):
+            _request_with_backoff(client, "GET", "https://x.test", should_cancel=lambda: True)
+        assert calls == []

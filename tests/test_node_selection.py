@@ -27,15 +27,17 @@ BASE = overview(
 
 
 class TestExclusions:
-    def test_mirror_excluded_by_default(self):
+    def test_nothing_excluded_by_default(self):
+        """Excluding anything is the user's call — we don't presume."""
+        assert Config().exclude_currencies == []
         nodes = select_nodes(BASE, Config())
-        assert "mirror" not in nodes
+        assert "mirror" in nodes
         assert "chaos" in nodes and "exalted" in nodes
 
     def test_explicit_exclusion_list(self):
         nodes = select_nodes(BASE, Config(exclude_currencies=["chaos", "annul"]))
         assert "chaos" not in nodes and "annul" not in nodes
-        assert "mirror" in nodes  # no longer excluded — list replaces the default
+        assert "mirror" in nodes
 
     def test_exclusions_are_case_and_space_insensitive(self):
         nodes = select_nodes(BASE, Config(exclude_currencies=[" Chaos ", "MIRROR"]))

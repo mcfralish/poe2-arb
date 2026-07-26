@@ -1,4 +1,4 @@
-# poe2-arb
+# <img src="docs/icon.png" alt="" width="32" height="32" valign="middle"> poe2-arb
 
 Detects profitable currency arbitrage cycles in the Path of Exile 2 player economy.
 Desktop app + CLI.
@@ -6,6 +6,14 @@ Desktop app + CLI.
 ## Download (Windows)
 
 Grab `poe2-arb.exe` from the [latest release](https://github.com/mcfralish/poe2-arb/releases/latest) — no install, just run it.
+
+On first launch it offers to install itself to `%LOCALAPPDATA%\Programs\poe2-arb\` and add
+a Start Menu shortcut, so it doesn't have to live in Downloads. Say no and it keeps running
+where it is; tick "Don't ask again" and it won't raise the subject twice. This is a
+**per-user install**: no administrator prompt, nothing outside your own profile is touched,
+and uninstalling means deleting that folder. Program Files is deliberately avoided — writing
+there needs elevation, and an unsigned app that elevates to copy itself into a system
+directory looks exactly like malware to antivirus heuristics.
 
 - Windows SmartScreen will warn because the exe is unsigned: click **More info → Run anyway**.
 - The app checks GitHub for new versions on startup and shows a download banner when one exists.
@@ -49,8 +57,13 @@ are exactly where genuinely hostile files land.
 **Data (hybrid, two sources):**
 
 - **poe.ninja** (`/poe2/api/economy/...`, documented at poe.ninja/docs/api) provides the
-  currency universe, one consensus value per currency (in divines), daily traded volume,
-  and the current league list. PoE2 data refreshes hourly. Note: poe.ninja publishes a
+  item universe, one consensus value per item (in divines), daily traded volume, and the
+  current league list. All 14 economy categories are loaded — Currency, Fragments, Abyss,
+  Essences, Runes, Soul Cores and the rest, 636 items at the time of writing — which
+  powers the Quick lookup tool and the exclusion menu. Every category quotes prices in
+  divines and item ids don't collide between them, so one flat map covers the economy.
+  The **arbitrage graph itself stays on Currency**: widening it multiplies the paced GGG
+  order-book requests each scan needs. PoE2 data refreshes hourly. Note: poe.ninja publishes a
   *single consistent price* per currency — no pay/receive spread — so on its own it can
   never show arbitrage (all cross-rates multiply to exactly 1 by construction; verified
   live at ~0.03% median deviation).
@@ -122,9 +135,24 @@ pinned in config — league names rotate every few months, never hardcode one.
 The desktop app keeps its own settings file instead, written by the Settings dialog:
 `%APPDATA%\poe2-arb\poe2arb.toml` on Windows, `~/.config/poe2-arb/poe2arb.toml` elsewhere.
 
-**Excluding currencies.** `exclude_currencies` keeps named currencies out of the search
-entirely. Mirrors are excluded by default: one costs thousands of divines, so loops
-through them are unreachable for most players and would crowd out tradeable ones.
+**Excluding items.** `exclude_currencies` keeps named items out of the arbitrage search
+*and* hides them from the Market and Book edges tabs — the point of excluding something
+is to stop having to look at it. Nothing is excluded by default. `max_currency_value_divines`
+does the same by price rather than by name. In the desktop app this is a category menu in
+Settings: hover a category to see its items. Config files use short ids (`mirror`).
+
+**Showing prices in another currency.** The **Show prices in** selector at the top right
+of the window (`base_currency` in config) switches every price in the app between Divine,
+Exalted, Chaos and Annulment — the Market column, the picker menus and the lookup. Internal
+maths always works in divines; this only changes what you read. The choice is saved.
+
+**Menu ordering.** Categories and item names sort alphabetically, but **tiers sort by
+strength, not by name** — alphabetically "Greater" precedes "Lesser" while outranking it.
+The ranking was checked against live median prices rather than assumed: Essences run
+Lesser 0.0030 < Greater 0.0034 < Perfect 0.0122 divines, and Delirium runs
+Diluted < base < Concentrated < Potent. "Ancient" variants consistently price *below*
+their plain counterparts, so they sort low. Anything level-graded (Uncut Gems) sorts
+numerically, because "Level 11" must not come before "Level 6".
 `max_currency_value_divines` does the same by price rather than by name — anything worth
 more than the cap is skipped (`0` disables it). Excluded currencies still appear in the
 app's Market tab for reference, just without a tick in the **In graph** column.

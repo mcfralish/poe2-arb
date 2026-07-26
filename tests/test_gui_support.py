@@ -23,12 +23,27 @@ class TestVersions:
         assert not is_newer("garbage", "0.2.0")  # malformed never triggers a banner
 
     def test_no_qt_import(self):
-        # updates.py must stay importable without PySide6 (CLI installs, tests).
+        """updates.py must stay importable without PySide6 (CLI-only installs).
+
+        Runs in a subprocess: once any other test module imports Qt, PySide6 is
+        in this process's sys.modules regardless of what this module needs.
+        """
+        import subprocess
         import sys
 
-        import poe2arb.gui.updates  # noqa: F401
-
-        assert not any(m.startswith("PySide6") for m in sys.modules)
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import poe2arb.gui.updates, sys;"
+                "qt = [m for m in sys.modules if m.startswith('PySide6')];"
+                "print('QT' if qt else 'CLEAN')",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "CLEAN"
 
 
 class TestConfigRoundTrip:

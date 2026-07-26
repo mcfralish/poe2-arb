@@ -41,6 +41,7 @@ class ScanWorker(QThread):
         super().__init__(parent)
         self._cfg = cfg
         self._cancelled = False
+        self.was_cancelled = False
 
     def cancel(self) -> None:
         """Ask the scan to abort at its next checkpoint (thread-safe: a bool set)."""
@@ -57,13 +58,41 @@ class ScanWorker(QThread):
                 should_cancel=self._is_cancelled,
             )
         except ScanCancelled:
-            log.info("scan cancelled")  # normal shutdown path, nothing to report
+            log.info("scan cancelled")  # normal stop path, nothing to report
+            self.was_cancelled = True
             return
         except Exception as e:  # surfaced to the UI, not raised on a Qt thread
             log.exception("scan failed")
             self.failed.emit(str(e))
         else:
             self.finished_ok.emit(result)
+
+
+class UniverseWorker(QThread):
+    """Load every priced item across poe.ninja's economy categories.
+
+    Only touches poe.ninja, which isn't the rate-limited API — GGG's exchange
+    endpoint is. One cached-or-cheap GET per category, versus the dozens of
+    paced requests a scan needs.
+    """
+
+    loaded = Signal(object)  # market.Universe
+
+    def __init__(self, cfg: Config, parent=None):
+        super().__init__(parent)
+        self._cfg = cfg
+
+    def run(self) -> None:
+        from ..client import NinjaClient
+
+        client = NinjaClient(self._cfg)
+        try:
+            league = self._cfg.league or client.current_league()
+            self.loaded.emit(client.universe(league))
+        except Exception:
+            log.info("could not load economy data", exc_info=True)
+        finally:
+            client.close()
 
 
 class UpdateCheckWorker(QThread):

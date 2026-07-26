@@ -5,6 +5,10 @@
 # from /poe2/api/economy/leagues (league names rotate — prefer auto-detect).
 #league = "Runes of Aldur"
 
+# Currency prices are displayed in: divine, exalted, chaos or annul.
+# Display only — internal maths always works in divines.
+base_currency = "divine"
+
 # --- signal filtering ---
 profit_threshold_pct = 3.0        # min net profit per loop to report
 fee_pct = 1.5                     # haircut per hop: exchange gold fee + fill slippage
@@ -12,10 +16,9 @@ liquidity_floor_divines = 20.0    # ignore currencies under this daily volume (p
 max_currencies = 10               # graph size cap, top-N by volume (main request-budget knob)
 max_cycle_len = 4                 # 3 or 4 (2-cycles are always scanned)
 
-# Keep currencies out of the search entirely. Mirrors are excluded by default:
-# thousands of divines each, so any loop through one is unreachable for most
-# players. Setting this key at all replaces the default list.
-exclude_currencies = ["mirror"]
+# Keep items out of the search entirely, and hide them from the Market and
+# Book edges tabs. Empty by default. Use poe.ninja's short ids.
+exclude_currencies = []
 # Also skip anything worth more than this per unit, in divines (0 = no limit).
 max_currency_value_divines = 0.0
 

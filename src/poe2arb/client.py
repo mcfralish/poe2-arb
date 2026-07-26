@@ -21,6 +21,7 @@ from typing import Callable
 import httpx
 
 from .config import Config
+from .market import CATEGORIES, Universe, merge_overviews
 from .rate_limit import parse_state, parse_windows
 
 log = logging.getLogger(__name__)
@@ -200,11 +201,41 @@ class DiskCache:
 # HTTP with backoff
 # ---------------------------------------------------------------------------
 
+def interruptible_sleep(
+    seconds: float, should_cancel: Callable[[], bool] | None = None, slice_s: float = 0.25
+) -> None:
+    """Sleep in slices so cancellation is noticed promptly.
+
+    A rate-limit Retry-After can be several minutes. Sleeping it in one call
+    would make the Stop button do nothing until it elapsed — exactly the moment
+    a user most wants out.
+    """
+    if should_cancel is None:
+        time.sleep(seconds)
+        return
+    deadline = time.monotonic() + seconds
+    while True:
+        if should_cancel():
+            raise ScanCancelled()
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return
+        time.sleep(min(remaining, slice_s))
+
+
 def _request_with_backoff(
-    client: httpx.Client, method: str, url: str, *, max_tries: int = 4, **kwargs
+    client: httpx.Client,
+    method: str,
+    url: str,
+    *,
+    max_tries: int = 4,
+    should_cancel: Callable[[], bool] | None = None,
+    **kwargs,
 ) -> httpx.Response:
     delay = 2.0
     for attempt in range(1, max_tries + 1):
+        if should_cancel is not None and should_cancel():
+            raise ScanCancelled()
         try:
             resp = client.request(method, url, **kwargs)
         except httpx.TransportError as e:
@@ -215,7 +246,7 @@ def _request_with_backoff(
             if resp.status_code == 429:
                 wait = float(resp.headers.get("Retry-After", delay))
                 log.warning("rate limited (429), sleeping %.0fs", wait)
-                time.sleep(wait)
+                interruptible_sleep(wait, should_cancel)
                 continue
             if resp.status_code >= 500:
                 if attempt == max_tries:
@@ -223,7 +254,7 @@ def _request_with_backoff(
                 log.warning("HTTP %d from %s, retrying in %.0fs", resp.status_code, url, delay)
             else:
                 return resp
-        time.sleep(delay)
+        interruptible_sleep(delay, should_cancel)
         delay *= 2
     raise ClientError(f"{url}: exhausted retries")
 
@@ -287,6 +318,28 @@ class NinjaClient:
         except SchemaError as e:
             raw = self.cache.dump_bad_response(key, json.dumps(data))
             raise SchemaError(str(e), raw) from e
+
+    def universe(self, league: str, categories: tuple[str, ...] = CATEGORIES) -> Universe:
+        """Every priced item across the given categories.
+
+        One request per category, each disk-cached. poe.ninja is not the
+        rate-limited API — GGG's exchange endpoint is — so this is cheap
+        compared with a scan.
+        """
+        per_category = {}
+        newest = None
+        for category in categories:
+            try:
+                overview = self.overview(league, category)
+            except ClientError:
+                log.info("category %s unavailable, skipping", category, exc_info=True)
+                continue
+            per_category[category] = overview
+            if newest is None or overview.fetched_at > newest:
+                newest = overview.fetched_at
+        if not per_category:
+            raise ClientError(f"no economy data available for league {league!r}")
+        return merge_overviews(league, newest or datetime.now(timezone.utc), per_category)
 
     def close(self) -> None:
         self._http.close()
@@ -359,13 +412,10 @@ class GggExchangeClient:
         wait out a full pacing interval.
         """
         interval = max(self.cfg.request_interval_s, self._header_backoff_s)
-        deadline = self._last_request_t + interval
-        while True:
-            self._check_cancelled()
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                return
-            time.sleep(min(remaining, 0.25))
+        remaining = (self._last_request_t + interval) - time.monotonic()
+        self._check_cancelled()
+        if remaining > 0:
+            interruptible_sleep(remaining, self._should_cancel)
 
     def fetch_offers(self, league: str, want: str, have: list[str]) -> list[Offer]:
         """All order-book offers selling `want` for any currency in `have`."""
@@ -381,6 +431,7 @@ class GggExchangeClient:
                 "POST",
                 GGG_EXCHANGE_URL.format(league=league),
                 json={"query": {"want": [want], "have": have}, "engine": "new"},
+                should_cancel=self._should_cancel,
             )
             self._last_request_t = time.monotonic()
             self._log_rate_state(resp)

@@ -16,6 +16,14 @@ def main() -> int:
     app.setApplicationName("poe2-arb")
     app.setQuitOnLastWindowClosed(False)  # tray keeps us alive while watching
     window = MainWindow()
+
+    # Offered before the window appears; if the user installs, the freshly
+    # installed copy takes over and this one exits.
+    from .install_prompt import maybe_offer_install
+
+    if maybe_offer_install(window.cfg, window):
+        return 0
+
     # Catch-all: whatever triggers the quit (tray menu, window close, session
     # logout), worker threads get joined before the interpreter tears down.
     app.aboutToQuit.connect(window.shutdown)
