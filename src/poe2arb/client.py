@@ -21,6 +21,7 @@ from typing import Callable
 import httpx
 
 from .config import Config
+from .rate_limit import parse_state, parse_windows
 
 log = logging.getLogger(__name__)
 
@@ -308,10 +309,48 @@ class GggExchangeClient:
         )
         self._last_request_t = 0.0
         self._should_cancel = should_cancel
+        # Extra spacing demanded by the live rate-limit headers, on top of the
+        # configured interval. Zero until the server tells us otherwise.
+        self._header_backoff_s = 0.0
 
     def _check_cancelled(self) -> None:
         if self._should_cancel is not None and self._should_cancel():
             raise ScanCancelled()
+
+    def _apply_rate_limit_headers(self, resp: httpx.Response) -> None:
+        """Slow down based on what the server says the IP has already used.
+
+        The configured interval only accounts for this app. The IP is shared
+        with anything else the player runs against the trade API, and the
+        X-Rate-Limit-Ip-State header reflects that combined usage — so it is
+        the only signal that can keep a busy IP out of a ban.
+        """
+        limit_header = resp.headers.get("X-Rate-Limit-Ip")
+        state_header = resp.headers.get("X-Rate-Limit-Ip-State")
+        if not limit_header or not state_header:
+            return
+        windows = parse_windows(limit_header)
+        state = parse_state(state_header)
+        backoff = 0.0
+        for w in windows:
+            used, restricted_for = state.get(w.period_s, (0, 0))
+            if restricted_for > 0:
+                log.warning(
+                    "trade API restricted for %ds (%s window) — waiting it out",
+                    restricted_for, w.label,
+                )
+                backoff = max(backoff, float(restricted_for))
+                continue
+            budget = max(1, int(w.max_hits * self.cfg.rate_limit_safety_fraction))
+            if used >= budget:
+                # Drop to that window's sustainable rate until it drains.
+                pace = w.period_s / max(1, w.max_hits)
+                log.info(
+                    "rate-limit headroom low (%d/%d in %s) — spacing requests %.1fs",
+                    used, w.max_hits, w.label, pace,
+                )
+                backoff = max(backoff, pace)
+        self._header_backoff_s = backoff
 
     def _pace(self) -> None:
         """Sleep out the request interval, staying responsive to cancellation.
@@ -319,7 +358,8 @@ class GggExchangeClient:
         Sliced rather than one long sleep so quitting the app doesn't have to
         wait out a full pacing interval.
         """
-        deadline = self._last_request_t + self.cfg.request_interval_s
+        interval = max(self.cfg.request_interval_s, self._header_backoff_s)
+        deadline = self._last_request_t + interval
         while True:
             self._check_cancelled()
             remaining = deadline - time.monotonic()
@@ -344,6 +384,7 @@ class GggExchangeClient:
             )
             self._last_request_t = time.monotonic()
             self._log_rate_state(resp)
+            self._apply_rate_limit_headers(resp)
             if resp.status_code == 404:
                 raise LeagueNotFoundError(league, [])
             if resp.status_code != 200:

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "poe2-arb"
-version = "0.2.1"
+version = "0.2.2"
 description = "Decision-support tool that detects currency arbitrage cycles in the Path of Exile 2 player economy (analysis only, never automates trades)"
 requires-python = ">=3.11"
 dependencies = [
@@ -24,6 +24,9 @@ poe2-arb-gui = "poe2arb.gui.app:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"poe2arb.gui" = ["*.ico"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -12,6 +12,13 @@ liquidity_floor_divines = 20.0    # ignore currencies under this daily volume (p
 max_currencies = 10               # graph size cap, top-N by volume (main request-budget knob)
 max_cycle_len = 4                 # 3 or 4 (2-cycles are always scanned)
 
+# Keep currencies out of the search entirely. Mirrors are excluded by default:
+# thousands of divines each, so any loop through one is unreachable for most
+# players. Setting this key at all replaces the default list.
+exclude_currencies = ["mirror"]
+# Also skip anything worth more than this per unit, in divines (0 = no limit).
+max_currency_value_divines = 0.0
+
 # --- order-book pricing ---
 depth_divines = 5.0               # edge rate = marginal rate to fill this much value
 bait_filter_ratio = 1.10          # drop offers better than consensus * this (scam bait)
@@ -20,9 +27,18 @@ have_chunk = 6                    # currencies per `have` list per exchange requ
 
 # --- politeness / caching ---
 refresh_minutes = 10              # min age before any remote re-fetch
-request_interval_s = 10.0         # spacing between GGG requests (limits: 5/15s, 10/90s, 30/300s)
+# Spacing between trade-API requests. Must stay above 10s: at exactly 10s a
+# 300s window can catch 31 requests against GGG's limit of 30, and crossing it
+# bans your IP for 30 minutes. The GUI refuses to save an unsafe value.
+request_interval_s = 13.0
+# Share of each rate-limit window this app will use (0.8 = 80%). The rest is
+# headroom for other trade tools running from the same IP.
+rate_limit_safety_fraction = 0.8
 #user_agent = "poe2-arb/0.1 (contact: you@example.com)"
 
 # --- paths ---
-#cache_dir = "~/.cache/poe2-arb"
-#history_path = "~/.cache/poe2-arb/history.jsonl"
+# Defaults follow each platform's convention and are best left unset:
+#   Windows: %LOCALAPPDATA%\poe2-arb
+#   Linux/macOS: $XDG_CACHE_HOME/poe2-arb, else ~/.cache/poe2-arb
+#cache_dir = "/custom/path"
+#history_path = "/custom/path/history.jsonl"

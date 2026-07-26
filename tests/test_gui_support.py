@@ -56,8 +56,9 @@ class TestConfigRoundTrip:
     def test_none_league_omitted_and_defaults(self, tmp_path: Path):
         path = tmp_path / "poe2arb.toml"
         save_config(Config(), path)
-        text = path.read_text()
-        assert "league" not in text.splitlines()[0] or not text.startswith("league")
+        # An all-defaults config writes an empty file: nothing to pin, so every
+        # value follows whatever the current version's defaults are.
+        assert path.read_text() == ""
         loaded = load_config(path)
         assert loaded.league is None
         assert loaded.watch_interval_minutes == 10

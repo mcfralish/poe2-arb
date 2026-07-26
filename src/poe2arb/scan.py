@@ -25,13 +25,27 @@ class ScanResult:
 
 
 def select_nodes(overview: NinjaOverview, cfg: Config) -> list[str]:
-    """Top-N currencies by daily volume above the liquidity floor."""
-    liquid = [
-        cid
-        for cid, vol in overview.volumes.items()
-        if cid != PRIMARY and vol >= cfg.liquidity_floor_divines
-    ]
+    """Top-N currencies by daily volume, above the liquidity floor and not excluded.
+
+    The primary unit (divine) is always included — it's the denominator every
+    value is quoted in, so excluding it would leave nothing to price against.
+    """
+    excluded = {c.strip().lower() for c in cfg.exclude_currencies if c.strip()}
+    cap = cfg.max_currency_value_divines
+
+    def keep(cid: str) -> bool:
+        if cid == PRIMARY or cid in excluded:
+            return False
+        if overview.volumes.get(cid, 0.0) < cfg.liquidity_floor_divines:
+            return False
+        if cap > 0 and overview.values.get(cid, 0.0) > cap:
+            return False
+        return True
+
+    liquid = [cid for cid in overview.volumes if keep(cid)]
     liquid.sort(key=lambda cid: overview.volumes[cid], reverse=True)
+    if excluded:
+        log.debug("excluded currencies: %s", ", ".join(sorted(excluded)))
     return [PRIMARY] + liquid[: cfg.max_currencies - 1]
 
 

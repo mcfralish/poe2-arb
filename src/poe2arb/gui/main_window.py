@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import sys
 import time
-import webbrowser
 from datetime import datetime
+from typing import NamedTuple
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QIcon
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import QTimer, QUrl
+from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QMainWindow,
     QMessageBox,
@@ -28,14 +28,97 @@ from PySide6.QtWidgets import (
 )
 
 from .. import __version__
-from ..config import Config, load_config, save_config, user_config_path
-from ..graph import Opportunity
+from ..config import (
+    Config,
+    load_config,
+    migrate_legacy_cache,
+    save_config,
+    user_config_path,
+)
+from ..format import fmt_depth, fmt_pct, fmt_rate, fmt_value, fmt_volume
+from ..rate_limit import Severity, check_pacing, min_safe_interval, worst_severity
 from ..report import route_str
 from ..scan import ScanResult
 from .icon import make_app_icon
 from .settings_dialog import SettingsDialog
+from .table_items import NumericItem, TextItem
 from .updates import RELEASES_PAGE
 from .worker import ScanWorker, UpdateCheckWorker, stop_thread
+
+
+class Column(NamedTuple):
+    title: str
+    tooltip: str
+
+
+# Tooltips are written for someone who plays the game but doesn't trade
+# professionally — no jargon, no maths, just what the number means for them.
+OPS_COLUMNS = [
+    Column(
+        "Route",
+        "The chain of trades to make, in order. You end up back in the currency "
+        "you started with — hopefully holding more of it than when you began.",
+    ),
+    Column(
+        "Profit/loop",
+        "How much more you'd finish with after going all the way around once, "
+        "if every trade fills at the price currently listed. Fees and a bit of "
+        "slippage are already subtracted.",
+    ),
+    Column(
+        "Depth (div)",
+        "Roughly how much this trade can absorb, in Divine Orbs, before you run "
+        "out of people offering these prices. The tightest step in the chain "
+        "sets the limit. Trade bigger than this and the profit shrinks.",
+    ),
+    Column(
+        "First seen",
+        "When this opportunity first showed up in a scan. Ones that have "
+        "survived several scans tend to be more real than ones that just blinked "
+        "into existence.",
+    ),
+]
+
+MARKET_COLUMNS = [
+    Column("Currency", "The currency item, as poe.ninja names it."),
+    Column(
+        "Value (div)",
+        "What one of these is worth in Divine Orbs, according to poe.ninja's "
+        "market data. A Divine Orb itself is 1.0000.",
+    ),
+    Column(
+        "Daily volume (div)",
+        "How much of this currency changes hands in a day, measured in Divine "
+        "Orbs of value. Higher means a busier market, which means your trades "
+        "are more likely to actually fill.",
+    ),
+    Column(
+        "In graph",
+        "A tick means this currency was included in the arbitrage search. "
+        "Quiet or excluded currencies are left out — they produce tempting "
+        "numbers that never actually trade.",
+    ),
+]
+
+EDGE_COLUMNS = [
+    Column("Pay", "The currency you hand over."),
+    Column("Receive", "The currency you get back."),
+    Column(
+        "Book rate",
+        "How many you'd receive for paying 1, based on real offers currently "
+        "listed on the official trade site — not a theoretical price.",
+    ),
+    Column(
+        "After fee",
+        "The same rate once the exchange fee and expected slippage are taken "
+        "off. This is the number the profit calculation actually uses.",
+    ),
+    Column(
+        "Depth (div)",
+        "How much value, in Divine Orbs, is available at this rate before you'd "
+        "have to accept worse prices.",
+    ),
+]
 
 
 def _play_alert_sound() -> None:
@@ -54,9 +137,12 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"poe2-arb {__version__} — PoE2 arbitrage watch (analysis only)")
-        self.resize(900, 560)
+        self.resize(720, 460)
+        self.setMinimumSize(560, 360)
         self.setWindowIcon(make_app_icon())
 
+        # Startup notices collected before the log widget exists.
+        self._pending_log: list[str] = []
         self.cfg = self._load_cfg()
         self._worker: ScanWorker | None = None
         self._known: dict[tuple[str, ...], float] = {}
@@ -66,6 +152,9 @@ class MainWindow(QMainWindow):
 
         self._build_toolbar()
         self._build_central()
+        for line in self._pending_log:
+            self._log(line)
+        self._pending_log.clear()
         self._build_tray()
         self._build_timers()
         self._check_updates()
@@ -75,13 +164,32 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ setup
 
     def _load_cfg(self) -> Config:
+        moved = migrate_legacy_cache()
+        if moved is not None:
+            self._pending_log.append(f"moved cached data to {moved}")
         path = user_config_path()
         try:
             if path.exists():
-                return load_config(path)
+                cfg = load_config(path)
+                self._warn_if_unsafe_pacing(cfg)
+                return cfg
         except (ValueError, OSError) as e:
             QMessageBox.warning(self, "Config", f"Could not read {path}:\n{e}\nUsing defaults.")
         return Config()
+
+    def _warn_if_unsafe_pacing(self, cfg: Config) -> None:
+        """A config written by an older version can hold unsafe pacing."""
+        issues = check_pacing(
+            cfg.request_interval_s, safety_fraction=cfg.rate_limit_safety_fraction
+        )
+        if worst_severity(issues) is not Severity.ERROR:
+            return
+        safe = min_safe_interval(safety_fraction=cfg.rate_limit_safety_fraction)
+        self._pending_log.append(
+            f"saved request spacing of {cfg.request_interval_s:g}s risks a rate-limit "
+            f"ban; raised to {safe:g}s (change it in Settings)"
+        )
+        cfg.request_interval_s = safe
 
     def _build_toolbar(self) -> None:
         tb = QToolBar("Main")
@@ -123,19 +231,13 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs)
 
-        self.ops_table = self._make_table(
-            ["Route", "Profit/loop", "Depth (div)", "First seen"]
-        )
+        self.ops_table = self._make_table(OPS_COLUMNS)
         self.tabs.addTab(self.ops_table, "Opportunities")
 
-        self.market_table = self._make_table(
-            ["Currency", "Value (div)", "Daily volume (div)", "In graph"]
-        )
+        self.market_table = self._make_table(MARKET_COLUMNS)
         self.tabs.addTab(self.market_table, "Market")
 
-        self.edges_table = self._make_table(
-            ["Pay", "Receive", "Book rate", "After fee", "Depth (div)"]
-        )
+        self.edges_table = self._make_table(EDGE_COLUMNS)
         self.tabs.addTab(self.edges_table, "Book edges")
 
         self.log_view = QPlainTextEdit()
@@ -146,12 +248,23 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
 
     @staticmethod
-    def _make_table(headers: list[str]) -> QTableWidget:
-        t = QTableWidget(0, len(headers))
-        t.setHorizontalHeaderLabels(headers)
-        t.horizontalHeader().setStretchLastSection(True)
+    def _make_table(columns: list[Column]) -> QTableWidget:
+        """Table whose first column absorbs slack and whose numbers stay compact."""
+        t = QTableWidget(0, len(columns))
+        t.setHorizontalHeaderLabels([c.title for c in columns])
+        header = t.horizontalHeader()
+        # Stretching the *last* column made the rightmost cell absurdly wide;
+        # the name/route column is the one that benefits from extra room.
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for i in range(1, len(columns)):
+            header.setSectionResizeMode(i, QHeaderView.ResizeMode.ResizeToContents)
+        for i, col in enumerate(columns):
+            item = t.horizontalHeaderItem(i)
+            item.setToolTip(col.tooltip)
         t.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         t.setSortingEnabled(True)
+        t.setAlternatingRowColors(True)
         t.verticalHeader().hide()
         return t
 
@@ -267,10 +380,10 @@ class MainWindow(QMainWindow):
                 self.ops_table,
                 r,
                 [
-                    route_str(op, names),
-                    f"+{op.profit_pct:.2f}%",
-                    f"{op.min_depth_divines:.1f}",
-                    self._first_seen.get(op.key, "—"),
+                    TextItem(route_str(op, names)),
+                    NumericItem(fmt_pct(op.profit_pct), op.profit_pct),
+                    NumericItem(fmt_depth(op.min_depth_divines), op.min_depth_divines),
+                    TextItem(self._first_seen.get(op.key, "—")),
                 ],
             )
         self.ops_table.setSortingEnabled(True)
@@ -281,15 +394,16 @@ class MainWindow(QMainWindow):
         self.market_table.setRowCount(len(rows))
         in_graph = set(result.nodes)
         for r, cid in enumerate(rows):
-            vol = overview.volumes.get(cid, 0)
+            vol = overview.volumes.get(cid, 0.0)
+            value = overview.values[cid]
             self._set_row(
                 self.market_table,
                 r,
                 [
-                    names.get(cid, cid),
-                    f"{overview.values[cid]:.4f}",
-                    "∞" if vol == float("inf") else f"{vol:,.0f}",
-                    "✓" if cid in in_graph else "",
+                    TextItem(names.get(cid, cid)),
+                    NumericItem(fmt_value(value), value),
+                    NumericItem(fmt_volume(vol), vol),
+                    TextItem("✓" if cid in in_graph else ""),
                 ],
             )
         self.market_table.setSortingEnabled(True)
@@ -302,20 +416,18 @@ class MainWindow(QMainWindow):
                 self.edges_table,
                 r,
                 [
-                    names.get(e.src, e.src),
-                    names.get(e.dst, e.dst),
-                    f"{e.raw_rate:.6g}",
-                    f"{e.rate:.6g}",
-                    f"{e.depth_filled_divines:.1f}",
+                    TextItem(names.get(e.src, e.src)),
+                    TextItem(names.get(e.dst, e.dst)),
+                    NumericItem(fmt_rate(e.raw_rate), e.raw_rate),
+                    NumericItem(fmt_rate(e.rate), e.rate),
+                    NumericItem(fmt_depth(e.depth_filled_divines), e.depth_filled_divines),
                 ],
             )
         self.edges_table.setSortingEnabled(True)
 
     @staticmethod
-    def _set_row(table: QTableWidget, row: int, values: list[str]) -> None:
-        for col, text in enumerate(values):
-            item = QTableWidgetItem(text)
-            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+    def _set_row(table: QTableWidget, row: int, items: list[QTableWidgetItem]) -> None:
+        for col, item in enumerate(items):
             table.setItem(row, col, item)
 
     # ------------------------------------------------------------------ watch loop

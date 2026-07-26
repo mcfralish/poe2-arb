@@ -18,6 +18,14 @@ from PySide6.QtWidgets import (
 )
 
 from ..config import Config
+from ..rate_limit import (
+    Severity,
+    check_pacing,
+    min_safe_interval,
+    requests_per_scan,
+    scan_duration_estimate_s,
+    worst_severity,
+)
 
 
 class SettingsDialog(QDialog):
@@ -57,28 +65,118 @@ class SettingsDialog(QDialog):
         form.addRow("Max loop length", self.max_cycle_len)
 
         self.liquidity = self._dspin(cfg.liquidity_floor_divines, 0.0, 100000.0, 5.0, " div")
+        self.liquidity.setToolTip(
+            "Ignore currencies that trade less than this much per day. Quiet "
+            "markets show tempting prices that never actually fill."
+        )
         form.addRow("Liquidity floor (daily volume)", self.liquidity)
+
+        self.exclusions = QLineEdit(", ".join(cfg.exclude_currencies))
+        self.exclusions.setPlaceholderText("e.g. mirror, hinekoras-lock")
+        self.exclusions.setToolTip(
+            "Comma-separated currency ids to keep out of the search entirely.\n"
+            "Use this for currencies you'd never realistically trade."
+        )
+        form.addRow("Exclude currencies", self.exclusions)
+
+        self.max_value = self._dspin(
+            cfg.max_currency_value_divines, 0.0, 1_000_000.0, 10.0, " div"
+        )
+        self.max_value.setSpecialValueText("no limit")
+        self.max_value.setToolTip(
+            "Also skip any currency worth more than this per unit.\n"
+            "Set to 0 for no limit."
+        )
+        form.addRow("Skip currencies worth over", self.max_value)
 
         self.depth = self._dspin(cfg.depth_divines, 0.5, 1000.0, 0.5, " div")
         form.addRow("Fill depth per edge", self.depth)
+
+        self.request_interval = self._dspin(
+            cfg.request_interval_s, 1.0, 120.0, 0.5, " s"
+        )
+        self.request_interval.setToolTip(
+            "How long to wait between requests to the official trade API.\n"
+            "Lower is faster but risks a rate-limit ban on your whole IP."
+        )
+        form.addRow("Seconds between requests", self.request_interval)
 
         self.sound = QCheckBox("Play sound with notifications")
         self.sound.setChecked(cfg.alert_sound)
         form.addRow("", self.sound)
 
-        note = QLabel(
-            "Larger graphs / shorter intervals mean more requests to GGG's API.\n"
-            "Defaults are tuned to stay well inside their rate limits — be polite."
-        )
-        note.setStyleSheet("color: gray;")
-        layout.addWidget(note)
+        self.budget_label = QLabel()
+        self.budget_label.setWordWrap(True)
+        layout.addWidget(self.budget_label)
 
-        buttons = QDialogButtonBox(
+        self.buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        layout.addWidget(self.buttons)
+
+        for widget in (self.request_interval, self.max_currencies, self.interval):
+            widget.valueChanged.connect(self._revalidate)
+        self._revalidate()
+
+    # ---------------------------------------------------------------- validation
+
+    def _revalidate(self) -> None:
+        """Re-check the request budget and gate the OK button on it.
+
+        Exceeding a window doesn't just throttle you, it bans the IP for up to
+        30 minutes — so an over-limit setting is refused outright rather than
+        merely warned about.
+        """
+        interval = self.request_interval.value()
+        issues = check_pacing(interval, safety_fraction=self._cfg.rate_limit_safety_fraction)
+        severity = worst_severity(issues)
+
+        n = requests_per_scan(self.max_currencies.value(), self._cfg.have_chunk)
+        duration = scan_duration_estimate_s(
+            self.max_currencies.value(), self._cfg.have_chunk, interval
+        )
+        summary = (
+            f"One full scan: {n} requests, about {duration / 60:.1f} minutes "
+            f"(cached data is reused, so most scans are shorter)."
+        )
+        if duration > self.interval.value() * 60:
+            summary += (
+                f"<br>That's longer than your {self.interval.value()}-minute watch "
+                f"interval, so scanning would run almost continuously. Consider "
+                f"fewer currencies or a longer interval."
+            )
+
+        if severity is Severity.ERROR:
+            safe = min_safe_interval(safety_fraction=self._cfg.rate_limit_safety_fraction)
+            detail = " ".join(i.message for i in issues if i.severity is Severity.ERROR)
+            self.budget_label.setText(
+                f"<b>Too fast — this would get your IP banned.</b><br>{detail}<br>"
+                f"Use at least <b>{safe:g} s</b> between requests.<br><br>{summary}"
+            )
+            self.budget_label.setStyleSheet("color: #b00020;")
+        elif severity is Severity.WARNING:
+            detail = " ".join(i.message for i in issues if i.severity is Severity.WARNING)
+            self.budget_label.setText(
+                f"<b>Close to the limit.</b><br>{detail}<br><br>{summary}"
+            )
+            self.budget_label.setStyleSheet("color: #8a6d1a;")
+        else:
+            self.budget_label.setText(
+                f"Comfortably inside GGG's rate limits, with room for other "
+                f"trade tools on the same connection.<br><br>{summary}"
+            )
+            self.budget_label.setStyleSheet("color: gray;")
+
+        ok = self.buttons.button(QDialogButtonBox.StandardButton.Ok)
+        ok.setEnabled(severity is not Severity.ERROR)
+        ok.setToolTip(
+            "Fix the request spacing first — these settings would get your IP "
+            "temporarily banned from the trade API."
+            if severity is Severity.ERROR
+            else ""
+        )
 
     @staticmethod
     def _dspin(value: float, lo: float, hi: float, step: float, suffix: str) -> QDoubleSpinBox:
@@ -89,9 +187,22 @@ class SettingsDialog(QDialog):
         s.setValue(value)
         return s
 
+    @staticmethod
+    def _parse_exclusions(text: str) -> list[str]:
+        """Accept comma- or space-separated ids, tolerating stray whitespace."""
+        raw = text.replace(",", " ").split()
+        seen: list[str] = []
+        for item in raw:
+            cid = item.strip().lower()
+            if cid and cid not in seen:
+                seen.append(cid)
+        return seen
+
     def result_config(self) -> Config:
         return replace(
             self._cfg,
+            exclude_currencies=self._parse_exclusions(self.exclusions.text()),
+            max_currency_value_divines=self.max_value.value(),
             league=self.league.text().strip() or None,
             profit_threshold_pct=self.threshold.value(),
             fee_pct=self.fee.value(),
@@ -100,5 +211,6 @@ class SettingsDialog(QDialog):
             max_cycle_len=int(self.max_cycle_len.currentText()),
             liquidity_floor_divines=self.liquidity.value(),
             depth_divines=self.depth.value(),
+            request_interval_s=self.request_interval.value(),
             alert_sound=self.sound.isChecked(),
         )

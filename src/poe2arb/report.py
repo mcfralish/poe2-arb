@@ -6,6 +6,7 @@ from rich.console import Console
 from rich.table import Table
 
 from .client import NinjaOverview
+from .format import fmt_depth, fmt_pct, fmt_rate, fmt_value, fmt_volume
 from .graph import Edge, Opportunity
 
 console = Console()
@@ -44,8 +45,8 @@ def print_opportunities(
         table.add_row(
             str(i),
             route_str(op, names),
-            f"+{op.profit_pct:.2f}%",
-            f"{op.min_depth_divines:.1f}",
+            fmt_pct(op.profit_pct),
+            fmt_depth(op.min_depth_divines),
         )
     console.print(table)
     console.print(
@@ -64,7 +65,10 @@ def print_rates(
     vol = overview.volumes.get(currency)
     console.print(f"[bold]{name}[/bold] ({currency})")
     if value is not None:
-        console.print(f"  poe.ninja value: {value:.4f} divine   daily volume: {vol:,.0f} div")
+        console.print(
+            f"  poe.ninja value: {fmt_value(value)} divine   "
+            f"daily volume: {fmt_volume(vol)} div"
+        )
     sell = sorted(
         (e for (s, _), e in edges.items() if s == currency), key=lambda e: e.dst
     )
@@ -82,12 +86,12 @@ def print_rates(
     table.add_column("Depth (div)", justify="right")
     for e in sell:
         table.add_row(
-            "pay", f"{currency} → {e.dst}", f"{e.raw_rate:.6g}", f"{e.rate:.6g}",
-            f"{e.depth_filled_divines:.1f}",
+            "pay", f"{currency} → {e.dst}", fmt_rate(e.raw_rate), fmt_rate(e.rate),
+            fmt_depth(e.depth_filled_divines),
         )
     for e in buy:
         table.add_row(
-            "receive", f"{e.src} → {currency}", f"{e.raw_rate:.6g}", f"{e.rate:.6g}",
-            f"{e.depth_filled_divines:.1f}",
+            "receive", f"{e.src} → {currency}", fmt_rate(e.raw_rate), fmt_rate(e.rate),
+            fmt_depth(e.depth_filled_divines),
         )
     console.print(table)

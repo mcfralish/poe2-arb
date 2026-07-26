@@ -31,7 +31,9 @@ jobs:
         run: >
           pyinstaller --noconfirm --clean --onefile --windowed
           --name poe2-arb
+          --icon src/poe2arb/gui/divine_orb_icon.ico
           --collect-submodules poe2arb
+          --collect-data poe2arb
           packaging/gui_entry.py
       - name: Smoke test exe imports
         run: dist/poe2-arb.exe --smoke-test
