@@ -16,6 +16,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 import httpx
 
@@ -32,6 +33,14 @@ PRIMARY = "divine"
 
 class ClientError(RuntimeError):
     pass
+
+
+class ScanCancelled(Exception):
+    """Raised to abort an in-flight scan when the caller asks it to stop.
+
+    Deliberately not a ClientError: cancellation is a normal control-flow
+    event (the app is quitting), not a failure to report to the user.
+    """
 
 
 class LeagueNotFoundError(ClientError):
@@ -290,7 +299,7 @@ class GggExchangeClient:
     honors rate-limit headers.
     """
 
-    def __init__(self, cfg: Config):
+    def __init__(self, cfg: Config, should_cancel: Callable[[], bool] | None = None):
         self.cfg = cfg
         self.cache = DiskCache(cfg.cache_dir)
         self._http = httpx.Client(
@@ -298,14 +307,29 @@ class GggExchangeClient:
             timeout=30,
         )
         self._last_request_t = 0.0
+        self._should_cancel = should_cancel
+
+    def _check_cancelled(self) -> None:
+        if self._should_cancel is not None and self._should_cancel():
+            raise ScanCancelled()
 
     def _pace(self) -> None:
-        wait = self.cfg.request_interval_s - (time.monotonic() - self._last_request_t)
-        if wait > 0:
-            time.sleep(wait)
+        """Sleep out the request interval, staying responsive to cancellation.
+
+        Sliced rather than one long sleep so quitting the app doesn't have to
+        wait out a full pacing interval.
+        """
+        deadline = self._last_request_t + self.cfg.request_interval_s
+        while True:
+            self._check_cancelled()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            time.sleep(min(remaining, 0.25))
 
     def fetch_offers(self, league: str, want: str, have: list[str]) -> list[Offer]:
         """All order-book offers selling `want` for any currency in `have`."""
+        self._check_cancelled()
         key = f"ggg_exchange_{league}_{want}_" + "_".join(sorted(have))
         cached = self.cache.load(key, self.cfg.refresh_minutes * 60)
         if cached:

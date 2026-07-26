@@ -6,10 +6,28 @@ import logging
 
 from PySide6.QtCore import QThread, Signal
 
+from ..client import ScanCancelled
 from ..config import Config
 from ..scan import ScanResult, run_scan
 
 log = logging.getLogger(__name__)
+
+
+def stop_thread(thread: QThread | None, timeout_ms: int = 5000) -> None:
+    """Cancel and join a worker thread, so quitting never destroys a live QThread.
+
+    Qt aborts the process if a QThread is garbage-collected while still
+    running, which is how a quit during an in-flight scan turns into a hang.
+    """
+    if thread is None or not thread.isRunning():
+        return
+    if isinstance(thread, ScanWorker):
+        thread.cancel()
+    thread.requestInterruption()
+    if not thread.wait(timeout_ms):
+        log.warning("worker did not stop in %dms; terminating", timeout_ms)
+        thread.terminate()
+        thread.wait(1000)
 
 
 class ScanWorker(QThread):
@@ -22,12 +40,25 @@ class ScanWorker(QThread):
     def __init__(self, cfg: Config, parent=None):
         super().__init__(parent)
         self._cfg = cfg
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        """Ask the scan to abort at its next checkpoint (thread-safe: a bool set)."""
+        self._cancelled = True
+
+    def _is_cancelled(self) -> bool:
+        return self._cancelled or self.isInterruptionRequested()
 
     def run(self) -> None:  # QThread entry point
         try:
             result: ScanResult = run_scan(
-                self._cfg, progress=lambda i, n: self.progress.emit(i, n)
+                self._cfg,
+                progress=lambda i, n: self.progress.emit(i, n),
+                should_cancel=self._is_cancelled,
             )
+        except ScanCancelled:
+            log.info("scan cancelled")  # normal shutdown path, nothing to report
+            return
         except Exception as e:  # surfaced to the UI, not raised on a Qt thread
             log.exception("scan failed")
             self.failed.emit(str(e))

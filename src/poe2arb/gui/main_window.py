@@ -35,7 +35,7 @@ from ..scan import ScanResult
 from .icon import make_app_icon
 from .settings_dialog import SettingsDialog
 from .updates import RELEASES_PAGE
-from .worker import ScanWorker, UpdateCheckWorker
+from .worker import ScanWorker, UpdateCheckWorker, stop_thread
 
 
 def _play_alert_sound() -> None:
@@ -156,6 +156,17 @@ class MainWindow(QMainWindow):
         return t
 
     def _build_tray(self) -> None:
+        # No tray on some Linux desktops and under WSLg (no StatusNotifierWatcher).
+        # Hiding to a tray that doesn't exist strands the window with no way to
+        # restore or quit it, so every tray path is guarded by this flag.
+        self.tray_available = QSystemTrayIcon.isSystemTrayAvailable()
+        if not self.tray_available:
+            self.tray = None
+            self._log(
+                "note: no system tray on this desktop — closing the window will quit "
+                "the app instead of watching in the background"
+            )
+            return
         self.tray = QSystemTrayIcon(make_app_icon(), self)
         menu_show = QAction("Show window", self)
         menu_show.triggered.connect(self._show_from_tray)
@@ -344,7 +355,7 @@ class MainWindow(QMainWindow):
             self._log(f"settings saved to {user_config_path()}")
 
     def _notify(self, title: str, message: str) -> None:
-        if self.tray.isVisible():
+        if self.tray is not None and self.tray.isVisible():
             self.tray.showMessage(title, message, make_app_icon(), 10_000)
         if self.cfg.alert_sound:
             _play_alert_sound()
@@ -366,11 +377,19 @@ class MainWindow(QMainWindow):
 
     def _quit(self) -> None:
         self._quitting = True
-        QApplication.quit()
+        self.close()
+
+    def shutdown(self) -> None:
+        """Stop timers and join worker threads before the event loop goes away."""
+        self.watch_timer.stop()
+        self.countdown_timer.stop()
+        stop_thread(self._worker)
+        stop_thread(getattr(self, "_update_worker", None), timeout_ms=2000)
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        # While watching, closing hides to tray so alerts keep coming.
-        if self.watch_action.isChecked() and not self._quitting:
+        # While watching, closing hides to tray so alerts keep coming — but only
+        # where a tray actually exists, otherwise the window would be unreachable.
+        if self.watch_action.isChecked() and self.tray_available and not self._quitting:
             event.ignore()
             self.hide()
             self.tray.showMessage(
@@ -379,6 +398,7 @@ class MainWindow(QMainWindow):
                 make_app_icon(),
                 5_000,
             )
-        else:
-            event.accept()
-            QApplication.quit()  # quit-on-last-window is disabled for tray mode
+            return
+        self.shutdown()
+        event.accept()
+        QApplication.quit()  # quit-on-last-window is disabled for tray mode

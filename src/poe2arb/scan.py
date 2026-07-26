@@ -64,9 +64,11 @@ def run_scan(
     *,
     log_history: bool = True,
     progress: Callable[[int, int], None] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> ScanResult:
+    """Run one full scan. Raises ScanCancelled if should_cancel() goes true."""
     ninja = NinjaClient(cfg)
-    ggg = GggExchangeClient(cfg)
+    ggg = GggExchangeClient(cfg, should_cancel)
     try:
         league = cfg.league or ninja.current_league()
         overview = ninja.overview(league)
