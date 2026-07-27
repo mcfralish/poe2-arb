@@ -115,10 +115,9 @@ it already announced; hardcoded colours replaced with theme-aware ones.
 - [x] ~~Temporal integrity: edges within one cycle are never observed at the same
   moment~~ — `Edge.observed_at` (from the cache's fetch time, not `now`) and
   `Opportunity.skew_s`, surfaced as a **Spread** column in both UIs and persisted to
-  history. Deliberately *reported, not filtered*: simulating the real request schedule
-  showed a 90s cap would reject 82% of 3-cycles at 10 currencies and **100% at 20**,
-  where the minimum achievable skew (104s) already exceeds it. What survived would be
-  decided by iteration order in `fetch_books`, not by data quality.
+  history. Deliberately *reported, not filtered* — see the measured numbers under
+  "Deliberate decisions". Verified end to end on a live scan: all 38 edges stamped,
+  observations spread over 4.7 minutes.
 - [ ] **Re-verify candidates instead of filtering on skew.** When a cycle clears the
   threshold, re-fetch just its 2–4 edges back-to-back (~26–52s) and report only if it
   survives. Opportunities are rare so the request cost is near zero, and it upgrades
@@ -148,10 +147,13 @@ it already announced; hardcoded colours replaced with theme-aware ones.
   build.** `packaging/changelog_section.py` cuts the entry for the tag; the test
   job runs it before anything is built, so a release whose notes nobody wrote
   can't ship. GitHub's generated commit list is still appended underneath.
-- **Skew is reported, never used to reject a cycle.** Simulating the real request
-  schedule showed any threshold tight enough to mean something rejects nearly
-  every loop, and what survives is decided by iteration order in `fetch_books`
-  rather than by data quality. Re-verification is the answer, not filtering.
+- **Skew is reported, never used to reject a cycle.** Measured on a real scan
+  (Runes of Aldur, 2026-07-27, 38 edges over 15 observation times spanning
+  4.7 min): of the 23 complete 3-cycles present, skew ran 60s / 220s / 263s
+  (min / median / max). A 90s cap would have kept **1 of 23**; 180s keeps 6.
+  A simulation of the request schedule agreed and was, if anything, optimistic.
+  What survives such a cap is decided by iteration order in `fetch_books`, not
+  by data quality. Re-verification is the answer, not filtering.
 
 - **Analysis only.** Never automates any in-game action, trade, whisper or input.
   Automating trading violates GGG's ToS. Hard requirement, not a gap.
