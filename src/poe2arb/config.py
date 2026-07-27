@@ -112,6 +112,9 @@ class Config:
     # Paths
     cache_dir: Path = field(default_factory=user_cache_path)
     history_path: Path | None = None    # default: <cache_dir>/history.jsonl
+    # How long scan records are kept. A watch loop appends one every few
+    # minutes indefinitely, so something has to age them out. 0 = keep forever.
+    history_retention_days: float = 30.0
 
     def __post_init__(self) -> None:
         self.cache_dir = Path(self.cache_dir).expanduser()

@@ -1,12 +1,14 @@
 # poe2-arb — TODO
 
-Merged list (yours + mine). Shipped version: **v0.2.4**.
+Merged list (yours + mine). Shipped version: **v0.2.5**.
 
-**Landed in v0.2.4**: install-prompt crash fixed; Market value at 2dp
-with an Adaptive unit mode; toolbar unit selector reordered with abbreviations;
-exclusion button shows a count instead of growing, with `•` markers on branches
-holding a selection; bigger centred ticks in **In Graph**; "Quick Lookup" and
-"Book Edges" capitalised.
+**Landed in v0.2.5** — Bellman-Ford now names the loop it found instead of
+just asserting one exists; Quick Lookup prefers live order-book rates and says
+which source it used, laid out like the in-game Currency Exchange; type-to-
+search in both item pickers; filter boxes on Market and Book Edges; Clear and
+Save on the Log tab; window position, splitter and tab remembered between runs;
+history file pruned on a retention setting; a restart no longer re-alerts loops
+it already announced; hardcoded colours replaced with theme-aware ones.
 
 ---
 
@@ -21,13 +23,15 @@ holding a selection; bigger centred ticks in **In Graph**; "Quick Lookup" and
   `category`, `detailsId` — no description text. Options to investigate: a poe.ninja
   detail endpoint keyed on `detailsId`, or another source (poedb, CDR). Decide before
   building.
-- [ ] **Smart search in the exclusion list and Quick Lookup**, working alongside the
-  tree menus rather than replacing them. Type-to-filter with the tree still available.
-- [ ] **Quick Lookup laid out like the in-game Currency Exchange**: "I Want" on the
-  left with its picker beneath, "I Have" on the right with its picker beneath,
-  "Market Ratio" centred with `x:y` below it.
-- [ ] **Quick Lookup note should say live data is used when available.** Requires the
-  functional change below — the note must not claim something the code doesn't do.
+- [x] ~~Smart search in the exclusion list and Quick Lookup~~ — a search box at the top
+  of each picker menu; typing shows a flat ranked list of matches, clearing it brings
+  the category tree back. Ranked by where the match lands, so "orb" leads with
+  *Orb of Annulment* over *Divine Orb*.
+- [x] ~~Quick Lookup laid out like the in-game Currency Exchange~~ — "I Want" left,
+  "I Have" right, "Market Ratio" centred with `x : y` beneath, reading left-to-right
+  in the same order as the columns.
+- [x] ~~Quick Lookup note should say live data is used when available~~ — it now names
+  the source and, for live rates, how old the scan was.
 - [ ] **Org tree structures** from `src/poe2arb/gui/OrgTrees/*.txt` (Currency and
   Fragments filled in; others still templates). Base category order, verbatim:
   Currency, Essences, Runes, Abyss, Omens, Soul Cores, Idols, Liquid Emotions,
@@ -37,15 +41,21 @@ holding a selection; bigger centred ticks in **In Graph**; "Quick Lookup" and
   written.**
 - [ ] Large values still read oddly in fixed non-adaptive units (a Mirror in `ex`).
   Adaptive mode covers the default case; decide whether fixed modes need scaling too.
-- [ ] No type-to-find, window position not remembered, Log tab has no clear/export,
-  Book Edges has no filter, no dark-mode check on the hardcoded banner/validation
-  colours.
+- [x] ~~Window position not remembered~~ — geometry, splitter and active tab are kept
+  in `ui-state.json` in the cache dir, with a guard against restoring onto a monitor
+  that's been unplugged.
+- [x] ~~Log tab has no clear/export~~ — Clear and "Save to file…".
+- [x] ~~Book Edges has no filter~~ — filter boxes on Book Edges and Market. They hide
+  rows rather than rebuilding, so sort order and scroll position survive typing.
+- [x] ~~No dark-mode check on the hardcoded banner/validation colours~~ — `gui/theme.py`
+  picks per-role colours off the palette's lightness.
+- [ ] No type-to-find *within* a table (the filter boxes cover the same need; revisit
+  only if they turn out not to).
 
 ## Functional
 
-- [x] ~~Install prompt crashed on first click~~ — `setOverrideCursor(None)`. Fixed and
-  regression-tested; the whole dialog path had no coverage because it only runs from a
-  frozen build.
+- [x] ~~Install prompt crashed on first click~~ — `setOverrideCursor(None)`. Fixed in
+  v0.2.4 and regression-tested.
 - [ ] **Put all items in the arbitrage graph**, choosing what to actually track
   algorithmically since request budget can't cover 636 items. *Inputs available:*
   `volumePrimaryValue` (daily volume in divines) and `sparkline` (7-day trend:
@@ -53,19 +63,24 @@ holding a selection; bigger centred ticks in **In Graph**; "Quick Lookup" and
   published but can be derived. **Needs a design conversation** — scoring function,
   how many slots, whether the set is stable between scans or churns, and how it
   interacts with `max_currencies` and the rate-limit budget.
-- [ ] **Extract the actual route from Bellman-Ford** when a longer cycle exists.
-  Today it only proves one exists. Walk predecessor pointers to name it.
-- [ ] **Quick Lookup should prefer live order-book rates** where a recent scan covered
-  the pair, falling back to poe.ninja consensus otherwise — and label which it used.
-- [ ] History file grows unbounded; no rotation or pruning.
+- [x] ~~Extract the actual route from Bellman-Ford~~ — `find_negative_cycle` walks
+  predecessor pointers and returns the loop; it's priced like any other opportunity
+  and logged by name, with the profit and depth, so it can be judged rather than
+  merely believed.
+- [x] ~~Quick Lookup should prefer live order-book rates~~ — uses the last scan's book
+  for the pair when it's under 45 minutes old, poe.ninja otherwise, and says which.
+- [x] ~~History file grows unbounded~~ — `history_retention_days` (default 30, 0 = keep
+  everything), pruned after append once the file passes 2 MB. Rewrite goes via a temp
+  file so an interruption can't truncate real data.
 - [ ] The banked history still has no reader — no trends, no "this loop appeared 6
   times this week". This was the stated reason for storing raw rates.
-- [ ] Restarting re-notifies opportunities that are still live (backload restores the
-  log and first-seen times, but not the "already told you" state).
+- [x] ~~Restarting re-notifies opportunities that are still live~~ — the newest restored
+  scan's loops count as already announced, but only while it's under an hour old;
+  older than that, a loop reappearing is genuinely news.
 - [ ] `depth_divines` is one global number; 5 divines means something different for
   chaos than for mirrors.
 - [ ] Fee model is a flat per-hop percentage; the real exchange fee is gold-denominated.
-- [ ] Install flow still unverified end-to-end on a real frozen exe (the crash above
+- [ ] Install flow still unverified end-to-end on a real frozen exe (the v0.2.4 crash
   was exactly this gap — worth a manual run before relying on it).
 - [ ] Windows 11 hides new tray icons in the overflow, so closing the window while
   watching can look like the app vanished.
@@ -89,7 +104,7 @@ holding a selection; bigger centred ticks in **In Graph**; "Quick Lookup" and
 - **Analysis only.** Never automates any in-game action, trade, whisper or input.
   Automating trading violates GGG's ToS. Hard requirement, not a gap.
 - **Exclusions don't apply to Quick Lookup.** Excluding something from the scan
-  shouldn't stop you pricing it.
+  shouldn't stop you pricing it. It gets the unfiltered order book too.
 - **Per-user install, never Program Files.** Elevating an unsigned binary to copy
   itself into a system directory is the dropper pattern we're avoiding.
 - **`request_interval_s` must stay above 10s.** At exactly 10s a 300s window catches
@@ -100,3 +115,8 @@ holding a selection; bigger centred ticks in **In Graph**; "Quick Lookup" and
 - **Nothing is excluded by default** — that's the user's call.
 - **Menus cap at 30 entries per submenu**; oversized groups split rather than relying
   on Qt to scroll or spill off-screen.
+- **Quick Lookup shows the book rate, not the after-fee rate.** A lookup asks what a
+  pair is offered at; the haircut belongs to the profit calculation.
+- **UI state lives in a JSON file in the cache dir**, not in the TOML config (which is
+  meant to stay hand-editable) and not in QSettings (which would write to the Windows
+  registry, contradicting "delete the folder to remove it").

@@ -22,7 +22,14 @@ class ScanResult:
     nodes: list[str]
     edges: dict[tuple[str, str], Edge]
     opportunities: list[Opportunity]
-    longer_cycle_hint: bool
+    # A profitable loop Bellman-Ford found outside the reported window — longer
+    # than max_cycle_len, or below the profit threshold. None when there's
+    # nothing beyond what `opportunities` already shows.
+    longer_cycle: Opportunity | None = None
+
+    @property
+    def longer_cycle_hint(self) -> bool:
+        return self.longer_cycle is not None
 
 
 def select_nodes(overview: NinjaOverview, cfg: Config) -> list[str]:
@@ -99,7 +106,7 @@ def run_scan(
             bait_filter_ratio=cfg.bait_filter_ratio,
             min_accounts=cfg.min_accounts,
         )
-        ops, hint = find_opportunities(
+        ops, longer = find_opportunities(
             edges,
             max_cycle_len=cfg.max_cycle_len,
             min_profit_pct=cfg.profit_threshold_pct,
@@ -113,10 +120,12 @@ def run_scan(
                 volumes=overview.volumes,
                 edges=edges,
                 opportunities=ops,
+                longer_cycle=longer,
+                retention_days=cfg.history_retention_days,
             )
         return ScanResult(
             league=league, overview=overview, nodes=nodes, edges=edges,
-            opportunities=ops, longer_cycle_hint=hint,
+            opportunities=ops, longer_cycle=longer,
         )
     finally:
         ninja.close()
@@ -166,11 +175,24 @@ def result_from_history_record(record: dict, names: dict[str, str]) -> ScanResul
             continue
     ops.sort(key=lambda op: op.profit_pct, reverse=True)
     nodes = sorted({n for pair in edges for n in pair})
+    longer = record.get("longer_cycle")
+    try:
+        restored = (
+            Opportunity(
+                cycle=tuple(longer["cycle"]),
+                profit_pct=float(longer["profit_pct"]),
+                min_depth_divines=float(longer["min_depth_divines"]),
+            )
+            if longer
+            else None
+        )
+    except (KeyError, TypeError, ValueError):
+        restored = None
     return ScanResult(
         league=overview.league,
         overview=overview,
         nodes=nodes,
         edges=edges,
         opportunities=ops,
-        longer_cycle_hint=False,
+        longer_cycle=restored,
     )

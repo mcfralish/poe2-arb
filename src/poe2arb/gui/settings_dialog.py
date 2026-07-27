@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 from ..config import Config
 from ..market import BASE_CURRENCY_CHOICES
 from .item_picker import ExclusionPicker
+from .theme import error_color, muted_color, warning_color
 from ..rate_limit import (
     Severity,
     check_pacing,
@@ -128,6 +129,17 @@ class SettingsDialog(QDialog):
         )
         form.addRow("Share of rate limit to use", self.safety)
 
+        self.retention = self._dspin(
+            cfg.history_retention_days, 0.0, 365.0, 1.0, " days", decimals=0
+        )
+        self.retention.setSpecialValueText("keep everything")
+        self.retention.setToolTip(
+            "How long saved scans are kept on disk. Watching writes a record\n"
+            "every scan, so without a limit the history file grows forever.\n"
+            "Set to 0 to keep everything."
+        )
+        form.addRow("Keep scan history for", self.retention)
+
         self.sound = QCheckBox("Play sound with notifications")
         self.sound.setChecked(cfg.alert_sound)
         form.addRow("", self.sound)
@@ -185,19 +197,19 @@ class SettingsDialog(QDialog):
                 f"<b>Too fast — this would get your IP banned.</b><br>{detail}<br>"
                 f"Use at least <b>{safe:g} s</b> between requests.<br><br>{summary}"
             )
-            self.budget_label.setStyleSheet("color: #b00020;")
+            self.budget_label.setStyleSheet(f"color: {error_color(self)};")
         elif severity is Severity.WARNING:
             detail = " ".join(i.message for i in issues if i.severity is Severity.WARNING)
             self.budget_label.setText(
                 f"<b>Close to the limit.</b><br>{detail}<br><br>{summary}"
             )
-            self.budget_label.setStyleSheet("color: #8a6d1a;")
+            self.budget_label.setStyleSheet(f"color: {warning_color(self)};")
         else:
             self.budget_label.setText(
                 f"Comfortably inside GGG's rate limits, with room for other "
                 f"trade tools on the same connection.<br><br>{summary}"
             )
-            self.budget_label.setStyleSheet("color: gray;")
+            self.budget_label.setStyleSheet(f"color: {muted_color(self)};")
 
         ok = self.buttons.button(QDialogButtonBox.StandardButton.Ok)
         ok.setEnabled(severity is not Severity.ERROR)
@@ -236,5 +248,6 @@ class SettingsDialog(QDialog):
             liquidity_floor_divines=self.liquidity.value(),
             depth_divines=self.depth.value(),
             request_interval_s=self.request_interval.value(),
+            history_retention_days=self.retention.value(),
             alert_sound=self.sound.isChecked(),
         )

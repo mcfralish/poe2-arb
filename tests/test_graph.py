@@ -13,7 +13,9 @@ from poe2arb.graph import (
     brute_force_cycles,
     build_graph,
     effective_rate,
+    find_negative_cycle,
     find_opportunities,
+    price_cycle,
 )
 
 
@@ -95,7 +97,16 @@ class TestPlantedCycles:
 
     def test_bellman_ford_agrees_with_brute_force(self):
         # Bellman-Ford flags a profitable loop that brute force misses at max_len=3
-        # -> surfaced as the longer_cycle_hint.
+        # -> surfaced as the longer_cycle.
+        edges = make_edges(self.ring_rates())
+        ops, longer = find_opportunities(edges, max_cycle_len=3, min_profit_pct=3.0)
+        assert ops == [] and longer is not None
+        ops4, longer4 = find_opportunities(edges, max_cycle_len=4, min_profit_pct=3.0)
+        assert ops4 and longer4 is None
+
+    @staticmethod
+    def ring_rates() -> dict[tuple[str, str], float]:
+        """A single directed 4-ring with a +50% edge: no 3-cycle can exist."""
         values = {"a": 1.0, "b": 2.0, "c": 3.0, "d": 4.0}
         ring = ["a", "b", "c", "d"]
         rates = {}
@@ -103,11 +114,78 @@ class TestPlantedCycles:
             y = ring[(i + 1) % 4]
             rates[(x, y)] = values[x] / values[y]
         rates[("d", "a")] *= 1.5
+        return rates
+
+
+class TestNegativeCycleRoute:
+    """Bellman-Ford must name the loop it found, not just assert one exists."""
+
+    def test_names_the_route_it_found(self):
+        edges = make_edges(TestPlantedCycles.ring_rates())
+        cycle = find_negative_cycle(edges)
+        assert cycle is not None
+        assert set(cycle) == {"a", "b", "c", "d"}
+
+    def test_route_is_traversable_in_order(self):
+        """Every consecutive pair must be a real edge, closing back to the start."""
+        edges = make_edges(TestPlantedCycles.ring_rates())
+        cycle = find_negative_cycle(edges)
+        for i, src in enumerate(cycle):
+            assert (src, cycle[(i + 1) % len(cycle)]) in edges
+
+    def test_route_is_actually_profitable(self):
+        edges = make_edges(TestPlantedCycles.ring_rates())
+        op = price_cycle(edges, find_negative_cycle(edges))
+        assert op.profit_pct == pytest.approx(50.0, abs=0.01)
+
+    def test_longer_cycle_carries_profit_and_depth(self):
+        edges = make_edges(TestPlantedCycles.ring_rates())
+        _, longer = find_opportunities(edges, max_cycle_len=3, min_profit_pct=3.0)
+        assert longer.profit_pct == pytest.approx(50.0, abs=0.01)
+        assert longer.min_depth_divines == 10.0
+
+    def test_finds_a_two_cycle_route(self):
+        rates = consistent_rates({"div": 1.0, "chaos": 1 / 9})
+        rates[("chaos", "div")] *= 1.08
+        cycle = find_negative_cycle(make_edges(rates))
+        assert set(cycle) == {"chaos", "div"}
+
+    def test_consistent_market_yields_no_route(self):
+        edges = make_edges(consistent_rates({"a": 1.0, "b": 2.0, "c": 3.0, "d": 4.0}))
+        assert find_negative_cycle(edges) is None
+
+    def test_empty_graph_is_safe(self):
+        assert find_negative_cycle({}) is None
+
+    def test_route_reported_below_threshold_too(self):
+        """A real but small loop is hidden by the threshold — still worth naming."""
+        rates = consistent_rates({"a": 1.0, "b": 2.0, "c": 3.0})
+        rates[("c", "a")] *= 1.01  # +1%, under a 3% threshold
         edges = make_edges(rates)
-        ops, hint = find_opportunities(edges, max_cycle_len=3, min_profit_pct=3.0)
-        assert ops == [] and hint
-        ops4, hint4 = find_opportunities(edges, max_cycle_len=4, min_profit_pct=3.0)
-        assert ops4 and not hint4
+        ops, longer = find_opportunities(edges, max_cycle_len=3, min_profit_pct=3.0)
+        assert ops == []
+        assert longer is not None and longer.profit_pct == pytest.approx(1.0, abs=0.01)
+
+    def test_disconnected_component_still_searched(self):
+        """A virtual source reaches every node, so an isolated loop isn't missed."""
+        rates = consistent_rates({"a": 1.0, "b": 2.0})
+        rates.update(consistent_rates({"y": 1.0, "z": 5.0}))
+        rates[("z", "y")] *= 1.2
+        cycle = find_negative_cycle(make_edges(rates))
+        assert set(cycle) == {"y", "z"}
+
+
+class TestPriceCycle:
+    def test_missing_hop_is_not_priced(self):
+        edges = make_edges({("a", "b"): 2.0})
+        assert price_cycle(edges, ("a", "b")) is None  # no b->a edge
+
+    def test_depth_is_the_bottleneck_hop(self):
+        edges = {
+            ("a", "b"): Edge("a", "b", 2.0, 2.0, depth_filled_divines=50.0),
+            ("b", "a"): Edge("b", "a", 0.6, 0.6, depth_filled_divines=7.0),
+        }
+        assert price_cycle(edges, ("a", "b")).min_depth_divines == 7.0
 
     def test_rotations_are_deduplicated(self):
         rates = consistent_rates({"a": 1.0, "b": 2.0, "c": 3.0})

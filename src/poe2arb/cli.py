@@ -83,7 +83,7 @@ def cmd_scan(cfg: Config) -> int:
         result.overview.names,
         league=result.league,
         threshold_pct=cfg.profit_threshold_pct,
-        longer_cycle_hint=result.longer_cycle_hint,
+        longer_cycle=result.longer_cycle,
     )
     return 0
 

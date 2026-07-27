@@ -11,7 +11,11 @@ pytest.importorskip("PySide6")
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from poe2arb.client import NinjaOverview  # noqa: E402
-from poe2arb.gui.item_picker import ExclusionPicker, ItemPicker  # noqa: E402
+from poe2arb.gui.item_picker import (  # noqa: E402
+    ExclusionPicker,
+    ItemPicker,
+    rank_matches,
+)
 from poe2arb.market import merge_overviews  # noqa: E402
 
 NOW = datetime.now(timezone.utc)
@@ -39,6 +43,12 @@ def universe():
 
 def submenus(picker):
     return [a for a in picker.menu().actions() if a.menu()]
+
+
+def search(picker, text):
+    """Type into the picker's search box and return the visible match labels."""
+    picker._search.field.setText(text)
+    return [a.text() for a in picker._search._results if a.isVisible()]
 
 
 class TestExclusionPicker:
@@ -108,6 +118,122 @@ class TestExclusionPicker:
         picker.rebuild(universe)
         currency = submenus(picker)[0].menu()
         assert len(currency.actions()) == 3  # still alive after two rebuilds
+
+
+class TestRanking:
+    def test_prefix_match_beats_a_later_word(self, universe):
+        """Typing "orb" should lead with Orb of…, not with Divine Orb."""
+        wider = merge_overviews(
+            "T", NOW,
+            {"Currency": NinjaOverview(
+                league="T", fetched_at=NOW,
+                values={"divine": 1.0, "annul": 0.1, "chaos": 0.01},
+                volumes={"divine": 1.0, "annul": 1.0, "chaos": 1.0},
+                names={"divine": "Divine Orb", "annul": "Orb of Annulment",
+                       "chaos": "Chaos Orb"},
+            )},
+        )
+        assert rank_matches(wider, "orb")[0].name == "Orb of Annulment"
+
+    def test_word_start_beats_mid_word(self, universe):
+        inner = merge_overviews(
+            "T", NOW,
+            {"Runes": NinjaOverview(
+                league="T", fetched_at=NOW,
+                values={"a": 1.0, "b": 1.0},
+                volumes={"a": 1.0, "b": 1.0},
+                names={"a": "Glassblower Rune", "b": "Iron Ruin"},
+            )},
+        )
+        assert [i.name for i in rank_matches(inner, "ru")] == [
+            "Glassblower Rune", "Iron Ruin",
+        ]
+
+    def test_case_insensitive(self, universe):
+        assert rank_matches(universe, "MIRROR")[0].id == "mirror"
+
+    def test_blank_query_matches_nothing(self, universe):
+        assert rank_matches(universe, "   ") == []
+
+    def test_no_universe_is_safe(self):
+        assert rank_matches(None, "chaos") == []
+
+    def test_result_count_is_capped(self, universe):
+        assert len(rank_matches(universe, "o", limit=2)) == 2
+
+
+class TestSearch:
+    def test_typing_shows_matches(self, app, universe):
+        picker = ItemPicker("Pick…", universe)
+        assert any("Chaos Orb" in label for label in search(picker, "chaos"))
+
+    def test_tree_hidden_while_searching(self, app, universe):
+        """A search that left the categories showing below it would be noise."""
+        picker = ItemPicker("Pick…", universe)
+        search(picker, "chaos")
+        assert not any(a.isVisible() for a in submenus(picker))
+
+    def test_clearing_brings_the_tree_back(self, app, universe):
+        picker = ItemPicker("Pick…", universe)
+        search(picker, "chaos")
+        search(picker, "")
+        assert all(a.isVisible() for a in submenus(picker))
+        assert not any(a.isVisible() for a in picker._search._results)
+
+    def test_no_matches_says_so(self, app, universe):
+        picker = ItemPicker("Pick…", universe)
+        assert search(picker, "zzzzz") == []
+        assert picker._search._empty.isVisible()
+
+    def test_choosing_a_match_selects_it(self, app, universe):
+        picker = ItemPicker("Pick…", universe)
+        search(picker, "mirror")
+        picker._search._results[0].trigger()
+        assert picker.current_id() == "mirror"
+
+    def test_matches_are_priced_like_the_tree(self, app, universe):
+        picker = ItemPicker("Pick…", universe, base_id="divine")
+        assert all("div)" in label for label in search(picker, "orb"))
+
+    def test_exclusion_search_reflects_existing_ticks(self, app, universe):
+        picker = ExclusionPicker(["mirror"], universe)
+        search(picker, "mirror")
+        assert picker._search._results[0].isChecked()
+
+    def test_ticking_from_search_updates_the_selection(self, app, universe):
+        picker = ExclusionPicker([], universe)
+        search(picker, "chaos")
+        picker._search._results[0].trigger()  # a checkable action toggles itself
+        assert picker.selected_ids() == ["chaos"]
+
+    def test_ticking_from_search_ticks_the_tree_too(self, app, universe):
+        """Otherwise reopening the menu shows the item as unticked."""
+        picker = ExclusionPicker([], universe)
+        search(picker, "chaos")
+        picker._search._results[0].trigger()
+        currency = submenus(picker)[0].menu()
+        chaos = [a for a in currency.actions() if a.text() == "Chaos Orb"][0]
+        assert chaos.isChecked()
+
+    def test_relabelling_slots_does_not_count_as_clicking(self, app, universe):
+        """Result actions are reused, so their checked state gets rewritten."""
+        picker = ExclusionPicker(["mirror"], universe)
+        search(picker, "mirror")
+        search(picker, "chaos")
+        search(picker, "orb")
+        assert picker.selected_ids() == ["mirror"]
+
+    def test_search_survives_a_rebuild(self, app, universe):
+        picker = ItemPicker("Pick…", universe)
+        picker.rebuild(universe)
+        assert any("Chaos Orb" in label for label in search(picker, "chaos"))
+
+    def test_reopening_starts_fresh(self, app, universe):
+        picker = ItemPicker("Pick…", universe)
+        search(picker, "chaos")
+        picker.menu().aboutToShow.emit()
+        assert picker._search.field.text() == ""
+        assert all(a.isVisible() for a in submenus(picker))
 
 
 class TestItemPicker:

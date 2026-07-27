@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from poe2arb.history import append_scan, read_recent
+from poe2arb.history import append_scan, prune, read_recent
 from poe2arb.graph import Edge, Opportunity
 from poe2arb.scan import result_from_history_record
 
@@ -85,6 +85,101 @@ class TestReadRecent:
         records = read_recent(p, 8)
         assert len(records) == 1
         assert records[0]["opportunities"][0]["profit_pct"] == 4.2
+
+
+class TestPrune:
+    """A watch loop appends forever, so old records have to age out."""
+
+    def test_drops_records_past_retention(self, tmp_path):
+        p = tmp_path / "h.jsonl"
+        write_record(p, hours_ago=24 * 40)
+        write_record(p, hours_ago=1)
+        assert prune(p, 30.0, min_bytes=0) == 1
+        assert len(read_recent(p, 24 * 365)) == 1
+
+    def test_keeps_everything_inside_retention(self, tmp_path):
+        p = tmp_path / "h.jsonl"
+        write_record(p, hours_ago=1)
+        write_record(p, hours_ago=48)
+        assert prune(p, 30.0, min_bytes=0) == 0
+        assert len(read_recent(p, 24 * 365)) == 2
+
+    def test_zero_retention_keeps_everything(self, tmp_path):
+        p = tmp_path / "h.jsonl"
+        write_record(p, hours_ago=24 * 400)
+        assert prune(p, 0.0, min_bytes=0) == 0
+        assert len(read_recent(p, 24 * 500)) == 1
+
+    def test_small_file_is_left_alone(self, tmp_path):
+        """The common case must not rewrite the file on every single scan."""
+        p = tmp_path / "h.jsonl"
+        write_record(p, hours_ago=24 * 40)
+        assert prune(p, 30.0) == 0  # default min_bytes, file is tiny
+        assert len(read_recent(p, 24 * 500)) == 1
+
+    def test_corrupt_lines_dropped_when_pruning(self, tmp_path):
+        p = tmp_path / "h.jsonl"
+        write_record(p, hours_ago=24 * 40)
+        with open(p, "a") as f:
+            f.write("not json\n")
+        write_record(p, hours_ago=1)
+        assert prune(p, 30.0, min_bytes=0) == 2
+        assert len(read_recent(p, 24 * 365)) == 1
+
+    def test_missing_file_is_harmless(self, tmp_path):
+        assert prune(tmp_path / "nope.jsonl", 30.0, min_bytes=0) == 0
+
+    def test_no_temp_file_left_behind(self, tmp_path):
+        p = tmp_path / "h.jsonl"
+        write_record(p, hours_ago=24 * 40)
+        write_record(p, hours_ago=1)
+        prune(p, 30.0, min_bytes=0)
+        assert [f.name for f in tmp_path.iterdir()] == ["h.jsonl"]
+
+    def test_append_prunes_when_asked(self, tmp_path):
+        p = tmp_path / "h.jsonl"
+        write_record(p, hours_ago=24 * 40)
+        append_scan(
+            p, league="T", values={}, volumes={}, edges={}, opportunities=[],
+            retention_days=30.0,
+        )
+        # Default min_bytes protects a file this small, so nothing goes yet.
+        assert len(read_recent(p, 24 * 500)) == 2
+
+    def test_records_stay_readable_after_pruning(self, tmp_path):
+        p = tmp_path / "h.jsonl"
+        write_record(p, hours_ago=24 * 40)
+        write_record(p, hours_ago=2, ops=[(("a", "b"), 7.5, 10.0)])
+        prune(p, 30.0, min_bytes=0)
+        records = read_recent(p, 24 * 365)
+        assert records[0]["opportunities"][0]["profit_pct"] == 7.5
+
+
+class TestLongerCyclePersistence:
+    """The route Bellman-Ford found must survive a restart, like the rest."""
+
+    def test_round_trips(self, tmp_path):
+        p = tmp_path / "h.jsonl"
+        append_scan(
+            p, league="T", values={"divine": 1.0}, volumes={"divine": 5.0},
+            edges={}, opportunities=[],
+            longer_cycle=Opportunity(("a", "b", "c", "d"), 1.4, 12.0),
+        )
+        result = result_from_history_record(read_recent(p, 8)[0], {})
+        assert result.longer_cycle.cycle == ("a", "b", "c", "d")
+        assert result.longer_cycle.profit_pct == 1.4
+        assert result.longer_cycle_hint
+
+    def test_absent_when_not_recorded(self, tmp_path):
+        record = write_record(tmp_path / "h.jsonl", hours_ago=1)
+        result = result_from_history_record(record, {})
+        assert result.longer_cycle is None
+        assert not result.longer_cycle_hint
+
+    def test_malformed_entry_ignored(self, tmp_path):
+        record = write_record(tmp_path / "h.jsonl", hours_ago=1)
+        record["longer_cycle"] = {"cycle": ["a", "b"]}  # missing profit
+        assert result_from_history_record(record, {}).longer_cycle is None
 
 
 class TestResultReconstruction:

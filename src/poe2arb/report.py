@@ -23,17 +23,19 @@ def print_opportunities(
     *,
     league: str,
     threshold_pct: float,
-    longer_cycle_hint: bool,
+    longer_cycle: Opportunity | None = None,
 ) -> None:
     if not ops:
         console.print(
             f"[dim]No arbitrage loops ≥ {threshold_pct:.1f}% in {league} right now.[/dim]"
         )
-        if longer_cycle_hint:
+        if longer_cycle is not None:
             console.print(
-                "[yellow]Note:[/yellow] Bellman-Ford detects a profitable loop outside the "
-                "reported length/threshold window — consider raising max_cycle_len or "
-                "lowering the threshold."
+                f"[yellow]Note:[/yellow] Bellman-Ford found a profitable loop outside the "
+                f"reported window: [bold]{route_str(longer_cycle, names)}[/bold] at "
+                f"{fmt_pct(longer_cycle.profit_pct)} "
+                f"(depth {fmt_depth(longer_cycle.min_depth_divines)} div). "
+                f"Raise max_cycle_len or lower the threshold to have it reported."
             )
         return
     table = Table(title=f"Arbitrage loops — {league}")

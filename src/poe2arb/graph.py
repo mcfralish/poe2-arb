@@ -126,6 +126,25 @@ def _canonical(cycle: tuple[str, ...]) -> tuple[str, ...]:
     return cycle[i:] + cycle[:i]
 
 
+def price_cycle(
+    edges: dict[tuple[str, str], Edge], cycle: tuple[str, ...]
+) -> Opportunity | None:
+    """Cost out one closed loop. None if any hop has no edge."""
+    product = 1.0
+    min_depth = math.inf
+    for i, src in enumerate(cycle):
+        edge = edges.get((src, cycle[(i + 1) % len(cycle)]))
+        if edge is None:
+            return None
+        product *= edge.rate
+        min_depth = min(min_depth, edge.depth_filled_divines)
+    return Opportunity(
+        cycle=cycle,
+        profit_pct=(product - 1.0) * 100.0,
+        min_depth_divines=min_depth,
+    )
+
+
 def brute_force_cycles(
     edges: dict[tuple[str, str], Edge],
     *,
@@ -139,51 +158,73 @@ def brute_force_cycles(
     arbitrage, and Bellman-Ford would flag it anyway.
     """
     nodes = sorted({n for e in edges for n in e})
-    found: dict[tuple[str, ...], Opportunity] = {}
+    found: list[Opportunity] = []
     for length in range(2, max_len + 1):
         for combo in permutations(nodes, length):
             if combo != _canonical(combo):
                 continue  # each rotation class visited exactly once
-            product = 1.0
-            min_depth = math.inf
-            ok = True
-            for i, src in enumerate(combo):
-                edge = edges.get((src, combo[(i + 1) % length]))
-                if edge is None:
-                    ok = False
-                    break
-                product *= edge.rate
-                min_depth = min(min_depth, edge.depth_filled_divines)
-            if not ok:
-                continue
-            profit_pct = (product - 1.0) * 100.0
-            if profit_pct >= min_profit_pct:
-                found[combo] = Opportunity(
-                    cycle=combo, profit_pct=profit_pct, min_depth_divines=min_depth
-                )
-    return sorted(found.values(), key=lambda op: op.profit_pct, reverse=True)
+            op = price_cycle(edges, combo)
+            if op is not None and op.profit_pct >= min_profit_pct:
+                found.append(op)
+    return sorted(found, key=lambda op: op.profit_pct, reverse=True)
 
 
-def bellman_ford_has_negative_cycle(edges: dict[tuple[str, str], Edge]) -> bool:
-    """True iff any profitable cycle (of any length) exists.
+# Slack on the distance comparison. Rates are floats put through a logarithm,
+# so an exactly-break-even loop can land a hair below zero; without this the
+# detector reports arbitrage in a perfectly consistent market.
+_EPS = 1e-12
+
+
+def find_negative_cycle(edges: dict[tuple[str, str], Edge]) -> tuple[str, ...] | None:
+    """One profitable cycle of any length, or None if the market is consistent.
 
     Runs on -log(rate) weights from a virtual source connected to every node,
-    so disconnected components are covered.
+    so disconnected components are covered: a loop multiplying above 1 is a
+    negative-weight cycle, and vice versa.
+
+    Unlike brute force this is O(V*E) regardless of loop length, but it finds
+    *a* cycle rather than the best one — which is exactly what's wanted for the
+    "there's something out past your search window" hint.
     """
     nodes = sorted({n for e in edges for n in e})
     if not nodes:
-        return False
+        return None
     dist = {n: 0.0 for n in nodes}  # virtual source: dist 0 to all
+    pred: dict[str, str | None] = {n: None for n in nodes}
     weighted = [(src, dst, -math.log(e.rate)) for (src, dst), e in edges.items() if e.rate > 0]
-    for _ in range(len(nodes) - 1):
-        changed = False
+
+    relaxed: str | None = None
+    for _ in range(len(nodes)):
+        relaxed = None
         for src, dst, w in weighted:
-            if dist[src] + w < dist[dst] - 1e-12:
+            if dist[src] + w < dist[dst] - _EPS:
                 dist[dst] = dist[src] + w
-                changed = True
-        if not changed:
-            break
-    return any(dist[src] + w < dist[dst] - 1e-12 for src, dst, w in weighted)
+                pred[dst] = src
+                relaxed = dst
+        if relaxed is None:
+            return None  # settled early: no negative cycle
+    # Still relaxing after |V| passes, so `relaxed` sits on or downstream of a
+    # negative cycle. Walking back |V| predecessors is guaranteed to land
+    # inside the cycle itself rather than on the tail leading into it.
+    node = relaxed
+    for _ in range(len(nodes)):
+        node = pred[node]
+        if node is None:
+            return None  # predecessor chain broken; nothing safe to report
+    cycle = [node]
+    walk = pred[node]
+    while walk is not None and walk != node:
+        cycle.append(walk)
+        walk = pred[walk]
+    if walk is None:
+        return None
+    cycle.reverse()  # predecessors walk backwards; report in travel order
+    return _canonical(tuple(cycle))
+
+
+def bellman_ford_has_negative_cycle(edges: dict[tuple[str, str], Edge]) -> bool:
+    """True iff any profitable cycle (of any length) exists."""
+    return find_negative_cycle(edges) is not None
 
 
 def find_opportunities(
@@ -191,14 +232,17 @@ def find_opportunities(
     *,
     max_cycle_len: int,
     min_profit_pct: float,
-) -> tuple[list[Opportunity], bool]:
-    """Returns (ranked opportunities, longer_cycle_hint).
+) -> tuple[list[Opportunity], Opportunity | None]:
+    """Returns (ranked opportunities, longer_cycle).
 
-    longer_cycle_hint is True when Bellman-Ford proves a profitable cycle exists
-    but brute force found nothing above threshold within max_cycle_len — i.e.
-    the profit lives in a longer loop or below the reporting threshold.
+    longer_cycle is set when Bellman-Ford finds a profitable cycle but brute
+    force reported nothing above threshold within max_cycle_len — i.e. the
+    profit lives in a longer loop, or below the reporting threshold. It carries
+    the actual route so the user can judge it, rather than just asserting that
+    something is out there.
     """
     ops = brute_force_cycles(edges, max_len=max_cycle_len, min_profit_pct=min_profit_pct)
-    bf = bellman_ford_has_negative_cycle(edges)
-    hint = bf and not ops
-    return ops, hint
+    if ops:
+        return ops, None
+    cycle = find_negative_cycle(edges)
+    return ops, price_cycle(edges, cycle) if cycle is not None else None

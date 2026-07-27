@@ -5,16 +5,19 @@ from __future__ import annotations
 import logging
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import NamedTuple
 
 from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
+    QFileDialog,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
@@ -49,6 +52,14 @@ from ..scan import ScanResult, result_from_history_record
 from .icon import make_app_icon
 from .settings_dialog import SettingsDialog
 from .table_items import NumericItem, TextItem
+from .theme import banner_style
+from .ui_state import (
+    decode_geometry,
+    encode_geometry,
+    load_ui_state,
+    save_ui_state,
+    ui_state_path,
+)
 from .updates import RELEASES_PAGE
 from .lookup import QuickLookup
 from .worker import ScanWorker, UniverseWorker, UpdateCheckWorker, stop_thread
@@ -58,6 +69,10 @@ log = logging.getLogger(__name__)
 
 # How far back the log and tables are repopulated on launch.
 BACKLOAD_HOURS = 8.0
+
+# How recent the last saved scan must be for its opportunities to count as
+# "already announced" — see _carry_forward_alerts.
+ALERT_MEMORY_HOURS = 1.0
 
 
 class Column(NamedTuple):
@@ -160,6 +175,7 @@ class MainWindow(QMainWindow):
         self.cfg = self._load_cfg()
         self._worker: ScanWorker | None = None
         self._known: dict[tuple[str, ...], float] = {}
+        self._known_longer: tuple[str, ...] | None = None
         self._first_seen: dict[tuple[str, ...], str] = {}
         # id -> display name from the last scan, so Settings can accept
         # in-game currency names and flag typos.
@@ -170,9 +186,12 @@ class MainWindow(QMainWindow):
         self._backload_record: dict | None = None
         self._next_scan_at: float | None = None
         self._quitting = False
+        # (table, search field, columns worth matching) — see _filtered.
+        self._filters: list[tuple[QTableWidget, QLineEdit, tuple[int, ...]]] = []
 
         self._build_toolbar()
         self._build_central()
+        self._restore_ui_state()
         for line in self._pending_log:
             self._log(line)
         self._pending_log.clear()
@@ -273,9 +292,7 @@ class MainWindow(QMainWindow):
         get_btn = QPushButton("Download")
         get_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(self._update_url)))
         banner_layout.addWidget(get_btn)
-        self.update_banner.setStyleSheet(
-            "background: #8a6d1a; border-radius: 4px; color: white;"
-        )
+        self.update_banner.setStyleSheet(banner_style(self))
         self.update_banner.hide()
         self._update_url = RELEASES_PAGE
         layout.addWidget(self.update_banner)
@@ -287,30 +304,115 @@ class MainWindow(QMainWindow):
             OPS_COLUMNS, 1, Qt.SortOrder.DescendingOrder  # biggest profit first
         )
         self.lookup = QuickLookup()
-        ops_split = QSplitter(Qt.Orientation.Vertical)
-        ops_split.addWidget(self.ops_table)
-        ops_split.addWidget(self.lookup)
-        ops_split.setStretchFactor(0, 3)
-        ops_split.setStretchFactor(1, 2)
-        self.tabs.addTab(ops_split, "Opportunities")
+        self.ops_split = QSplitter(Qt.Orientation.Vertical)
+        self.ops_split.addWidget(self.ops_table)
+        self.ops_split.addWidget(self.lookup)
+        self.ops_split.setStretchFactor(0, 3)
+        self.ops_split.setStretchFactor(1, 2)
+        self.tabs.addTab(self.ops_split, "Opportunities")
 
         self.market_table = self._make_table(
             MARKET_COLUMNS, 1, Qt.SortOrder.DescendingOrder  # most valuable first
         )
         self._update_market_header()
-        self.tabs.addTab(self.market_table, "Market")
+        self.market_filter = QLineEdit()
+        self.tabs.addTab(
+            self._filtered(
+                self.market_table, self.market_filter, "Filter currencies…", (0,)
+            ),
+            "Market",
+        )
 
         self.edges_table = self._make_table(
             EDGE_COLUMNS, 4, Qt.SortOrder.DescendingOrder  # deepest books first
         )
-        self.tabs.addTab(self.edges_table, "Book Edges")
+        self.edges_filter = QLineEdit()
+        self.tabs.addTab(
+            self._filtered(
+                self.edges_table, self.edges_filter, "Filter pairs…", (0, 1)
+            ),
+            "Book Edges",
+        )
 
         self.log_view = QPlainTextEdit()
         self.log_view.setReadOnly(True)
         self.log_view.setMaximumBlockCount(2000)
-        self.tabs.addTab(self.log_view, "Log")
+        self.tabs.addTab(self._log_tab(), "Log")
 
         self.setCentralWidget(central)
+
+    def _filtered(
+        self, table: QTableWidget, field: QLineEdit, hint: str,
+        columns: tuple[int, ...],
+    ) -> QWidget:
+        """A table with a search box above it, hiding rows that don't match.
+
+        Hiding rows rather than rebuilding the table keeps the sort order,
+        the selection and the scroll position intact while typing.
+
+        `columns` names the ones holding text worth matching on. Market keeps
+        its currency name in column 0 and a value in column 1; Book Edges has
+        a currency in both. Searching the value columns as well would mean
+        typing "12" hides every row whose rate happens not to contain it.
+        """
+        field.setPlaceholderText(hint)
+        field.setClearButtonEnabled(True)
+        field.textChanged.connect(
+            lambda text: self._apply_filter(table, text, columns)
+        )
+        self._filters.append((table, field, columns))
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(field)
+        layout.addWidget(table)
+        return page
+
+    @staticmethod
+    def _apply_filter(
+        table: QTableWidget, text: str, columns: tuple[int, ...] = (0,)
+    ) -> None:
+        query = text.strip().lower()
+        for row in range(table.rowCount()):
+            if not query:
+                table.setRowHidden(row, False)
+                continue
+            cells = [table.item(row, col) for col in columns]
+            hit = any(c is not None and query in c.text().lower() for c in cells)
+            table.setRowHidden(row, not hit)
+
+    def _log_tab(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        tools = QHBoxLayout()
+        tools.setContentsMargins(0, 0, 0, 0)
+        tools.addStretch(1)
+        clear = QPushButton("Clear")
+        clear.setToolTip("Empty the log view. Saved scan history is untouched.")
+        clear.clicked.connect(self.log_view.clear)
+        tools.addWidget(clear)
+        export = QPushButton("Save to file…")
+        export.setToolTip("Write everything shown here to a text file.")
+        export.clicked.connect(self._export_log)
+        tools.addWidget(export)
+        layout.addLayout(tools)
+        layout.addWidget(self.log_view)
+        return page
+
+    def _export_log(self) -> None:
+        default = f"poe2-arb-log-{datetime.now().strftime('%Y%m%d-%H%M')}.txt"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save log", str(Path.home() / default), "Text files (*.txt)"
+        )
+        if not path:
+            return
+        try:
+            Path(path).write_text(self.log_view.toPlainText(), encoding="utf-8")
+        except OSError as e:
+            QMessageBox.warning(self, "Save log", f"Could not write {path}:\n{e}")
+            return
+        self._log(f"log saved to {path}")
 
     @staticmethod
     def _make_table(columns: list[Column], sort_column: int = 0,
@@ -452,9 +554,32 @@ class MainWindow(QMainWindow):
             f"restored {len(records)} scan(s) from the last "
             f"{BACKLOAD_HOURS:g}h — newest {latest_ts.strftime('%H:%M:%S')}"
         )
+        self._carry_forward_alerts(seen, latest_ts)
         self.statusBar().showMessage(
             f"Showing saved results from {latest_ts.strftime('%H:%M:%S')} — "
             f"press Scan now to refresh"
+        )
+
+    def _carry_forward_alerts(
+        self, seen: dict[tuple[str, ...], float], latest_ts: datetime
+    ) -> None:
+        """Treat the newest restored scan's loops as already announced.
+
+        Without this, restarting re-fires a toast for every opportunity that
+        was live before — the app has genuinely seen them, it just forgot on
+        the way through the door. Only while the record is fresh: a loop last
+        seen hours ago is worth announcing again, because by then it's news
+        rather than a repeat.
+        """
+        if not seen:
+            return
+        age = datetime.now().astimezone() - latest_ts
+        if age > timedelta(hours=ALERT_MEMORY_HOURS):
+            return
+        self._known = dict(seen)
+        self._log(
+            f"{len(seen)} opportunity(ies) still live from before the restart — "
+            f"you won't be alerted about them twice"
         )
 
     def _preload_currencies(self) -> None:
@@ -522,7 +647,6 @@ class MainWindow(QMainWindow):
                 nodes=[],
                 edges={},
                 opportunities=[],
-                longer_cycle_hint=False,
             )
         )
 
@@ -598,13 +722,35 @@ class MainWindow(QMainWindow):
         self._known_currencies = dict(names)
         self._currency_values = dict(result.overview.values)
         self._refresh_tables(result)
+        self._note_longer_cycle(result, names)
 
-        hint = " (longer/deeper loop exists below reporting window)" if result.longer_cycle_hint else ""
+        hint = " — one more outside your search window" if result.longer_cycle else ""
         self.statusBar().showMessage(
             f"{result.league} — scanned {now} — {len(current)} opportunity(ies){hint}"
         )
         if self.watch_action.isChecked():
             self._schedule_next()
+
+    def _note_longer_cycle(self, result: ScanResult, names: dict[str, str]) -> None:
+        """Log the loop Bellman-Ford found outside the reporting window.
+
+        It goes to the log rather than the table because it isn't a signal to
+        act on: it sits below the profit threshold or beyond the maximum loop
+        length. It's a nudge that the current settings are hiding something —
+        and now that the route is named, one worth judging for yourself.
+        """
+        op = result.longer_cycle
+        key = op.cycle if op is not None else None
+        if key == self._known_longer:
+            return
+        self._known_longer = key
+        if op is None:
+            return
+        self._log(
+            f"outside window  {route_str(op, names)}: {op.profit_pct:+.2f}% "
+            f"(depth {op.min_depth_divines:.1f} div) — raise the max loop length "
+            f"or lower the profit threshold to have it reported"
+        )
 
     def _scan_failed(self, message: str) -> None:
         now = datetime.now().strftime("%H:%M:%S")
@@ -616,6 +762,9 @@ class MainWindow(QMainWindow):
     def _refresh_tables(self, result: ScanResult) -> None:
         self._last_result = result
         names = result.overview.names
+        # Unfiltered on purpose: Quick Lookup ignores the exclusion list, so it
+        # gets the whole book rather than the trimmed view the tables show.
+        self.lookup.set_edges(result.edges, result.overview.fetched_at)
 
         ops = result.opportunities
         self.ops_table.setSortingEnabled(False)
@@ -696,6 +845,45 @@ class MainWindow(QMainWindow):
                 ],
             )
         self.edges_table.setSortingEnabled(True)
+
+        # New rows arrive visible, so a filter typed before a scan finished
+        # would silently stop applying.
+        for table, field, columns in self._filters:
+            self._apply_filter(table, field.text(), columns)
+
+    # ------------------------------------------------------------------ ui state
+
+    def _restore_ui_state(self) -> None:
+        """Put the window back where it was, if that's still a sensible place."""
+        state = load_ui_state(ui_state_path(self.cfg.cache_dir))
+        geometry = decode_geometry(state.get("geometry"))
+        if geometry and self.restoreGeometry(geometry):
+            # A saved position can point at a monitor that's since been
+            # unplugged, leaving the window somewhere unreachable.
+            if not any(
+                s.availableGeometry().intersects(self.frameGeometry())
+                for s in QApplication.screens()
+            ):
+                self.resize(720, 460)
+                self.move(100, 100)
+        sizes = state.get("ops_split")
+        if isinstance(sizes, list) and len(sizes) == 2 and all(
+            isinstance(n, int) and n >= 0 for n in sizes
+        ):
+            self.ops_split.setSizes(sizes)
+        tab = state.get("tab")
+        if isinstance(tab, int) and 0 <= tab < self.tabs.count():
+            self.tabs.setCurrentIndex(tab)
+
+    def _save_ui_state(self) -> None:
+        save_ui_state(
+            ui_state_path(self.cfg.cache_dir),
+            {
+                "geometry": encode_geometry(self.saveGeometry()),
+                "ops_split": self.ops_split.sizes(),
+                "tab": self.tabs.currentIndex(),
+            },
+        )
 
     @staticmethod
     def _set_row(table: QTableWidget, row: int, items: list[QTableWidgetItem]) -> None:
@@ -781,6 +969,7 @@ class MainWindow(QMainWindow):
 
     def shutdown(self) -> None:
         """Stop timers and join worker threads before the event loop goes away."""
+        self._save_ui_state()
         self.watch_timer.stop()
         self.countdown_timer.stop()
         stop_thread(self._worker)
