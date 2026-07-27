@@ -1,9 +1,8 @@
 # poe2-arb — TODO
 
-Merged list (yours + mine). Shipped version: **v0.2.3**; unreleased work sits on
-`main` until the next tag.
+Merged list (yours + mine). Shipped version: **v0.2.4**.
 
-**Done since v0.2.3** (unreleased): install-prompt crash fixed; Market value at 2dp
+**Landed in v0.2.4**: install-prompt crash fixed; Market value at 2dp
 with an Adaptive unit mode; toolbar unit selector reordered with abbreviations;
 exclusion button shows a count instead of growing, with `•` markers on branches
 holding a selection; bigger centred ticks in **In Graph**; "Quick Lookup" and
