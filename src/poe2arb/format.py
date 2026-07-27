@@ -58,3 +58,17 @@ def fmt_pct(value: float, *, signed: bool = True) -> str:
     """A percentage, always with two decimals."""
     sign = "+" if signed and value > 0 else ""
     return f"{sign}{value:,.2f}%"
+
+
+def fmt_skew(seconds: float | None) -> str:
+    """How far apart a loop's edges were observed, as a duration.
+
+    Minutes and seconds rather than raw seconds: "3m 54s" lands as "most of a
+    scan ago" in a way that "234s" does not.
+    """
+    if seconds is None:
+        return "—"
+    if seconds < 60:
+        return f"{seconds:.0f}s"
+    minutes, rest = divmod(int(round(seconds)), 60)
+    return f"{minutes}m {rest:02d}s"

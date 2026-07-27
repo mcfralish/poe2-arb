@@ -6,7 +6,7 @@ from rich.console import Console
 from rich.table import Table
 
 from .client import NinjaOverview
-from .format import fmt_depth, fmt_pct, fmt_rate, fmt_value, fmt_volume
+from .format import fmt_depth, fmt_pct, fmt_rate, fmt_skew, fmt_value, fmt_volume
 from .graph import Edge, Opportunity
 
 console = Console()
@@ -43,17 +43,21 @@ def print_opportunities(
     table.add_column("Route")
     table.add_column("Profit/loop", justify="right", style="green")
     table.add_column("Depth (div)", justify="right")
+    table.add_column("Spread", justify="right", style="dim")
     for i, op in enumerate(ops, 1):
         table.add_row(
             str(i),
             route_str(op, names),
             fmt_pct(op.profit_pct),
             fmt_depth(op.min_depth_divines),
+            fmt_skew(op.skew_s),
         )
     console.print(table)
     console.print(
         "[dim]Depth = bottleneck order-book depth: max value the loop supports at these "
-        "rates. Analysis only — execute (or don't) by hand in game.[/dim]"
+        "rates. Spread = time between the oldest and newest price in the loop; a scan "
+        "checks one currency at a time, so nothing is ever seen simultaneously. "
+        "Analysis only — execute (or don't) by hand in game.[/dim]"
     )
 
 

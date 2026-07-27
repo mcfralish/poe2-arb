@@ -43,7 +43,7 @@ from ..config import (
     save_config,
     user_config_path,
 )
-from ..format import fmt_depth, fmt_pct, fmt_rate, fmt_value, fmt_volume
+from ..format import fmt_depth, fmt_pct, fmt_rate, fmt_skew, fmt_value, fmt_volume
 from ..history import read_recent
 from ..market import ADAPTIVE_BASE, BASE_CURRENCY_CHOICES, Universe, base_abbreviation
 from ..rate_limit import Severity, check_pacing, min_safe_interval, worst_severity
@@ -99,6 +99,14 @@ OPS_COLUMNS = [
         "Roughly how much this trade can absorb, in Divine Orbs, before you run "
         "out of people offering these prices. The tightest step in the chain "
         "sets the limit. Trade bigger than this and the profit shrinks.",
+    ),
+    Column(
+        "Spread",
+        "How far apart in time the prices in this chain were actually checked. "
+        "A scan asks about one currency at a time, several seconds apart, so no "
+        "loop is ever seen all at once. A small spread means the prices were "
+        "close to simultaneous and the loop is more likely to be real; a large "
+        "one means the far end may already have moved.",
     ),
     Column(
         "First seen",
@@ -777,6 +785,12 @@ class MainWindow(QMainWindow):
                     TextItem(route_str(op, names)),
                     NumericItem(fmt_pct(op.profit_pct), op.profit_pct),
                     NumericItem(fmt_depth(op.min_depth_divines), op.min_depth_divines),
+                    # Unstamped loops sort to the end rather than the top: an
+                    # unknown spread is the worst case, not the best.
+                    NumericItem(
+                        fmt_skew(op.skew_s),
+                        op.skew_s if op.skew_s is not None else float("inf"),
+                    ),
                     TextItem(self._first_seen.get(op.key, "—")),
                 ],
             )

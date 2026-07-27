@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
@@ -83,6 +83,11 @@ class Offer:
     get_amount: float
     stock: float  # available stock, in units of get_currency
     account: str | None = None  # lister account — used to resist single-account fake walls
+    # When the response backing this offer was fetched — which is *not* "now":
+    # order books are disk-cached for refresh_minutes, so a scan can legitimately
+    # be built from responses several minutes apart. Carried so a cycle can say
+    # how far apart in time its edges were actually observed.
+    observed_at: datetime | None = None
 
     @property
     def rate(self) -> float:
@@ -423,7 +428,7 @@ class GggExchangeClient:
         key = f"ggg_exchange_{league}_{want}_" + "_".join(sorted(have))
         cached = self.cache.load(key, self.cfg.refresh_minutes * 60)
         if cached:
-            data, _ = cached
+            data, observed_at = cached
         else:
             self._pace()
             resp = _request_with_backoff(
@@ -444,12 +449,17 @@ class GggExchangeClient:
                     f"trade2 exchange returned HTTP {resp.status_code} (raw saved to {raw})"
                 )
             data = resp.json()
-            self.cache.store(key, data)
+            observed_at = self.cache.store(key, data)
         try:
-            return parse_exchange(data)
+            offers = parse_exchange(data)
         except SchemaError as e:
             raw = self.cache.dump_bad_response(key, json.dumps(data))
             raise SchemaError(str(e), raw) from e
+        # Stamped here rather than in the parser: the parser sees only the
+        # response body, which carries no timestamp. A cache hit is stamped with
+        # when it was *fetched*, not when it was read back — otherwise a
+        # ten-minute-old book would claim to be current.
+        return [replace(offer, observed_at=observed_at) for offer in offers]
 
     @staticmethod
     def _log_rate_state(resp: httpx.Response) -> None:

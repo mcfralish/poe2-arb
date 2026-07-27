@@ -17,6 +17,10 @@ jobs:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
       - run: python -m pytest -q
+      # Fails the release before anything is built if the tag has no changelog
+      # entry — a shipped build whose notes nobody wrote is what this prevents.
+      - name: Check the changelog covers this tag
+        run: python packaging/changelog_section.py "${GITHUB_REF_NAME}" /dev/null
 
   build-windows-exe:
     needs: test
@@ -40,8 +44,13 @@ jobs:
           packaging/gui_entry.py
       - name: Smoke test exe imports
         run: dist/poe2-arb.exe --smoke-test
+      - name: Build release notes from the changelog
+        run: python packaging/changelog_section.py "${env:GITHUB_REF_NAME}" RELEASE_NOTES.md
       - name: Attach to release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/poe2-arb.exe
+          body_path: RELEASE_NOTES.md
+          # Appended below the hand-written notes, so the commit list is still
+          # there for anyone who wants it.
           generate_release_notes: true

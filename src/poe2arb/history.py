@@ -146,6 +146,7 @@ def append_scan(
                 "raw_rate": e.raw_rate,
                 "effective_rate": e.rate,
                 "depth_divines": e.depth_filled_divines,
+                "observed_at": e.observed_at.isoformat() if e.observed_at else None,
             }
             for e in edges.values()
         ],
@@ -154,6 +155,7 @@ def append_scan(
                 "cycle": list(op.cycle),
                 "profit_pct": op.profit_pct,
                 "min_depth_divines": op.min_depth_divines,
+                "skew_s": op.skew_s,
             }
             for op in opportunities
         ],
@@ -163,6 +165,7 @@ def append_scan(
             "cycle": list(longer_cycle.cycle),
             "profit_pct": longer_cycle.profit_pct,
             "min_depth_divines": longer_cycle.min_depth_divines,
+            "skew_s": longer_cycle.skew_s,
         }
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a", encoding="utf-8") as f:

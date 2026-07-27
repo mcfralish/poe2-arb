@@ -132,6 +132,26 @@ def run_scan(
         ggg.close()
 
 
+def _parse_stamp(value: object) -> datetime | None:
+    """Read an ISO timestamp back, tolerating records written before it existed."""
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _opportunity_from(data: dict) -> Opportunity:
+    skew = data.get("skew_s")
+    return Opportunity(
+        cycle=tuple(data["cycle"]),
+        profit_pct=float(data["profit_pct"]),
+        min_depth_divines=float(data["min_depth_divines"]),
+        skew_s=float(skew) if isinstance(skew, (int, float)) else None,
+    )
+
+
 def result_from_history_record(record: dict, names: dict[str, str]) -> ScanResult:
     """Rebuild a ScanResult from a logged scan, for repopulating the UI.
 
@@ -157,6 +177,7 @@ def result_from_history_record(record: dict, names: dict[str, str]) -> ScanResul
                 rate=float(e["effective_rate"]),
                 raw_rate=float(e["raw_rate"]),
                 depth_filled_divines=float(e["depth_divines"]),
+                observed_at=_parse_stamp(e.get("observed_at")),
             )
         except (KeyError, TypeError, ValueError):
             continue
@@ -164,28 +185,14 @@ def result_from_history_record(record: dict, names: dict[str, str]) -> ScanResul
     ops: list[Opportunity] = []
     for o in record.get("opportunities", []):
         try:
-            ops.append(
-                Opportunity(
-                    cycle=tuple(o["cycle"]),
-                    profit_pct=float(o["profit_pct"]),
-                    min_depth_divines=float(o["min_depth_divines"]),
-                )
-            )
+            ops.append(_opportunity_from(o))
         except (KeyError, TypeError, ValueError):
             continue
     ops.sort(key=lambda op: op.profit_pct, reverse=True)
     nodes = sorted({n for pair in edges for n in pair})
     longer = record.get("longer_cycle")
     try:
-        restored = (
-            Opportunity(
-                cycle=tuple(longer["cycle"]),
-                profit_pct=float(longer["profit_pct"]),
-                min_depth_divines=float(longer["min_depth_divines"]),
-            )
-            if longer
-            else None
-        )
+        restored = _opportunity_from(longer) if longer else None
     except (KeyError, TypeError, ValueError):
         restored = None
     return ScanResult(

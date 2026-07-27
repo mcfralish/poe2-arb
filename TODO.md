@@ -67,9 +67,27 @@ it already announced; hardcoded colours replaced with theme-aware ones.
   algorithmically since request budget can't cover 636 items. *Inputs available:*
   `volumePrimaryValue` (daily volume in divines) and `sparkline` (7-day trend:
   `totalChange` plus 7 daily points) per item, both already fetched. Volume/hour isn't
-  published but can be derived. **Needs a design conversation** — scoring function,
-  how many slots, whether the set is stable between scans or churns, and how it
-  interacts with `max_currencies` and the rate-limit budget.
+  published but can be derived. **Design agreed, awaiting the go-ahead:**
+  - *Liquidity is a gate, not a term* — below the floor `effective_rate` drops the
+    edge anyway, so scoring it lets volatility buy past a mechanical constraint.
+  - *Volatility is the signal, and `totalChange` measures it wrongly* — that's net
+    drift, so an item that rose 10% and fell back scores ~0 despite having been
+    maximally volatile, which is exactly the item whose books are stale. Use the
+    stdev of daily deltas from `sparkline.data` (cumulative, so `diff` it),
+    exponentially weighted toward recent days.
+  - *Volume is a tiebreaker with diminishing returns* — `log1p`, not raw. Raw volume
+    as a driver is what produces today's "same ten currencies forever".
+  - *Connectivity is why a fixed core exists* — cycles need shared counterparties;
+    ten exotic items with no common bridge form no cycles at all. Divine/exalted/
+    chaos are structural, not volatile.
+  - So: `score = ewma_volatility × log1p(volume / floor)`, gated on the floor,
+    filling rotating slots only. ~60% stable core (top-K by volume, always PRIMARY),
+    ~40% rotating, with hysteresis so a 2% score difference doesn't cause churn.
+    Volume behind a `VolumeSource` protocol so the cx API can swap in later.
+  - **Caveat: "volatile items have stale books" is a hypothesis I can't validate
+    from the data at hand.** Pair this with the history reader below, or we've
+    replaced a defensible heuristic with an undefensible one that merely feels
+    more sophisticated.
 - [x] ~~Extract the actual route from Bellman-Ford~~ — `find_negative_cycle` walks
   predecessor pointers and returns the loop; it's priced like any other opportunity
   and logged by name, with the profit and depth, so it can be judged rather than
@@ -86,7 +104,25 @@ it already announced; hardcoded colours replaced with theme-aware ones.
   older than that, a loop reappearing is genuinely news.
 - [ ] `depth_divines` is one global number; 5 divines means something different for
   chaos than for mirrors.
-- [ ] Fee model is a flat per-hop percentage; the real exchange fee is gold-denominated.
+- [ ] **Fee model is a flat per-hop percentage and both its justifications fail.**
+  Gold isn't divine-denominated, so charging it as a percentage of divine value is a
+  category error; slippage is already captured by the depth walk, so charging it again
+  double-counts. *Recommendation:* default to 0, keep the knob for fill risk (the offer
+  may be gone, partial fills strand you mid-loop), rename `fee_pct` →
+  `safety_margin_pct` with a back-compat alias — `load_config` raises on unknown keys,
+  so a bare rename breaks every existing config. Note this raises reported profit by
+  ~4.4% on a 3-hop loop, i.e. it lowers the noise floor. **Awaiting your call.**
+- [x] ~~Temporal integrity: edges within one cycle are never observed at the same
+  moment~~ — `Edge.observed_at` (from the cache's fetch time, not `now`) and
+  `Opportunity.skew_s`, surfaced as a **Spread** column in both UIs and persisted to
+  history. Deliberately *reported, not filtered*: simulating the real request schedule
+  showed a 90s cap would reject 82% of 3-cycles at 10 currencies and **100% at 20**,
+  where the minimum achievable skew (104s) already exceeds it. What survived would be
+  decided by iteration order in `fetch_books`, not by data quality.
+- [ ] **Re-verify candidates instead of filtering on skew.** When a cycle clears the
+  threshold, re-fetch just its 2–4 edges back-to-back (~26–52s) and report only if it
+  survives. Opportunities are rare so the request cost is near zero, and it upgrades
+  "these existed sometime in a 4-minute window" to "confirmed within 39 seconds".
 - [ ] Install flow still unverified end-to-end on a real frozen exe (the v0.2.4 crash
   was exactly this gap — worth a manual run before relying on it).
 - [ ] Windows 11 hides new tray icons in the overflow, so closing the window while
@@ -107,6 +143,15 @@ it already announced; hardcoded colours replaced with theme-aware ones.
 ---
 
 ## Deliberate decisions — do not "fix" these
+
+- **Release notes come from `CHANGELOG.md`, and a tag without a section fails the
+  build.** `packaging/changelog_section.py` cuts the entry for the tag; the test
+  job runs it before anything is built, so a release whose notes nobody wrote
+  can't ship. GitHub's generated commit list is still appended underneath.
+- **Skew is reported, never used to reject a cycle.** Simulating the real request
+  schedule showed any threshold tight enough to mean something rejects nearly
+  every loop, and what survives is decided by iteration order in `fetch_books`
+  rather than by data quality. Re-verification is the answer, not filtering.
 
 - **Analysis only.** Never automates any in-game action, trade, whisper or input.
   Automating trading violates GGG's ToS. Hard requirement, not a gap.

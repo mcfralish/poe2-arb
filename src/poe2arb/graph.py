@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from datetime import datetime
 from itertools import permutations
 
 from .client import Offer
@@ -26,6 +27,9 @@ class Edge:
     rate: float       # effective dst per 1 src, after fee haircut
     raw_rate: float   # marginal book rate before haircut
     depth_filled_divines: float  # book depth actually available at <= raw_rate
+    # When the order book behind this edge was fetched. None means unknown
+    # (synthetic edges in tests, or history written before this was recorded).
+    observed_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -33,6 +37,11 @@ class Opportunity:
     cycle: tuple[str, ...]   # e.g. ("exalted", "chaos", "divine") — closes back to first
     profit_pct: float        # (product of effective rates - 1) * 100
     min_depth_divines: float  # bottleneck edge depth — max size this loop supports
+    # Seconds between the oldest and newest edge in the loop. A scan issues one
+    # paced request per (want, chunk), so a loop's edges are never observed
+    # simultaneously — this says how far from simultaneous they were. None when
+    # any edge lacks a timestamp.
+    skew_s: float | None = None
 
     @property
     def key(self) -> tuple[str, ...]:
@@ -113,9 +122,13 @@ def build_graph(
         if priced is None:
             continue
         raw_rate, depth = priced
+        # The oldest stamp among the offers, not the newest: an edge is only as
+        # current as the stalest thing it was built from.
+        stamps = [o.observed_at for o in pair_offers if o.observed_at is not None]
         edges[(src, dst)] = Edge(
             src=src, dst=dst, rate=raw_rate * haircut, raw_rate=raw_rate,
             depth_filled_divines=depth,
+            observed_at=min(stamps) if stamps else None,
         )
     return edges
 
@@ -126,22 +139,40 @@ def _canonical(cycle: tuple[str, ...]) -> tuple[str, ...]:
     return cycle[i:] + cycle[:i]
 
 
+def cycle_skew_s(hops: list[Edge]) -> float | None:
+    """Seconds between the oldest and newest edge in a loop.
+
+    None if any hop is unstamped: a partial answer here would understate the
+    spread, which is the one direction that matters — a loop that looks
+    tightly-timed but isn't is exactly the phantom this number exists to expose.
+    """
+    stamps = [e.observed_at for e in hops]
+    if not stamps:
+        return 0.0  # no hops, nothing to be spread apart
+    if any(s is None for s in stamps):
+        return None
+    return (max(stamps) - min(stamps)).total_seconds()
+
+
 def price_cycle(
     edges: dict[tuple[str, str], Edge], cycle: tuple[str, ...]
 ) -> Opportunity | None:
     """Cost out one closed loop. None if any hop has no edge."""
     product = 1.0
     min_depth = math.inf
+    hops: list[Edge] = []
     for i, src in enumerate(cycle):
         edge = edges.get((src, cycle[(i + 1) % len(cycle)]))
         if edge is None:
             return None
+        hops.append(edge)
         product *= edge.rate
         min_depth = min(min_depth, edge.depth_filled_divines)
     return Opportunity(
         cycle=cycle,
         profit_pct=(product - 1.0) * 100.0,
         min_depth_divines=min_depth,
+        skew_s=cycle_skew_s(hops),
     )
 
 
