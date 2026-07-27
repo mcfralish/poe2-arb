@@ -226,3 +226,11 @@ python -m pytest
 Tests cover the cycle math on synthetic graphs with planted cycles (including one whose
 gross profit sits just below the fee haircut and must not be reported) and the parsers
 against saved real API responses in `tests/fixtures/`.
+
+## Legal
+
+This product isn't affiliated with or endorsed by Grinding Gear Games in any way.
+
+Path of Exile 2 and all associated names, images and data are the property of Grinding
+Gear Games. poe2-arb reads publicly available market data and analyses it; it never
+automates any in-game action.

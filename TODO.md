@@ -127,3 +127,20 @@ it already announced; hardcoded colours replaced with theme-aware ones.
 - **UI state lives in a JSON file in the cache dir**, not in the TOML config (which is
   meant to stay hand-editable) and not in QSettings (which would write to the Windows
   registry, contradicting "delete the folder to remove it").
+  - **No peer-to-peer data sharing between clients.** Considered and rejected.
+  Request cost is ~n²/have_chunk, so pooling budget across P peers buys only
+  √P graph width — 4,000× peers to reach 636 items. Federated edges also
+  arrive at different timestamps, and Bellman-Ford will happily find a cycle
+  assembled from edges that were never simultaneously true: a phantom-arb
+  generator that looks legitimate. GGG's rate-limit rules include `client`,
+  so aggregate per-application throttling already exists and can be applied
+  at any time. If sharing is ever revisited, it is a central relay the
+  maintainer operates, not P2P.
+- **Currency Exchange API (`service:cxapi`) — not pursuing.** Requires a
+  confidential OAuth client, which requires a server on an HTTPS domain the
+  maintainer controls. Public/desktop clients cannot use `service:*` scopes
+  at all, so it can never ship inside the exe. Out of scope for a local tool.
+  For the record if this is ever revisited: hourly *historical* digests only,
+  no current-hour data, so it wouldn't replace the live book anyway — the
+  value was per-pair traded volume and hourly low/high ratios economy-wide
+  for one request an hour.
