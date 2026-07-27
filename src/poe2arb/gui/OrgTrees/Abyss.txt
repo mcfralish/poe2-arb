@@ -1,16 +1,20 @@
 Abyss
 │
-├─ 
-│ ├─ 
-│ ├─ 
-│ └─ 
+├─ Ancient
+│ ├─ Ancient Collarbone
+│ ├─ Ancient Jawbone
+│ └─ Ancient Rib
 │
-├─ 
-│ ├─ 
-│ ├─ 
-│ └─ 
-│
-└─ 
-  ├─ 
-  ├─ 
-  └─ 
+└─ Standard
+  ├─ Altered Collarbone
+  ├─ Amanamu's Gaze
+  ├─ Gnawed Collarbone
+  ├─ Gnawed Jawbone
+  ├─ Gnawed Rib
+  ├─ Kurgal's Gaze
+  ├─ Preserved Collarbone
+  ├─ Preserved Cranium
+  ├─ Preserved Jawbone
+  ├─ Preserved Rib
+  ├─ Tecrod's Gaze
+  └─ Ulaman's Gaze

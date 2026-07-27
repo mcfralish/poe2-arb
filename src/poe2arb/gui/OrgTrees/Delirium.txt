@@ -1,0 +1,37 @@
+Delirium
+│
+├─ Diluted
+│ ├─ Diluted Liquid Greed
+│ ├─ Diluted Liquid Guilt
+│ └─ Diluted Liquid Ire
+│
+├─ Ancient
+│ ├─ Ancient Concentrated Liquid Fear
+│ ├─ Ancient Concentrated Liquid Isolation
+│ ├─ Ancient Concentrated Liquid Suffering
+│ ├─ Ancient Diluted Liquid Greed
+│ ├─ Ancient Diluted Liquid Guilt
+│ ├─ Ancient Diluted Liquid Ire
+│ ├─ Ancient Liquid Despair
+│ ├─ Ancient Liquid Disgust
+│ ├─ Ancient Liquid Envy
+│ ├─ Ancient Liquid Paranoia
+│ ├─ Ancient Potent Liquid Contempt
+│ ├─ Ancient Potent Liquid Ferocity
+│ └─ Ancient Potent Liquid Melancholy
+│
+├─ Standard
+│ ├─ Liquid Despair
+│ ├─ Liquid Disgust
+│ ├─ Liquid Envy
+│ └─ Liquid Paranoia
+│
+├─ Concentrated
+│ ├─ Concentrated Liquid Fear
+│ ├─ Concentrated Liquid Isolation
+│ └─ Concentrated Liquid Suffering
+│
+└─ Potent
+  ├─ Potent Liquid Contempt
+  ├─ Potent Liquid Ferocity
+  └─ Potent Liquid Melancholy

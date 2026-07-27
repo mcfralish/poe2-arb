@@ -1,16 +1,49 @@
 Uncut Gems
 │
-├─ 
-│ ├─ 
-│ ├─ 
-│ └─ 
+├─ Skill Gems
+│ ├─ Uncut Skill Gem (Level 1)
+│ ├─ Uncut Skill Gem (Level 2)
+│ ├─ Uncut Skill Gem (Level 3)
+│ ├─ Uncut Skill Gem (Level 4)
+│ ├─ Uncut Skill Gem (Level 5)
+│ ├─ Uncut Skill Gem (Level 6)
+│ ├─ Uncut Skill Gem (Level 7)
+│ ├─ Uncut Skill Gem (Level 8)
+│ ├─ Uncut Skill Gem (Level 9)
+│ ├─ Uncut Skill Gem (Level 10)
+│ ├─ Uncut Skill Gem (Level 11)
+│ ├─ Uncut Skill Gem (Level 12)
+│ ├─ Uncut Skill Gem (Level 13)
+│ ├─ Uncut Skill Gem (Level 14)
+│ ├─ Uncut Skill Gem (Level 15)
+│ ├─ Uncut Skill Gem (Level 16)
+│ ├─ Uncut Skill Gem (Level 17)
+│ ├─ Uncut Skill Gem (Level 18)
+│ ├─ Uncut Skill Gem (Level 19)
+│ └─ Uncut Skill Gem (Level 20)
 │
-├─ 
-│ ├─ 
-│ ├─ 
-│ └─ 
+├─ Spirit Gems
+│ ├─ Uncut Spirit Gem (Level 4)
+│ ├─ Uncut Spirit Gem (Level 5)
+│ ├─ Uncut Spirit Gem (Level 6)
+│ ├─ Uncut Spirit Gem (Level 7)
+│ ├─ Uncut Spirit Gem (Level 8)
+│ ├─ Uncut Spirit Gem (Level 9)
+│ ├─ Uncut Spirit Gem (Level 10)
+│ ├─ Uncut Spirit Gem (Level 11)
+│ ├─ Uncut Spirit Gem (Level 12)
+│ ├─ Uncut Spirit Gem (Level 13)
+│ ├─ Uncut Spirit Gem (Level 14)
+│ ├─ Uncut Spirit Gem (Level 15)
+│ ├─ Uncut Spirit Gem (Level 16)
+│ ├─ Uncut Spirit Gem (Level 17)
+│ ├─ Uncut Spirit Gem (Level 18)
+│ ├─ Uncut Spirit Gem (Level 19)
+│ └─ Uncut Spirit Gem (Level 20)
 │
-└─ 
-  ├─ 
-  ├─ 
-  └─ 
+└─ Support Gems
+  ├─ Uncut Support Gem (Level 1)
+  ├─ Uncut Support Gem (Level 2)
+  ├─ Uncut Support Gem (Level 3)
+  ├─ Uncut Support Gem (Level 4)
+  └─ Uncut Support Gem (Level 5)

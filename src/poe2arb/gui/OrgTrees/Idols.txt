@@ -1,16 +1,37 @@
 Idols
 │
-├─ 
-│ ├─ 
-│ ├─ 
-│ └─ 
+├─ Bear Idol
+│ ├─ Bear Idol
+│ ├─ Boar Idol
+│ ├─ Carved Cunning
+│ ├─ Carved Majesty
+│ ├─ Carved Mischief
+│ ├─ Carved Tenacity
+│ ├─ Cat Idol
+│ ├─ Fox Idol
+│ ├─ Idol of Alira
+│ ├─ Idol of Eeshta
+│ ├─ Idol of Egrin
+│ ├─ Idol of Eramir
+│ ├─ Idol of Greust
+│ ├─ Idol of Grold
+│ ├─ Idol of Kraityn
+│ └─ Idol of Maxarius
 │
-├─ 
-│ ├─ 
-│ ├─ 
-│ └─ 
-│
-└─ 
-  ├─ 
-  ├─ 
-  └─ 
+└─ Idol of Oak
+  ├─ Idol of Oak
+  ├─ Idol of Ralakesh
+  ├─ Idol of Silk
+  ├─ Idol of Sirrius
+  ├─ Idol of the Martyr
+  ├─ Idol of the Pharisee
+  ├─ Idol of the Sycophant
+  ├─ Idol of Thruldana
+  ├─ Idol of Yeena
+  ├─ Owl Idol
+  ├─ Ox Idol
+  ├─ Primate Idol
+  ├─ Rabbit Idol
+  ├─ Snake Idol
+  ├─ Stag Idol
+  └─ Wolf Idol

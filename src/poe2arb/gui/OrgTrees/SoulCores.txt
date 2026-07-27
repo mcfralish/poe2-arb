@@ -1,16 +1,40 @@
 Soul Cores
 │
-├─ 
-│ ├─ 
-│ ├─ 
-│ └─ 
+├─ Atmohua's Soul…
+│ ├─ Atmohua's Soul Core of Retreat
+│ ├─ Cholotl's Soul Core of War
+│ ├─ Citaqualotl's Soul Core of Foulness
+│ ├─ Citaqualotl's Thesis
+│ ├─ Estazunti's Soul Core of Convalescence
+│ ├─ Guatelitzi's Soul Core of Endurance
+│ ├─ Guatelitzi's Thesis
+│ ├─ Hayoxi's Soul Core of Heatproofing
+│ ├─ Jiquani's Thesis
+│ ├─ Opiloti's Soul Core of Assault
+│ ├─ Quipolatl's Soul Core of Flow
+│ ├─ Quipolatl's Thesis
+│ ├─ Raven-Touched Shard
+│ ├─ Soul Core of Atmohua
+│ ├─ Soul Core of Azcapa
+│ ├─ Soul Core of Cholotl
+│ ├─ Soul Core of Citaqualotl
+│ └─ Soul Core of Jiquani
 │
-├─ 
-│ ├─ 
-│ ├─ 
-│ └─ 
-│
-└─ 
-  ├─ 
-  ├─ 
-  └─ 
+└─ Soul Core of…
+  ├─ Soul Core of Opiloti
+  ├─ Soul Core of Puhuarte
+  ├─ Soul Core of Quipolatl
+  ├─ Soul Core of Tacati
+  ├─ Soul Core of Ticaba
+  ├─ Soul Core of Topotante
+  ├─ Soul Core of Tzamoto
+  ├─ Soul Core of Xopec
+  ├─ Soul Core of Zalatl
+  ├─ Soul Core of Zantipi
+  ├─ Tacati's Soul Core of Affliction
+  ├─ Topotante's Soul Core of Dampening
+  ├─ Tzamoto's Soul Core of Ferocity
+  ├─ Uromoti's Soul Core of Attenuation
+  ├─ Xipocado's Soul Core of Dominion
+  ├─ Xopec's Soul Core of Power
+  └─ Zalatl's Soul Core of Insulation

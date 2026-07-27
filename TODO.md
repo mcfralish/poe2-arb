@@ -32,13 +32,20 @@ it already announced; hardcoded colours replaced with theme-aware ones.
   in the same order as the columns.
 - [x] ~~Quick Lookup note should say live data is used when available~~ — it now names
   the source and, for live rates, how old the scan was.
-- [ ] **Org tree structures** from `src/poe2arb/gui/OrgTrees/*.txt` (Currency and
-  Fragments filled in; others still templates). Base category order, verbatim:
-  Currency, Essences, Runes, Abyss, Omens, Soul Cores, Idols, Liquid Emotions,
-  Catalysts, Fragments, Uncut Gems, Lineage Gems, Expedition, Verisium.
-  Note the renames vs poe.ninja's own names: Omens=Ritual, Liquid Emotions=Delirium,
-  Catalysts=Breach, Lineage Gems=LineageSupportGems. **Last item — trees still being
-  written.**
+- [ ] **Org tree structures** from `src/poe2arb/gui/OrgTrees/*.txt`. Every file now
+  holds the app's *current* grouping, dumped by `tools/dump_org_trees.py` from the
+  same `by_category_and_tier` call the menus use — so edits start from what the app
+  really does. `Currency.txt` is hand-written and the tool refuses to touch it
+  without `--force`. Files are named for poe.ninja's own categories (Ritual,
+  Delirium, Breach, LineageSupportGems), not the in-game display names.
+  Base category order, verbatim: Currency, Essences, Runes, Abyss, Omens, Soul
+  Cores, Idols, Liquid Emotions, Catalysts, Fragments, Uncut Gems, Lineage Gems,
+  Expedition, Verisium. **Waiting on the edited trees.**
+- [ ] **Extend the selection marker to parent sections in the exclusion picker.**
+  *Root cause found:* `rebuild` counts a category's selections across all its groups,
+  but `_refresh_markers` recounts from each menu's *direct* item children only. A
+  category whose children are group submenus therefore scores 0 and loses its `• N`
+  the moment anything is ticked. Both levels need a recursive count.
 - [ ] Large values still read oddly in fixed non-adaptive units (a Mirror in `ex`).
   Adaptive mode covers the default case; decide whether fixed modes need scaling too.
 - [x] ~~Window position not remembered~~ — geometry, splitter and active tab are kept
