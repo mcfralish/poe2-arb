@@ -42,7 +42,7 @@ from ..config import (
 )
 from ..format import fmt_depth, fmt_pct, fmt_rate, fmt_value, fmt_volume
 from ..history import read_recent
-from ..market import BASE_CURRENCY_CHOICES, Universe
+from ..market import ADAPTIVE_BASE, BASE_CURRENCY_CHOICES, Universe, base_abbreviation
 from ..rate_limit import Severity, check_pacing, min_safe_interval, worst_severity
 from ..report import route_str
 from ..scan import ScanResult, result_from_history_record
@@ -303,7 +303,7 @@ class MainWindow(QMainWindow):
         self.edges_table = self._make_table(
             EDGE_COLUMNS, 4, Qt.SortOrder.DescendingOrder  # deepest books first
         )
-        self.tabs.addTab(self.edges_table, "Book edges")
+        self.tabs.addTab(self.edges_table, "Book Edges")
 
         self.log_view = QPlainTextEdit()
         self.log_view.setReadOnly(True)
@@ -358,13 +358,19 @@ class MainWindow(QMainWindow):
 
     def _update_market_header(self) -> None:
         """Market value column names whichever currency the user picked."""
-        label = dict(BASE_CURRENCY_CHOICES).get(self.cfg.base_currency, "Divine Orb")
-        short = label.split()[0].lower()
         item = self.market_table.horizontalHeaderItem(1)
-        item.setText(f"Value ({short})")
+        if self.cfg.base_currency == ADAPTIVE_BASE:
+            item.setText("Value")
+            item.setToolTip(
+                "What one of these is worth, shown in whichever currency reads "
+                "most clearly for its price. Change the unit in the toolbar."
+            )
+            return
+        label = dict(BASE_CURRENCY_CHOICES).get(self.cfg.base_currency, "Divine Orb")
+        item.setText(f"Value ({base_abbreviation(self.cfg.base_currency)})")
         item.setToolTip(
             f"What one of these is worth in {label}s, according to poe.ninja's "
-            f"market data. Change the unit in Settings."
+            f"market data. Change the unit in the toolbar."
         )
 
     def _build_tray(self) -> None:
@@ -638,19 +644,32 @@ class MainWindow(QMainWindow):
         self.market_table.setSortingEnabled(False)
         self.market_table.setRowCount(len(rows))
         in_graph = set(result.nodes)
-        base_rate = overview.values.get(self.cfg.base_currency) or 1.0
+        adaptive = self.cfg.base_currency == ADAPTIVE_BASE
+        base_rate = 1.0 if adaptive else (overview.values.get(self.cfg.base_currency) or 1.0)
         for r, cid in enumerate(rows):
             vol = overview.volumes.get(cid, 0.0)
-            # Stored in divines; shown in whatever unit the user picked.
-            value = overview.values[cid] / base_rate
+            divine_value = overview.values[cid]
+            if adaptive and self._universe is not None and self._universe.get(cid):
+                unit = self._universe.adaptive_unit(cid)
+                shown = self._universe.convert(cid, unit) or 0.0
+                text = f"{shown:,.2f} {base_abbreviation(unit)}"
+            else:
+                text = f"{divine_value / base_rate:,.2f}"
+            tick = TextItem("✔" if cid in in_graph else "")
+            tick.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            font = tick.font()
+            font.setPointSize(max(11, font.pointSize() + 3))
+            tick.setFont(font)
             self._set_row(
                 self.market_table,
                 r,
                 [
                     TextItem(names.get(cid, cid)),
-                    NumericItem(fmt_value(value), value),
+                    # Sorts on the divine value so mixed adaptive units still
+                    # order correctly.
+                    NumericItem(text, divine_value),
                     NumericItem(fmt_volume(vol), vol),
-                    TextItem("✓" if cid in in_graph else ""),
+                    tick,
                 ],
             )
         self.market_table.setSortingEnabled(True)

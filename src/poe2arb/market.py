@@ -43,13 +43,35 @@ _DISPLAY_NAMES = {
     "SoulCores": "Soul Cores",
 }
 
-# Currencies offered as the unit to price everything else in.
+# Units prices can be displayed in, in the order they appear in the toolbar.
+# "Adaptive" leads and is the default: it picks a sensible unit per item so a
+# Mirror doesn't read as 508,857.40 ex and a Wisdom Scroll doesn't read as
+# 0.00 div.
+ADAPTIVE_BASE = "adaptive"
+
 BASE_CURRENCY_CHOICES: tuple[tuple[str, str], ...] = (
-    ("divine", "Divine Orb"),
+    (ADAPTIVE_BASE, "Adaptive"),
     ("exalted", "Exalted Orb"),
     ("chaos", "Chaos Orb"),
     ("annul", "Orb of Annulment"),
+    ("divine", "Divine Orb"),
 )
+
+# Short forms used in table headers and adaptive cells.
+BASE_CURRENCY_ABBREVIATIONS: dict[str, str] = {
+    ADAPTIVE_BASE: "adaptive",
+    "exalted": "ex",
+    "chaos": "chaos",
+    "annul": "annul",
+    "divine": "div",
+}
+
+# Cheapest first — adaptive walks this looking for a readable magnitude.
+ADAPTIVE_LADDER: tuple[str, ...] = ("exalted", "chaos", "annul", "divine")
+
+
+def base_abbreviation(base_id: str) -> str:
+    return BASE_CURRENCY_ABBREVIATIONS.get(base_id, base_id)
 
 
 def category_label(category: str) -> str:
@@ -265,6 +287,23 @@ class Universe:
                     final[sub_label] = piece
             grouped[category] = final
         return grouped
+
+    def adaptive_unit(self, item_id: str) -> str:
+        """Pick the unit that shows this item's price most legibly.
+
+        The economy spans six orders of magnitude, so any single unit makes one
+        end of it unreadable. This picks the largest denomination the item is
+        still worth at least one of, falling back to the cheapest unit for
+        things worth less than a single Exalted Orb.
+        """
+        best = ADAPTIVE_LADDER[0]
+        for unit in ADAPTIVE_LADDER:
+            value = self.convert(item_id, unit)
+            if value is None:
+                continue
+            if value >= 1.0:
+                best = unit
+        return best
 
     def convert(self, item_id: str, base_id: str) -> float | None:
         """Price of `item_id` expressed in units of `base_id`.

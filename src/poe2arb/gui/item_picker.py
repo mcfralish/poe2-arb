@@ -14,13 +14,24 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QMenu, QProxyStyle, QPushButton, QStyle
 
 from ..format import fmt_num
-from ..market import Universe, category_label
+from ..market import ADAPTIVE_BASE, Universe, base_abbreviation, category_label
 
 
 def _item_label(name: str, value_in_base: float | None, base_name: str) -> str:
     if value_in_base is None:
         return name
     return f"{name}   ({fmt_num(value_in_base, 2)} {base_name})"
+
+
+def _priced_label(universe: Universe, item, base_id: str) -> str:
+    """Item label with its price, in the chosen unit or a per-item sensible one."""
+    if base_id == ADAPTIVE_BASE:
+        unit = universe.adaptive_unit(item.id)
+    else:
+        unit = base_id
+    return _item_label(
+        item.name, universe.convert(item.id, unit), base_abbreviation(unit)
+    )
 
 
 class _MultiColumnMenuStyle(QProxyStyle):
@@ -98,16 +109,25 @@ class ExclusionPicker(QPushButton):
             return
 
         known = set(universe.items)
+        selected = set(self._selected)
         for category, groups in universe.by_category_and_tier().items():
-            cat_menu = _new_submenu(
-                self, self._menu, category_label(category), self._submenus
+            # A bullet marks branches holding a selection — without it, finding
+            # what you ticked means opening every category in turn.
+            in_category = sum(
+                1 for items in groups.values() for i in items if i.id in selected
             )
+            cat_title = category_label(category)
+            if in_category:
+                cat_title += f"  • {in_category}"
+            cat_menu = _new_submenu(self, self._menu, cat_title, self._submenus)
             for group, items in groups.items():
                 # A lone "Standard" group means the category isn't worth
                 # splitting; list its items straight under the category.
+                in_group = sum(1 for i in items if i.id in selected)
+                group_title = f"{group}  • {in_group}" if in_group else group
                 target = (
                     cat_menu if len(groups) == 1
-                    else _new_submenu(self, cat_menu, group, self._submenus)
+                    else _new_submenu(self, cat_menu, group_title, self._submenus)
                 )
                 for item in items:
                     action = target.addAction(item.name)
@@ -144,7 +164,21 @@ class ExclusionPicker(QPushButton):
         elif not checked and item_id in self._selected:
             self._selected.remove(item_id)
         self._refresh_text()
+        self._refresh_markers()
         self.changed.emit()
+
+    def _refresh_markers(self) -> None:
+        """Update the branch bullets without rebuilding the open menu."""
+        if self._universe is None:
+            return
+        selected = set(self._selected)
+        for menu in self._submenus:
+            own = sum(
+                1 for a in menu.actions()
+                if not a.menu() and a.data() in selected
+            )
+            title = menu.title().split("  •")[0]
+            menu.setTitle(f"{title}  • {own}" if own else title)
 
     def clear(self) -> None:
         self._selected.clear()
@@ -160,14 +194,13 @@ class ExclusionPicker(QPushButton):
         return [self._universe.name(cid) for cid in self._selected]
 
     def summary_text(self) -> str:
-        names = self._display_names()
-        if not names:
+        """Kept short and fixed-width-ish so the settings form stops growing."""
+        count = len(self._selected)
+        if not count:
             return "Nothing excluded"
-        if len(names) == 1:
-            return names[0]
-        if len(names) == 2:
-            return " and ".join(names)
-        return f"{names[0]}, {names[1]} and {len(names) - 2} more"
+        if count == 1:
+            return self._display_names()[0]
+        return f"{count} items excluded"
 
     def _refresh_text(self) -> None:
         self.setText(self.summary_text())
@@ -202,7 +235,6 @@ class ItemPicker(QPushButton):
             self._menu.addAction("Loading economy data…").setEnabled(False)
             self._refresh_text()
             return
-        base_name = universe.name(self._base_id)
         for category, groups in universe.by_category_and_tier().items():
             cat_menu = _new_submenu(
                 self, self._menu, category_label(category), self._submenus
@@ -213,8 +245,9 @@ class ItemPicker(QPushButton):
                     else _new_submenu(self, cat_menu, group, self._submenus)
                 )
                 for item in items:
-                    value = universe.convert(item.id, self._base_id)
-                    action = target.addAction(_item_label(item.name, value, base_name))
+                    action = target.addAction(
+                        _priced_label(universe, item, self._base_id)
+                    )
                     action.setData(item.id)
                     action.triggered.connect(
                         lambda _=False, cid=item.id: self.set_current(cid)

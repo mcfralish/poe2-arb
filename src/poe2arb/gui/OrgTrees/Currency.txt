@@ -1,0 +1,107 @@
+Currency
+│
+├─ Transmutation
+│ ├─ Orb of Transmutation
+│ ├─ Greater Orb of Transmutation
+│ └─ Perfect Orb of Transmutation
+│
+├─ Augmentation
+│ ├─ Orb of Augmentation
+│ ├─ Greater Orb of Augmentation
+│ └─ Perfect Orb of Augmentation
+│
+├─ Regal
+│ ├─ Regal Orb
+│ ├─ Greater Regal Orb
+│ └─ Perfect Regal Orb
+│
+├─ Exalted
+│ ├─ Exalted Orb
+│ ├─ Greater Exalted Orb
+│ └─ Perfect Exalted Orb
+│
+├─ Chaos
+│ ├─ Chaos Orb
+│ ├─ Greater Chaos Orb
+│ └─ Perfect Chaos Orb
+│
+├─ Sockets
+│ ├─ Artificer's Orb
+│ ├─ Lesser Jeweller's Orb
+│ ├─ Greater Jeweller's Orb
+│ └─ Perfect Jeweller's Orb
+│
+├─ High End
+│ ├─ Orb of Alchemy
+│ ├─ Orb of Chance
+│ ├─ Orb of Annulment
+│ ├─ Divine Orb
+│ ├─ Fracturing Orb
+│ ├─ Hinekora's Lock
+│ └─ Mirror of Kalandra
+│
+├─ Corrupted
+│ ├─ Vaal Orb
+│ ├─ Vaal Siphoner
+│ ├─ Yugul's Orb of Sacrifice
+│ ├─ Yaomac's Orb of Sacrifice
+│ ├─ Kopec's Orb of Sacrifice
+│ ├─ Kamasa's Orb of Sacrifice
+│ ├─ Ancient Infuser
+│ ├─ Crystallised Corruption
+│ ├─ Vaal Cultivation Orb
+│ ├─ Core Destabiliser
+│ └─ Architect's Orb
+│
+├─ Quality
+│ ├─ Blacksmith's Whetstone
+│ ├─ Glassblower's Bauble
+│ ├─ Armourer's Scrap
+│ ├─ Gemcutter's Prism
+│ ├─ Arcanist's Etcher
+│ ├─ Vaal Blacksmith's Infuser
+│ ├─ Vaal Arcanist's Infuser
+│ ├─ Vaal Armourer's Infuser
+│ └─ Vaal Catalysing Infuser
+│
+├─ Shards
+│ ├─ Scroll of Wisdom
+│ ├─ Transmutation Shard
+│ ├─ Regal Shard
+│ ├─ Artificer's Shard
+│ └─ Chance Shard
+│
+└─ Misc.
+  ├─ Cryptic Key
+  └─ Orb of Extraction
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

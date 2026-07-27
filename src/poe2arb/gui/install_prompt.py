@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import sys
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QCheckBox, QMessageBox
 
 from ..config import Config, save_config, user_config_path
@@ -63,7 +64,7 @@ def maybe_offer_install(cfg: Config, parent=None) -> bool:
             _persist(cfg)
         return False
 
-    QApplication.setOverrideCursor(QApplication.overrideCursor() or None)
+    QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
     try:
         result = perform_install()
     except OSError as e:
@@ -74,6 +75,8 @@ def maybe_offer_install(cfg: Config, parent=None) -> bool:
             f"You can keep running the app from its current location.",
         )
         return False
+    finally:
+        QApplication.restoreOverrideCursor()
 
     detail = f"Installed to:\n{result.exe_path}"
     if result.shortcut_path is not None:

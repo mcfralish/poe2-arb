@@ -1,0 +1,40 @@
+Fragments
+│
+├─ 
+│ ├─ 
+│ ├─ 
+│ └─ 
+│
+├─ 
+│ ├─ 
+│ ├─ 
+│ └─ 
+│
+└─ 
+  ├─ 
+  ├─ 
+  └─ 
+
+The Trialmaster's Reliquary Key
+Zarokh's Reliquary Key: Against the Darkness
+Azmeri Reliquary Key
+Xesht's Reliquary Key
+Tangmazu's Reliquary Key
+The Arbiter's Reliquary Key
+Breachlord Sac
+Faded Crisis Fragment
+Origin Core
+Olroth's Reliquary Key
+Deadly Fate
+Cowardly Fate
+Victorious Fate
+Origin Spark
+Origin Cradle
+Simulacrum
+Kulemak's Invitation
+Ritualistic Reliquary Key
+Ancient Crisis Fragment
+Weathered Crisis Fragment
+Call of the Shadows
+Twilight Reliquary Key
+Simulacrum Splinter

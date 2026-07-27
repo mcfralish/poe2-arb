@@ -61,9 +61,38 @@ class TestCategories:
         assert category_label("LineageSupportGems") == "Lineage Support Gems"
         assert category_label("Currency") == "Currency"
 
-    def test_base_choices_are_the_four_wealth_currencies(self):
+    def test_base_choices_lead_with_adaptive_then_ascend_in_value(self):
         ids = [cid for cid, _ in BASE_CURRENCY_CHOICES]
-        assert ids == ["divine", "exalted", "chaos", "annul"]
+        assert ids == ["adaptive", "exalted", "chaos", "annul", "divine"]
+
+    def test_abbreviations(self):
+        from poe2arb.market import base_abbreviation
+
+        assert base_abbreviation("exalted") == "ex"
+        assert base_abbreviation("divine") == "div"
+        assert base_abbreviation("chaos") == "chaos"
+        assert base_abbreviation("annul") == "annul"
+
+
+class TestAdaptiveUnit:
+    def test_expensive_items_priced_in_divines(self, universe):
+        rich = merge_overviews("T", NOW, {"Currency": overview(
+            {"divine": 1.0, "chaos": 0.11, "exalted": 0.00225, "mirror": 4886.0},
+            {"divine": "Divine Orb", "chaos": "Chaos Orb",
+             "exalted": "Exalted Orb", "mirror": "Mirror"},
+        )})
+        assert rich.adaptive_unit("mirror") == "divine"
+
+    def test_cheap_items_priced_in_exalts(self, universe):
+        cheap = merge_overviews("T", NOW, {"Currency": overview(
+            {"divine": 1.0, "exalted": 0.00225, "scrap": 0.000001},
+            {"divine": "Divine Orb", "exalted": "Exalted Orb", "scrap": "Scrap"},
+        )})
+        assert cheap.adaptive_unit("scrap") == "exalted"
+
+    def test_each_currency_reads_as_one_of_itself(self, universe):
+        for cid in ("divine", "chaos", "exalted"):
+            assert universe.adaptive_unit(cid) == cid
 
 
 class TestMerge:

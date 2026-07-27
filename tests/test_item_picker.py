@@ -70,9 +70,21 @@ class TestExclusionPicker:
         assert picker.selected_ids() == []
         assert picker.text() == "Nothing excluded"
 
-    def test_summary_collapses_beyond_two(self, app, universe):
+    def test_summary_is_a_count_not_a_growing_list(self, app, universe):
+        """The label must not stretch the settings form as items are ticked."""
         picker = ExclusionPicker(["divine", "chaos", "mirror"], universe)
-        assert picker.text().endswith("and 1 more")
+        assert picker.text() == "3 items excluded"
+
+    def test_single_selection_named_in_full(self, app, universe):
+        assert ExclusionPicker(["mirror"], universe).text() == "Mirror of Kalandra"
+
+    def test_branches_marked_when_they_hold_a_selection(self, app, universe):
+        """Otherwise finding what you ticked means opening every category."""
+        picker = ExclusionPicker(["mirror"], universe)
+        titles = [a.text() for a in submenus(picker)]
+        assert any("•" in t for t in titles)
+        clean = ExclusionPicker([], universe)
+        assert not any("•" in a.text() for a in submenus(clean))
 
     def test_clear_all(self, app, universe):
         picker = ExclusionPicker(["chaos", "mirror"], universe)
@@ -114,13 +126,20 @@ class TestItemPicker:
         picker = ItemPicker("Pick…", universe, base_id="divine")
         currency = submenus(picker)[0].menu()
         mirror = [a for a in currency.actions() if a.text().startswith("Mirror")][0]
-        assert "Divine Orb" in mirror.text()
+        assert "div)" in mirror.text()
 
     def test_base_change_relabels(self, app, universe):
         picker = ItemPicker("Pick…", universe, base_id="divine")
         picker.rebuild(universe, base_id="chaos")
         currency = submenus(picker)[0].menu()
-        assert any("Chaos Orb)" in a.text() for a in currency.actions())
+        assert any("chaos)" in a.text() for a in currency.actions())
+
+    def test_adaptive_prices_each_item_in_a_readable_unit(self, app, universe):
+        picker = ItemPicker("Pick…", universe, base_id="adaptive")
+        currency = submenus(picker)[0].menu()
+        labels = {a.text().split("   (")[0]: a.text() for a in currency.actions()}
+        assert "div)" in labels["Mirror of Kalandra"]
+        assert "chaos)" in labels["Chaos Orb"]
 
     def test_selection_cleared_if_absent_after_rebuild(self, app, universe):
         picker = ItemPicker("Pick…", universe)

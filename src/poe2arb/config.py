@@ -91,7 +91,7 @@ class Config:
 
     # The currency prices are displayed in. Internal maths stays in divines;
     # this only affects what the UI shows.
-    base_currency: str = "divine"
+    base_currency: str = "adaptive"
 
     # Watch / GUI
     watch_interval_minutes: float = 10.0  # re-scan cadence for watch mode and the GUI

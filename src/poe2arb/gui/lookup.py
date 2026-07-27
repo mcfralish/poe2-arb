@@ -29,9 +29,9 @@ from .item_picker import ItemPicker
 
 class QuickLookup(QGroupBox):
     def __init__(self, parent=None):
-        super().__init__("Quick lookup", parent)
+        super().__init__("Quick Lookup", parent)
         self._universe: Universe | None = None
-        self._base_id = "divine"
+        self._base_id = "adaptive"
 
         outer = QVBoxLayout(self)
         grid = QGridLayout()
