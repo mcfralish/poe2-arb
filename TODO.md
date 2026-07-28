@@ -2,15 +2,44 @@
 
 Merged list (yours + mine). Shipped version: **v0.2.7**.
 
-**Landed in v0.2.5** — Bellman-Ford now names the loop it found instead of
-just asserting one exists; Quick Lookup prefers live order-book rates and says
-which source it used, laid out like the in-game Currency Exchange; type-to-
-search in both item pickers; filter boxes on Market and Book Edges; Clear and
-Save on the Log tab; window position, splitter and tab remembered between runs;
-history file pruned on a retention setting; a restart no longer re-alerts loops
-it already announced; hardcoded colours replaced with theme-aware ones.
+Per-release detail lives in [CHANGELOG.md](CHANGELOG.md); this file tracks
+what is *not* done and why.
 
 ---
+
+## State of play — read this first
+
+**Shipped:** v0.2.7. Working tree clean, `main` pushed, tag pushed, release built.
+
+**Where things stand on the two big threads:**
+
+1. **Node selection / "all items in the graph"** — the design is agreed and
+   written up below, and the scope question is answered (~634 items are
+   tradeable, ids match poe.ninja exactly). It is **waiting on data, not on
+   decisions**: Watch is running to bank scans so the scorer can be judged
+   against the Trends tab rather than against a hypothesis. Check
+   `Trends → Currency performance` before writing any scoring code — if the
+   current top-10 all show a 0% hit rate over a few hundred scans, that is
+   itself the most useful thing to know.
+2. **OrgTrees** — regenerated against the in-game tabs, awaiting the user's
+   manual pass. Two known weaknesses in the generated versions: `Currency.txt`
+   lost the hand-written grouping (Transmutation / Sockets / High End /
+   Corrupted / Quality / Shards) that was there before — the old version is in
+   git at `86a5bac` — and `AtzirisTemple.txt` splits on the word "Vaal", which
+   isn't a real distinction. The user is redoing both by hand.
+
+**Open question the user is deciding:** the Market tab bar scrolls at narrow
+window widths (Expedition and Gems hide behind arrows at ~1000px). Options
+offered were a smaller tab font or wrapping to two rows. No work started.
+
+**How to verify GUI work without a display:**
+`QT_QPA_PLATFORM=offscreen`, construct the widget, `app.processEvents()`,
+`widget.grab().save(path)`. This has caught three real bugs that the test
+suite did not: a startup `NameError` after a refactor, a Trends note that
+claimed something false on thin data, and the icon-cache size being ~10x what
+was predicted. Use it.
+
+**Venv:** `~/.venvs/poe2-arb/bin/python`. Tests: `python -m pytest -q` (424).
 
 ## Aesthetic / UX
 
