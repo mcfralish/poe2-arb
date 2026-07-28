@@ -185,8 +185,24 @@ category work has to pick one and map to it deliberately.
 All, Currency, Essences, Delirium, Breach, Abyss, Atziri's Temple, Fragments,
 Runes, Ritual, Soul Cores, Idols, Uncut Gems, Expedition, Gems.
 
-**In-game tabs match poe.ninja's categories more closely than GGG's API groups
-do.** The API lumps things the game separates:
+**Decision: the UI models the in-game selection**, not poe.ninja's categories and
+not GGG's API groups. The mapping is fully determined — poe.ninja category (or
+item) on the left, in-game tab on the right:
+
+| poe.ninja | in-game tab |
+|---|---|
+| Currency, minus the 15 Vaal items below | Currency |
+| those 15 Vaal items | **Atziri's Temple** |
+| Essences / Delirium / Breach / Abyss / Runes / Ritual / SoulCores / Idols / UncutGems / Fragments | same name |
+| Expedition **+ Verisium** | **Expedition** |
+| LineageSupportGems | **Gems** |
+
+Verisium has no tab of its own — the game files it under Expedition. Waystones
+would sit under Fragments, but poe.ninja prices none of them so they never reach
+our UI anyway.
+
+**GGG's API groups are for trading only, never for display.** The API lumps
+things the game separates:
 
 | GGG API group | poe.ninja categories inside it |
 |---|---|
