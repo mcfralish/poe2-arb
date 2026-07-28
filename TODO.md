@@ -55,9 +55,19 @@ it already announced; hardcoded colours replaced with theme-aware ones.
   hiding excluded items and instead show an "Excluded" checkbox column that adds and
   removes them from the list in place. Then **remove the exclusion picker from
   Settings**, and put a **"View exclusion list" button on the Market tab**.
-  *Open question:* Book Edges also hides excluded items today — say whether that
-  should follow Market or keep hiding them.
+  Book Edges keeps hiding excluded items: an excluded item is never a graph node,
+  so a *fresh* scan has no edges for it anyway. The filter still earns its place
+  for stale data — excluding something re-renders the previous scan's result, and
+  history backload restores edges recorded before the exclusion.
 - [ ] **Rename the Market "Filter currencies…" box to "Search".**
+- [ ] **Restore Defaults button in Settings.**
+- [ ] **Split the Vaal / Atziri's Temple items out of Currency.** In-game they have
+  their own tab; poe.ninja files them under Currency. GGG's static data names them
+  exactly — 15 of poe.ninja's 51 Currency items, highest-value first: Architect's Orb,
+  Vaal Catalysing Infuser, Core Destabiliser, Crystallised Corruption, Vaal
+  Cultivation Orb, Vaal Armourer's Infuser, Orb of Extraction, Vaal Blacksmith's
+  Infuser, Ancient Infuser, and the Kamasa's / Kopec's / Yaomac's / Yugul's Orbs of
+  Sacrifice, Vaal Siphoner, Vaal Arcanist's Infuser. Currency.txt changes as a result.
 - [ ] Large values still read oddly in fixed non-adaptive units (a Mirror in `ex`).
   Adaptive mode covers the default case; decide whether fixed modes need scaling too.
 - [x] ~~Window position not remembered~~ — geometry, splitter and active tab are kept
@@ -163,6 +173,41 @@ it already announced; hardcoded colours replaced with theme-aware ones.
   which would make Bellman-Ford the primary detector rather than the cross-check.
 - [ ] Multi-league / Standard comparison.
 - [ ] Packaging beyond one exe — PyPI for the CLI, Scoop/winget manifests.
+
+---
+
+## Reference: three taxonomies that don't agree
+
+Measured 2026-07-27 from GGG's static data plus poe.ninja's categories. Any
+category work has to pick one and map to it deliberately.
+
+**In-game tab order** (from the Currency Exchange, authoritative for the UI):
+All, Currency, Essences, Delirium, Breach, Abyss, Atziri's Temple, Fragments,
+Runes, Ritual, Soul Cores, Idols, Uncut Gems, Expedition, Gems.
+
+**In-game tabs match poe.ninja's categories more closely than GGG's API groups
+do.** The API lumps things the game separates:
+
+| GGG API group | poe.ninja categories inside it |
+|---|---|
+| `Vaal` | SoulCores (34) + Currency (15) — the game splits these into *Soul Cores* and *Atziri's Temple* |
+| `Ritual` | Ritual (38) + Idols (28) + Fragments (1) + SoulCores (1) — the game splits Ritual and Idols |
+| `Expedition` | Expedition (24) + Idols (4) + Runes (4) |
+| `Delirium` | Delirium (26) + Fragments (2) |
+
+So: **group by poe.ninja category for display, and use GGG ids only for
+trading.** Mapping the UI to GGG's groups would merge tabs the game keeps apart.
+
+Other findings worth not rediscovering:
+
+- **`sep` is a separator, not an item.** GGG's static entries include repeated
+  `sep` rows for UI spacing. Filter them out or they become phantom items.
+- **Waystones are tradeable but entirely unpriced by poe.ninja** (0 of 16). No
+  consensus value means no fair rate, so the bait filter can't run — they can't
+  be graph nodes as things stand.
+- **76 of 213 runes are unpriced**, mostly `lesser-*` variants; ~137 are usable.
+- **Verisium has no in-game tab** in the screenshot, though GGG groups it and
+  poe.ninja prices 24 items. Worth confirming where the game puts them.
 
 ---
 
