@@ -46,6 +46,18 @@ it already announced; hardcoded colours replaced with theme-aware ones.
   but `_refresh_markers` recounts from each menu's *direct* item children only. A
   category whose children are group submenus therefore scores 0 and loses its `• N`
   the moment anything is ticked. Both levels need a recursive count.
+- [ ] **Market tab: tabs instead of one very long list**, with an **All** tab keeping
+  the full list.
+- [ ] **Market tab: real filters over the first and second level of categorisation.**
+  Build against the current `by_category_and_tier` grouping; the hand-written
+  OrgTrees replace it once they land.
+- [ ] **Exclusions become a Market column, not a Settings field.** Market should stop
+  hiding excluded items and instead show an "Excluded" checkbox column that adds and
+  removes them from the list in place. Then **remove the exclusion picker from
+  Settings**, and put a **"View exclusion list" button on the Market tab**.
+  *Open question:* Book Edges also hides excluded items today — say whether that
+  should follow Market or keep hiding them.
+- [ ] **Rename the Market "Filter currencies…" box to "Search".**
 - [ ] Large values still read oddly in fixed non-adaptive units (a Mirror in `ex`).
   Adaptive mode covers the default case; decide whether fixed modes need scaling too.
 - [x] ~~Window position not remembered~~ — geometry, splitter and active tab are kept
@@ -64,7 +76,19 @@ it already announced; hardcoded colours replaced with theme-aware ones.
 - [x] ~~Install prompt crashed on first click~~ — `setOverrideCursor(None)`. Fixed in
   v0.2.4 and regression-tested.
 - [ ] **Put all items in the arbitrage graph**, choosing what to actually track
-  algorithmically since request budget can't cover 636 items. *Inputs available:*
+  algorithmically since request budget can't cover 636 items.
+  **Scope question answered (2026-07-27, one unmetered request to
+  `/api/trade2/data/static`):** GGG's exchange accepts **754 items across 15
+  groups**, including Runes (213), Essences (84), LineageSupportGems (76),
+  Ritual (75), UncutGems (45) — plus Vaal and Waystones, which poe.ninja
+  doesn't carry. **634 of poe.ninja's 642 ids match GGG's exactly**, so no
+  mapping layer is needed. Live probes confirmed real books with real depth
+  outside Currency: Uncut Skill Gem (Level 20) 96 offers/96 accounts,
+  Essence of Delirium 85/85, Simulacrum 90/90. Rates reconcile against
+  poe.ninja consensus, and the top-of-book "1:1" listings on cheap items are
+  ordinary bait that `bait_filter_ratio` already removes. So "all items"
+  means ~634, not ~50 — the ceiling is the request budget, nothing else.
+  *Inputs available:*
   `volumePrimaryValue` (daily volume in divines) and `sparkline` (7-day trend:
   `totalChange` plus 7 daily points) per item, both already fetched. Volume/hour isn't
   published but can be derived. **Design agreed, awaiting the go-ahead:**
@@ -120,6 +144,9 @@ it already announced; hardcoded colours replaced with theme-aware ones.
   threshold, re-fetch just its 2–4 edges back-to-back (~26–52s) and report only if it
   survives. Opportunities are rare so the request cost is near zero, and it upgrades
   "these existed sometime in a 4-minute window" to "confirmed within 39 seconds".
+- [ ] **Installer should update in place rather than prompt, when an older version is
+  already installed.** Today `should_offer_install` only asks about a first install;
+  an existing older copy should be replaced without a question.
 - [ ] Install flow still unverified end-to-end on a real frozen exe (the v0.2.4 crash
   was exactly this gap — worth a manual run before relying on it).
 - [ ] Windows 11 hides new tray icons in the overflow, so closing the window while
@@ -157,6 +184,8 @@ it already announced; hardcoded colours replaced with theme-aware ones.
   Automating trading violates GGG's ToS. Hard requirement, not a gap.
 - **Exclusions don't apply to Quick Lookup.** Excluding something from the scan
   shouldn't stop you pricing it. It gets the unfiltered order book too.
+  (Note: exclusions hiding rows from the *Market* tab is being reversed — see the
+  Market items above. Quick Lookup's independence is the part that stands.)
 - **Per-user install, never Program Files.** Elevating an unsigned binary to copy
   itself into a system directory is the dropper pattern we're avoiding.
 - **`request_interval_s` must stay above 10s.** At exactly 10s a 300s window catches
