@@ -6,7 +6,7 @@ says what changed for you and, where it matters, why.
 Versions follow `MAJOR.MINOR.PATCH`. Until 1.0 the minor number moves for
 anything user-visible.
 
-## [Unreleased]
+## [0.2.7] — 2026-07-27
 
 ### Changed
 - **The Market tab now follows the in-game Currency Exchange.** Tabs in the

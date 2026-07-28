@@ -1,6 +1,6 @@
 # poe2-arb — TODO
 
-Merged list (yours + mine). Shipped version: **v0.2.6**.
+Merged list (yours + mine). Shipped version: **v0.2.7**.
 
 **Landed in v0.2.5** — Bellman-Ford now names the loop it found instead of
 just asserting one exists; Quick Lookup prefers live order-book rates and says
