@@ -71,6 +71,9 @@ class NinjaOverview:
     values: dict[str, float]   # currency id -> value in divines
     volumes: dict[str, float]  # currency id -> daily traded volume in divines
     names: dict[str, str]      # currency id -> display name
+    # currency id -> CDN path for its 64px icon, e.g. "/gen/image/.../Foo.png".
+    # A path, not a URL: the host belongs to whatever fetches it.
+    images: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -119,13 +122,27 @@ def parse_overview(data: dict, league: str, fetched_at: datetime) -> NinjaOvervi
             continue
         values[cid] = float(value)
         volumes[cid] = float(line.get("volumePrimaryValue") or 0.0)
-    names = {it["id"]: it["name"] for it in items if it.get("id") and it.get("name")}
+    # poe.ninja repeats the primary unit inside `core.items` for every
+    # category, so both lists are read — `items` first, since a category's own
+    # entry is the more specific one.
+    names: dict[str, str] = {}
+    images: dict[str, str] = {}
+    for source in (items, core.get("items") or []):
+        for it in source:
+            cid = it.get("id")
+            if not cid:
+                continue
+            if it.get("name"):
+                names.setdefault(cid, it["name"])
+            if it.get("image"):
+                images.setdefault(cid, it["image"])
     # The primary unit itself is priced implicitly at 1.0 and has no line entry.
     values.setdefault(PRIMARY, 1.0)
     volumes.setdefault(PRIMARY, float("inf"))
     names.setdefault(PRIMARY, "Divine Orb")
     return NinjaOverview(
-        league=league, fetched_at=fetched_at, values=values, volumes=volumes, names=names
+        league=league, fetched_at=fetched_at, values=values, volumes=volumes,
+        names=names, images=images,
     )
 
 

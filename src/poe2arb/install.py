@@ -19,7 +19,10 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
+
+from .version import is_newer
 
 log = logging.getLogger(__name__)
 
@@ -63,15 +66,90 @@ def is_installed(exe: Path | None = None, local_appdata: str | None = None) -> b
         return False
 
 
+VERSION_MARKER = "version.txt"
+
+
+def version_marker_path(local_appdata: str | None = None) -> Path:
+    """Records which version sits in the install directory.
+
+    Reading the version out of the exe itself would mean parsing a PE resource
+    or taking a pywin32 dependency; a one-line text file next to it answers the
+    same question and costs nothing.
+    """
+    return install_dir(local_appdata) / VERSION_MARKER
+
+
+def installed_version(local_appdata: str | None = None) -> str | None:
+    """The version currently installed, or None if nothing is (or it's unmarked)."""
+    if not installed_exe_path(local_appdata).exists():
+        return None
+    try:
+        text = version_marker_path(local_appdata).read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return text or None
+
+
+def write_version_marker(version: str, local_appdata: str | None = None) -> None:
+    try:
+        path = version_marker_path(local_appdata)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(version, encoding="utf-8")
+    except OSError:
+        # Losing the marker costs an unnecessary re-copy next launch, nothing more.
+        log.warning("could not write version marker", exc_info=True)
+
+
+class InstallAction(str, Enum):
+    """What launching this exe should do about the per-user install."""
+
+    NONE = "none"      # nothing to do — stay quiet
+    OFFER = "offer"    # nothing installed: ask whether to install
+    UPDATE = "update"  # an older version is installed: replace it silently
+
+
+def decide_install_action(
+    *,
+    frozen: bool,
+    platform: str,
+    already_installed: bool,
+    user_declined: bool,
+    running_version: str,
+    installed: str | None,
+) -> InstallAction:
+    """Decide between staying quiet, offering an install, and updating in place.
+
+    Updating is deliberately silent: the user already chose to install this app
+    once, so re-asking every release is a nag, not a question.
+
+    `installed` is the version found in the install directory, or None when
+    nothing is there. A *newer* installed version means this exe is an old copy
+    someone launched out of Downloads — replacing it would be a silent
+    downgrade, so that case does nothing at all.
+    """
+    if not frozen or platform != "win32" or already_installed:
+        return InstallAction.NONE
+    if installed is None:
+        # `user_declined` only silences the question, never an update: someone
+        # who said no has nothing installed to update.
+        return InstallAction.NONE if user_declined else InstallAction.OFFER
+    if is_newer(running_version, installed):
+        return InstallAction.UPDATE
+    return InstallAction.NONE
+
+
 def should_offer_install(
     *, frozen: bool, platform: str, already_installed: bool, user_declined: bool
 ) -> bool:
-    """Offer only for a frozen Windows build that isn't installed yet.
-
-    Running from source, on another OS, or after the user has said no once —
-    all reasons to stay quiet.
-    """
-    return frozen and platform == "win32" and not already_installed and not user_declined
+    """Kept for callers that only care about the first-run offer."""
+    return decide_install_action(
+        frozen=frozen,
+        platform=platform,
+        already_installed=already_installed,
+        user_declined=user_declined,
+        running_version="0",
+        installed=None,
+    ) is InstallAction.OFFER
 
 
 @dataclass(frozen=True)
@@ -114,12 +192,18 @@ def create_start_menu_shortcut(target: Path, appdata: str | None = None) -> Path
     return shortcut
 
 
-def perform_install(source: Path | None = None) -> InstallResult:
+def perform_install(
+    source: Path | None = None, version: str | None = None
+) -> InstallResult:
     """Copy the running exe into the per-user install dir and add a shortcut.
 
     Reading your own executable is fine on Windows — a running image is locked
     against writes, not reads. A shortcut failure is reported but doesn't fail
     the install; the copied exe is the part that matters.
+
+    Doubles as the updater: copying over an existing exe is the whole update.
+    Only the exe is touched, so cache, config and scan history — which live in
+    LOCALAPPDATA and APPDATA, not here — survive untouched.
     """
     source = (source or current_exe()).resolve()
     target_dir = install_dir()
@@ -127,6 +211,8 @@ def perform_install(source: Path | None = None) -> InstallResult:
     target = target_dir / EXE_NAME
     if target.resolve() != source:
         shutil.copy2(source, target)
+    if version is not None:
+        write_version_marker(version)
 
     shortcut: Path | None = None
     error: str | None = None

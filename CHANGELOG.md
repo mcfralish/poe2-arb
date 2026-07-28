@@ -6,6 +6,32 @@ says what changed for you and, where it matters, why.
 Versions follow `MAJOR.MINOR.PATCH`. Until 1.0 the minor number moves for
 anything user-visible.
 
+## [Unreleased]
+
+### Added
+- **Item icons everywhere** — Market, Book Edges, Quick Lookup and both item
+  pickers. They're fetched from the game's own asset CDN as items are shown and
+  kept on disk, so the cost is paid once (about 5.9 MB) and never again. The
+  cache sits alongside your other saved data, not inside the app folder, so
+  updating the app never throws it away.
+- **Trends tab.** What the saved scan history actually says over time: which
+  loops keep coming back and how often, and which currencies are earning their
+  place in the search versus occupying a slot without ever paying for it.
+- **Restore Defaults** in Settings. Puts every setting back to its shipped
+  value; your exclusion list is deliberately left alone, and nothing is saved
+  until you press OK.
+
+### Changed
+- **Updating no longer asks.** If you already have an older version installed,
+  launching a newer one replaces it silently and hands over — you chose to
+  install it once, so being asked every release is a nag. Your settings, cached
+  data and scan history are untouched, and an older copy can never overwrite a
+  newer install.
+
+### Fixed
+- Category names in the exclusion list lost their `• N` marker the moment you
+  ticked something inside them — which is exactly when it should have appeared.
+
 ## [0.2.6] — 2026-07-27
 
 ### Changed

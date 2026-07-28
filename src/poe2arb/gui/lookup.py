@@ -132,6 +132,11 @@ class QuickLookup(QGroupBox):
 
     # ------------------------------------------------------------------ inputs
 
+    def set_icons(self, provider) -> None:
+        """Share the window's icon provider with both pickers."""
+        self.want_picker.set_icons(provider)
+        self.have_picker.set_icons(provider)
+
     def set_universe(self, universe: Universe) -> None:
         self._universe = universe
         self.want_picker.rebuild(universe, self._base_id)

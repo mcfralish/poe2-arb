@@ -12,7 +12,7 @@ type to see a flat list of matches, clear the box to get the categories back.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
     QLineEdit,
     QMenu,
@@ -203,7 +203,30 @@ def _set_tree_visible(menu: QMenu, search: _SearchSection, visible: bool) -> Non
             action.setVisible(visible)
 
 
-class ExclusionPicker(QPushButton):
+class _IconMixin:
+    """Optional icons on menu entries and the button face.
+
+    Optional because both pickers are constructed before the universe (and so
+    before any icons) exist, and because the Settings dialog can be opened with
+    no provider at all. `_icon` answering None keeps every call site the same
+    whether art is available or not.
+    """
+
+    def set_icons(self, provider) -> None:
+        self._icons = provider
+        self.rebuild(self._universe)
+
+    def _icon(self, item_id: str):
+        provider = getattr(self, "_icons", None)
+        return provider.icon(item_id) if provider is not None else None
+
+    def _apply_icon(self, action, item_id: str) -> None:
+        icon = self._icon(item_id)
+        if icon is not None:
+            action.setIcon(icon)
+
+
+class ExclusionPicker(_IconMixin, QPushButton):
     """Multi-select: tick items to exclude, grouped by category."""
 
     changed = Signal()
@@ -211,6 +234,7 @@ class ExclusionPicker(QPushButton):
     def __init__(self, selected_ids: list[str], universe: Universe | None = None,
                  parent=None):
         super().__init__(parent)
+        self._icons = None
         self._selected = list(dict.fromkeys(selected_ids))
         self._universe = universe
         self._menu = _new_menu(self)
@@ -266,6 +290,7 @@ class ExclusionPicker(QPushButton):
                     action.setCheckable(True)
                     action.setChecked(item.id in self._selected)
                     action.setData(item.id)
+                    self._apply_icon(action, item.id)
                     action.toggled.connect(
                         lambda checked, cid=item.id: self._set(cid, checked)
                     )
@@ -340,16 +365,31 @@ class ExclusionPicker(QPushButton):
         self._sync_tree_checks()
         self.changed.emit()
 
+    @staticmethod
+    def _count_selected(menu: QMenu, selected: set[str]) -> int:
+        """Selections anywhere beneath this menu, including in submenus.
+
+        Counting only direct children was the bug: a category whose children
+        are all group submenus holds no items itself, so it scored 0 and lost
+        its marker the moment anything under it was ticked — exactly when the
+        marker is meant to appear.
+        """
+        total = 0
+        for action in menu.actions():
+            child = action.menu()
+            if child is not None:
+                total += ExclusionPicker._count_selected(child, selected)
+            elif action.data() in selected:
+                total += 1
+        return total
+
     def _refresh_markers(self) -> None:
         """Update the branch bullets without rebuilding the open menu."""
         if self._universe is None:
             return
         selected = set(self._selected)
         for menu in self._submenus:
-            own = sum(
-                1 for a in menu.actions()
-                if not a.menu() and a.data() in selected
-            )
+            own = self._count_selected(menu, selected)
             title = menu.title().split("  •")[0]
             menu.setTitle(f"{title}  • {own}" if own else title)
 
@@ -379,7 +419,7 @@ class ExclusionPicker(QPushButton):
         self.setText(self.summary_text())
 
 
-class ItemPicker(QPushButton):
+class ItemPicker(_IconMixin, QPushButton):
     """Single-select: choose one item, grouped by category."""
 
     selected = Signal(str)
@@ -387,6 +427,7 @@ class ItemPicker(QPushButton):
     def __init__(self, placeholder: str = "Choose…", universe: Universe | None = None,
                  base_id: str = "divine", parent=None):
         super().__init__(parent)
+        self._icons = None
         self._placeholder = placeholder
         self._universe = universe
         self._base_id = base_id
@@ -429,6 +470,7 @@ class ItemPicker(QPushButton):
                         _priced_label(universe, item, self._base_id)
                     )
                     action.setData(item.id)
+                    self._apply_icon(action, item.id)
                     action.triggered.connect(
                         lambda _=False, cid=item.id: self.set_current(cid)
                     )
@@ -472,7 +514,12 @@ class ItemPicker(QPushButton):
     def _refresh_text(self) -> None:
         if self._current is None:
             self.setText(self._placeholder)
-        elif self._universe is not None:
+            self.setIcon(QIcon())
+            return
+        if self._universe is not None:
             self.setText(self._universe.name(self._current))
         else:
             self.setText(self._current)
+        icon = self._icon(self._current)
+        if icon is not None:
+            self.setIcon(icon)

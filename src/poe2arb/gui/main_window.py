@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import NamedTuple
 
-from PySide6.QtCore import Qt, QTimer, QUrl
+from PySide6.QtCore import QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
@@ -50,6 +50,7 @@ from ..rate_limit import Severity, check_pacing, min_safe_interval, worst_severi
 from ..report import route_str
 from ..scan import ScanResult, result_from_history_record
 from .icon import make_app_icon
+from .icon_provider import ICON_SIZE, IconProvider
 from .settings_dialog import SettingsDialog
 from .table_items import NumericItem, TextItem
 from .theme import banner_style
@@ -198,6 +199,15 @@ class MainWindow(QMainWindow):
         self._quitting = False
         # (table, search field, columns worth matching) — see _filtered.
         self._filters: list[tuple[QTableWidget, QLineEdit, tuple[int, ...]]] = []
+
+        self.icons = IconProvider(self.cfg.cache_dir, self)
+        # One repaint per batch of arrivals rather than per icon: a table of 600
+        # rows would otherwise re-render 600 times as the fetches land.
+        self._icon_refresh = QTimer(self)
+        self._icon_refresh.setSingleShot(True)
+        self._icon_refresh.setInterval(400)
+        self._icon_refresh.timeout.connect(self._reapply_view_settings)
+        self.icons.ready.connect(lambda _: self._icon_refresh.start())
 
         self._build_toolbar()
         self._build_central()
@@ -610,6 +620,8 @@ class MainWindow(QMainWindow):
     def _universe_loaded(self, universe: Universe) -> None:
         """Full economy data arrived: feed the pickers and the lookup tool."""
         self._universe = universe
+        self.icons.set_images(universe.images())
+        self.lookup.set_icons(self.icons)
         self.lookup.set_universe(universe)
         self.lookup.set_base_currency(self.cfg.base_currency)
         self._log(
@@ -834,11 +846,13 @@ class MainWindow(QMainWindow):
             font = tick.font()
             font.setPointSize(max(11, font.pointSize() + 3))
             tick.setFont(font)
+            name_cell = TextItem(names.get(cid, cid))
+            name_cell.setIcon(self.icons.icon(cid))
             self._set_row(
                 self.market_table,
                 r,
                 [
-                    TextItem(names.get(cid, cid)),
+                    name_cell,
                     # Sorts on the divine value so mixed adaptive units still
                     # order correctly.
                     NumericItem(text, divine_value),
@@ -846,6 +860,7 @@ class MainWindow(QMainWindow):
                     tick,
                 ],
             )
+        self.market_table.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
         self.market_table.setSortingEnabled(True)
 
         edges = sorted(
@@ -858,17 +873,22 @@ class MainWindow(QMainWindow):
         self.edges_table.setSortingEnabled(False)
         self.edges_table.setRowCount(len(edges))
         for r, e in enumerate(edges):
+            src_cell = TextItem(names.get(e.src, e.src))
+            src_cell.setIcon(self.icons.icon(e.src))
+            dst_cell = TextItem(names.get(e.dst, e.dst))
+            dst_cell.setIcon(self.icons.icon(e.dst))
             self._set_row(
                 self.edges_table,
                 r,
                 [
-                    TextItem(names.get(e.src, e.src)),
-                    TextItem(names.get(e.dst, e.dst)),
+                    src_cell,
+                    dst_cell,
                     NumericItem(fmt_rate(e.raw_rate), e.raw_rate),
                     NumericItem(fmt_rate(e.rate), e.rate),
                     NumericItem(fmt_depth(e.depth_filled_divines), e.depth_filled_divines),
                 ],
             )
+        self.edges_table.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
         self.edges_table.setSortingEnabled(True)
 
         # New rows arrive visible, so a filter typed before a scan finished
@@ -995,6 +1015,7 @@ class MainWindow(QMainWindow):
     def shutdown(self) -> None:
         """Stop timers and join worker threads before the event loop goes away."""
         self._save_ui_state()
+        self.icons.shutdown()
         self.watch_timer.stop()
         self.countdown_timer.stop()
         stop_thread(self._worker)

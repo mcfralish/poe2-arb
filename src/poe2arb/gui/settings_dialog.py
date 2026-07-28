@@ -156,16 +156,52 @@ class SettingsDialog(QDialog):
         layout.addWidget(self.budget_label)
 
         self.buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel
+            | QDialogButtonBox.StandardButton.RestoreDefaults
         )
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
+        restore = self.buttons.button(QDialogButtonBox.StandardButton.RestoreDefaults)
+        restore.setToolTip(
+            "Put every setting on this page back to its shipped value.\n"
+            "Nothing is saved until you press OK, so this is undoable\n"
+            "with Cancel."
+        )
+        restore.clicked.connect(self.restore_defaults)
         layout.addWidget(self.buttons)
 
         for widget in (
             self.request_interval, self.max_currencies, self.interval, self.safety
         ):
             widget.valueChanged.connect(self._revalidate)
+        self._revalidate()
+
+    def restore_defaults(self) -> None:
+        """Reset every widget to the shipped default.
+
+        Deliberately only touches the widgets, not the saved file: pressing
+        Cancel afterwards must leave the existing config exactly as it was.
+        The league is included — blank means auto-detect, which is the default
+        and the right answer for almost everyone.
+        """
+        d = Config()
+        self.league.setText("")
+        self.threshold.setValue(d.profit_threshold_pct)
+        self.margin.setValue(d.safety_margin_pct)
+        self.interval.setValue(d.watch_interval_minutes)
+        self.max_currencies.setValue(d.max_currencies)
+        self.max_cycle_len.setCurrentText(str(d.max_cycle_len))
+        self.liquidity.setValue(d.liquidity_floor_divines)
+        self.max_value.setValue(d.max_currency_value_divines)
+        self.depth.setValue(d.depth_divines)
+        self.request_interval.setValue(d.request_interval_s)
+        self.safety.setValue(round(d.rate_limit_safety_fraction * 100))
+        self.retention.setValue(d.history_retention_days)
+        self.sound.setChecked(d.alert_sound)
+        # Exclusions are the user's own curation, not a setting with a sensible
+        # default — wiping a long list on a button labelled "restore defaults"
+        # would be a nasty surprise. Clear All inside the picker still exists.
         self._revalidate()
 
     # ---------------------------------------------------------------- validation

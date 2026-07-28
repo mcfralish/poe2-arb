@@ -279,3 +279,64 @@ class TestItemPicker:
         )
         picker.rebuild(smaller)
         assert picker.current_id() is None
+
+
+class TestParentMarkers:
+    """Category branches must keep their `• N` once something under them is ticked.
+
+    The bug: `rebuild` counted a category's selections across all its groups,
+    but `_refresh_markers` recounted from direct item children only — so a
+    category whose children are group submenus scored 0 and dropped its marker
+    the instant anything was ticked.
+    """
+
+    @pytest.fixture
+    def deep(self):
+        """A universe big enough that Essences splits into tier submenus."""
+        essences = NinjaOverview(
+            league="T", fetched_at=NOW,
+            values={f"ess-{i}": 0.01 * (i + 1) for i in range(14)},
+            volumes={f"ess-{i}": 1.0 for i in range(14)},
+            names={
+                **{f"ess-{i}": f"Lesser Essence {i}" for i in range(7)},
+                **{f"ess-{i}": f"Greater Essence {i}" for i in range(7, 14)},
+            },
+        )
+        return merge_overviews("T", NOW, {"Essences": essences})
+
+    def category_menu(self, picker):
+        return [a for a in picker.menu().actions() if a.menu()][0]
+
+    def test_category_splits_into_groups(self, app, deep):
+        """Guards the fixture: without nesting this test proves nothing."""
+        assert any(a.menu() for a in self.category_menu(deep_picker(deep)).menu().actions())
+
+    def test_marker_survives_a_tick(self, app, deep):
+        picker = ExclusionPicker([], deep)
+        group = [a for a in self.category_menu(picker).menu().actions() if a.menu()][0]
+        item = [a for a in group.menu().actions() if a.data()][0]
+        item.setChecked(True)
+        assert "•" in self.category_menu(picker).text()
+
+    def test_marker_counts_across_all_groups(self, app, deep):
+        picker = ExclusionPicker(["ess-0", "ess-8"], deep)
+        picker._refresh_markers()
+        assert "• 2" in self.category_menu(picker).text()
+
+    def test_marker_clears_when_the_last_item_is_unticked(self, app, deep):
+        picker = ExclusionPicker(["ess-0"], deep)
+        group = [a for a in self.category_menu(picker).menu().actions() if a.menu()][0]
+        for action in group.menu().actions():
+            if action.data() == "ess-0":
+                action.setChecked(False)
+        assert "•" not in self.category_menu(picker).text()
+
+    def test_group_level_marker_still_works(self, app, deep):
+        picker = ExclusionPicker(["ess-0"], deep)
+        picker._refresh_markers()
+        groups = [a for a in self.category_menu(picker).menu().actions() if a.menu()]
+        assert sum(1 for g in groups if "•" in g.text()) == 1
+
+
+def deep_picker(universe):
+    return ExclusionPicker([], universe)

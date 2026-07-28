@@ -10,30 +10,17 @@ import logging
 
 import httpx
 
+# Re-exported: these moved to the package root so the installer can use them
+# without depending on the GUI layer. Imported here so existing callers (and
+# the Qt-free import test) keep working unchanged.
+from ..version import is_newer, parse_version  # noqa: F401
+
 log = logging.getLogger(__name__)
 
 # Set to the public repo that hosts releases.
 REPO = "mcfralish/poe2-arb"
 LATEST_RELEASE_API = f"https://api.github.com/repos/{REPO}/releases/latest"
 RELEASES_PAGE = f"https://github.com/{REPO}/releases"
-
-
-def parse_version(tag: str) -> tuple[int, ...] | None:
-    """'v0.2.1' / '0.2.1' -> (0, 2, 1); None if malformed."""
-    tag = tag.strip().lstrip("vV")
-    parts = tag.split(".")
-    try:
-        return tuple(int(p) for p in parts)
-    except ValueError:
-        return None
-
-
-def is_newer(candidate_tag: str, current_version: str) -> bool:
-    cand = parse_version(candidate_tag)
-    cur = parse_version(current_version)
-    if cand is None or cur is None:
-        return False
-    return cand > cur
 
 
 def check_for_update(current_version: str) -> tuple[str, str] | None:

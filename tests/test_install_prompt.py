@@ -18,7 +18,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
 from poe2arb.config import Config  # noqa: E402
 from poe2arb.gui import install_prompt  # noqa: E402
-from poe2arb.install import InstallResult  # noqa: E402
+from poe2arb.install import InstallAction, InstallResult  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -34,14 +34,16 @@ def accepting(monkeypatch):
     )
     monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
-    monkeypatch.setattr(install_prompt, "should_offer_install", lambda **kw: True)
+    monkeypatch.setattr(
+        install_prompt, "decide_install_action", lambda **kw: InstallAction.OFFER
+    )
 
 
 def test_accepting_the_offer_installs_and_exits(app, accepting, monkeypatch, tmp_path):
     launched = []
     monkeypatch.setattr(
         install_prompt, "perform_install",
-        lambda: InstallResult(tmp_path / "poe2-arb.exe", tmp_path / "s.lnk"),
+        lambda **kw: InstallResult(tmp_path / "poe2-arb.exe", tmp_path / "s.lnk"),
     )
     monkeypatch.setattr(install_prompt, "launch", lambda exe: launched.append(exe))
 
@@ -53,7 +55,7 @@ def test_accepting_the_offer_installs_and_exits(app, accepting, monkeypatch, tmp
 
 
 def test_install_failure_is_reported_not_raised(app, accepting, monkeypatch):
-    def boom():
+    def boom(**kw):
         raise OSError("disk full")
 
     monkeypatch.setattr(install_prompt, "perform_install", boom)
@@ -65,14 +67,16 @@ def test_install_failure_is_reported_not_raised(app, accepting, monkeypatch):
 def test_shortcut_failure_still_counts_as_installed(app, accepting, monkeypatch, tmp_path):
     monkeypatch.setattr(
         install_prompt, "perform_install",
-        lambda: InstallResult(tmp_path / "e.exe", None, "no shell"),
+        lambda **kw: InstallResult(tmp_path / "e.exe", None, "no shell"),
     )
     monkeypatch.setattr(install_prompt, "launch", lambda exe: None)
     assert install_prompt.maybe_offer_install(Config()) is True
 
 
 def test_declining_records_the_choice(app, monkeypatch, tmp_path):
-    monkeypatch.setattr(install_prompt, "should_offer_install", lambda **kw: True)
+    monkeypatch.setattr(
+        install_prompt, "decide_install_action", lambda **kw: InstallAction.OFFER
+    )
     monkeypatch.setattr(QMessageBox, "exec", lambda self: QMessageBox.StandardButton.No)
     monkeypatch.setattr(
         install_prompt, "_persist", lambda cfg: None
@@ -86,8 +90,79 @@ def test_declining_records_the_choice(app, monkeypatch, tmp_path):
 
 def test_silent_when_not_applicable(app, monkeypatch):
     """Running from source must never show the dialog."""
-    monkeypatch.setattr(install_prompt, "should_offer_install", lambda **kw: False)
+    monkeypatch.setattr(
+        install_prompt, "decide_install_action", lambda **kw: InstallAction.NONE
+    )
     called = []
     monkeypatch.setattr(QMessageBox, "exec", lambda self: called.append(1))
     assert install_prompt.maybe_offer_install(Config()) is False
     assert called == []
+
+
+class TestUpdateInPlace:
+    """An older installed copy is replaced silently — no dialog, no question.
+
+    The user already chose to install this app once; asking again on every
+    release is a nag, not a question.
+    """
+
+    @pytest.fixture
+    def updating(self, monkeypatch):
+        monkeypatch.setattr(
+            install_prompt, "decide_install_action", lambda **kw: InstallAction.UPDATE
+        )
+        monkeypatch.setattr(install_prompt, "installed_version", lambda: "0.2.5")
+
+    def test_no_dialog_is_shown(self, app, updating, monkeypatch, tmp_path):
+        shown = []
+        monkeypatch.setattr(QMessageBox, "exec", lambda self: shown.append(1))
+        monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: shown.append(1))
+        monkeypatch.setattr(
+            install_prompt, "perform_install",
+            lambda **kw: InstallResult(tmp_path / "e.exe", None),
+        )
+        monkeypatch.setattr(install_prompt, "launch", lambda exe: None)
+
+        assert install_prompt.maybe_offer_install(Config()) is True
+        assert shown == []
+
+    def test_hands_over_to_the_updated_copy(self, app, updating, monkeypatch, tmp_path):
+        launched = []
+        monkeypatch.setattr(
+            install_prompt, "perform_install",
+            lambda **kw: InstallResult(tmp_path / "new.exe", None),
+        )
+        monkeypatch.setattr(install_prompt, "launch", lambda exe: launched.append(exe))
+        install_prompt.maybe_offer_install(Config())
+        assert launched == [tmp_path / "new.exe"]
+
+    def test_stamps_the_new_version(self, app, updating, monkeypatch, tmp_path):
+        seen = {}
+        monkeypatch.setattr(
+            install_prompt, "perform_install",
+            lambda **kw: seen.update(kw) or InstallResult(tmp_path / "e.exe", None),
+        )
+        monkeypatch.setattr(install_prompt, "launch", lambda exe: None)
+        install_prompt.maybe_offer_install(Config())
+        from poe2arb import __version__
+
+        assert seen["version"] == __version__
+
+    def test_a_locked_exe_does_not_stop_the_app(self, app, updating, monkeypatch):
+        """The installed copy may be running, or held by antivirus mid-scan."""
+        def boom(**kw):
+            raise OSError("in use by another process")
+
+        monkeypatch.setattr(install_prompt, "perform_install", boom)
+        assert install_prompt.maybe_offer_install(Config()) is False
+        assert QApplication.overrideCursor() is None
+
+    def test_declining_the_first_offer_does_not_block_later_updates(self, app, updating,
+                                                                    monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            install_prompt, "perform_install",
+            lambda **kw: InstallResult(tmp_path / "e.exe", None),
+        )
+        monkeypatch.setattr(install_prompt, "launch", lambda exe: None)
+        cfg = Config(skip_install_prompt=True)
+        assert install_prompt.maybe_offer_install(cfg) is True

@@ -206,6 +206,7 @@ class Item:
     category: str
     value_divine: float
     volume_divine: float
+    image: str | None = None   # CDN path for the item's icon
 
     @property
     def tier(self) -> str:
@@ -232,6 +233,9 @@ class Universe:
 
     def names(self) -> dict[str, str]:
         return {i.id: i.name for i in self.items.values()}
+
+    def images(self) -> dict[str, str]:
+        return {i.id: i.image for i in self.items.values() if i.image}
 
     def values(self) -> dict[str, float]:
         return {i.id: i.value_divine for i in self.items.values()}
@@ -342,5 +346,6 @@ def merge_overviews(league: str, fetched_at: datetime, per_category: dict) -> Un
                 category=category,
                 value_divine=value,
                 volume_divine=overview.volumes.get(item_id, 0.0),
+                image=overview.images.get(item_id),
             )
     return Universe(league=league, fetched_at=fetched_at, items=items)

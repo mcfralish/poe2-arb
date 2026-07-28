@@ -13,13 +13,17 @@ import pytest
 
 from poe2arb.install import (
     EXE_NAME,
+    InstallAction,
     _powershell_shortcut_script,
+    decide_install_action,
     install_dir,
     installed_exe_path,
+    installed_version,
     is_installed,
     perform_install,
     should_offer_install,
     start_menu_dir,
+    write_version_marker,
 )
 
 
@@ -119,3 +123,83 @@ class TestPerformInstall:
 
         result = perform_install(target)
         assert result.exe_path.read_bytes() == b"already here"
+
+
+class TestInstallAction:
+    """Three-way: stay quiet, offer a first install, or update in place."""
+
+    def decide(self, **over):
+        base = dict(
+            frozen=True, platform="win32", already_installed=False,
+            user_declined=False, running_version="0.2.7", installed=None,
+        )
+        base.update(over)
+        return decide_install_action(**base)
+
+    def test_first_run_offers(self):
+        assert self.decide() is InstallAction.OFFER
+
+    def test_older_installed_updates_without_asking(self):
+        assert self.decide(installed="0.2.5") is InstallAction.UPDATE
+
+    def test_same_version_does_nothing(self):
+        assert self.decide(installed="0.2.7") is InstallAction.NONE
+
+    def test_newer_installed_is_never_downgraded(self):
+        """An old exe launched from Downloads must not overwrite a newer install."""
+        assert self.decide(installed="0.3.0") is InstallAction.NONE
+
+    def test_running_the_installed_copy_does_nothing(self):
+        assert self.decide(already_installed=True, installed="0.2.5") is InstallAction.NONE
+
+    def test_declining_silences_the_offer(self):
+        assert self.decide(user_declined=True) is InstallAction.NONE
+
+    def test_declining_does_not_silence_updates(self):
+        """Different question: they have it installed, this just refreshes it."""
+        assert self.decide(user_declined=True, installed="0.2.5") is InstallAction.UPDATE
+
+    def test_unmarked_install_is_left_alone(self):
+        """No marker means an unknown version; overwriting on a guess is worse."""
+        assert self.decide(installed=None, user_declined=True) is InstallAction.NONE
+
+    def test_unparseable_installed_version_does_nothing(self):
+        assert self.decide(installed="garbage") is InstallAction.NONE
+
+    def test_source_checkout_never_acts(self):
+        assert self.decide(frozen=False, installed="0.2.5") is InstallAction.NONE
+
+    def test_other_platforms_never_act(self):
+        assert self.decide(platform="linux", installed="0.2.5") is InstallAction.NONE
+
+    def test_minor_versions_compare_numerically(self):
+        assert self.decide(running_version="0.10.0", installed="0.9.0") is (
+            InstallAction.UPDATE
+        )
+
+
+class TestVersionMarker:
+    def test_round_trips(self, tmp_path):
+        (install_dir(str(tmp_path)) ).mkdir(parents=True, exist_ok=True)
+        installed_exe_path(str(tmp_path)).write_text("exe", encoding="utf-8")
+        write_version_marker("0.2.7", str(tmp_path))
+        assert installed_version(str(tmp_path)) == "0.2.7"
+
+    def test_no_install_means_no_version(self, tmp_path):
+        assert installed_version(str(tmp_path)) is None
+
+    def test_exe_without_a_marker_reads_as_unknown(self, tmp_path):
+        install_dir(str(tmp_path)).mkdir(parents=True, exist_ok=True)
+        installed_exe_path(str(tmp_path)).write_text("exe", encoding="utf-8")
+        assert installed_version(str(tmp_path)) is None
+
+    def test_marker_without_an_exe_is_ignored(self, tmp_path):
+        """A leftover marker must not make a missing install look present."""
+        write_version_marker("0.2.7", str(tmp_path))
+        assert installed_version(str(tmp_path)) is None
+
+    def test_blank_marker_reads_as_unknown(self, tmp_path):
+        install_dir(str(tmp_path)).mkdir(parents=True, exist_ok=True)
+        installed_exe_path(str(tmp_path)).write_text("exe", encoding="utf-8")
+        write_version_marker("   ", str(tmp_path))
+        assert installed_version(str(tmp_path)) is None

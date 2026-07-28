@@ -14,10 +14,13 @@ it already announced; hardcoded colours replaced with theme-aware ones.
 
 ## Aesthetic / UX
 
-- [ ] **Item icons from poe.ninja** in Quick Lookup, Market and Book Edges, including
-  during selection. *Feasible:* the overview response carries an `image` path per item
-  (e.g. `/gen/image/…/CurrencyRerollRare.png`). Needs a disk image cache — 636 items —
-  and a placeholder while loading.
+- [x] ~~Item icons from poe.ninja~~ — in Market, Book Edges, Quick Lookup and both
+  pickers. Fetched from `web.poecdn.com` (GGG's static host, not the rate-limited
+  trade API) on demand, cached to `<cache_dir>/icons` keyed on a hash of the CDN
+  path, with a transparent placeholder until each arrives. **Measured on a real
+  first run: 570 icons / 5.9 MB in ~20s** — the Market table lists every priced
+  item, so the first render effectively asks for all of them. One-time: item art
+  doesn't change between leagues, so the cache never expires.
 - [ ] **Hover tooltips explaining each item**, same three tabs plus selection.
   *Blocked on a source:* the exchange endpoint exposes only `id`, `name`, `image`,
   `category`, `detailsId` — no description text. Options to investigate: a poe.ninja
@@ -41,11 +44,9 @@ it already announced; hardcoded colours replaced with theme-aware ones.
   Base category order, verbatim: Currency, Essences, Runes, Abyss, Omens, Soul
   Cores, Idols, Liquid Emotions, Catalysts, Fragments, Uncut Gems, Lineage Gems,
   Expedition, Verisium. **Waiting on the edited trees.**
-- [ ] **Extend the selection marker to parent sections in the exclusion picker.**
-  *Root cause found:* `rebuild` counts a category's selections across all its groups,
-  but `_refresh_markers` recounts from each menu's *direct* item children only. A
-  category whose children are group submenus therefore scores 0 and loses its `• N`
-  the moment anything is ticked. Both levels need a recursive count.
+- [x] ~~Extend the selection marker to parent sections in the exclusion picker~~ —
+  `_refresh_markers` now counts recursively, so a category keeps its `• N` when the
+  selection lives in a group submenu beneath it.
 - [ ] **Market tab: tabs instead of one very long list**, with an **All** tab keeping
   the full list.
 - [ ] **Market tab: real filters over the first and second level of categorisation.**
@@ -60,7 +61,9 @@ it already announced; hardcoded colours replaced with theme-aware ones.
   for stale data — excluding something re-renders the previous scan's result, and
   history backload restores edges recorded before the exclusion.
 - [ ] **Rename the Market "Filter currencies…" box to "Search".**
-- [ ] **Restore Defaults button in Settings.**
+- [x] ~~Restore Defaults button in Settings~~ — resets the widgets only, so Cancel
+  still undoes it, and deliberately leaves the exclusion list alone (that's the
+  user's curation, not a setting with a default).
 - [ ] **Split the Vaal / Atziri's Temple items out of Currency.** In-game they have
   their own tab; poe.ninja files them under Currency. GGG's static data names them
   exactly — 15 of poe.ninja's 51 Currency items, highest-value first: Architect's Orb,
@@ -154,9 +157,10 @@ it already announced; hardcoded colours replaced with theme-aware ones.
   threshold, re-fetch just its 2–4 edges back-to-back (~26–52s) and report only if it
   survives. Opportunities are rare so the request cost is near zero, and it upgrades
   "these existed sometime in a 4-minute window" to "confirmed within 39 seconds".
-- [ ] **Installer should update in place rather than prompt, when an older version is
-  already installed.** Today `should_offer_install` only asks about a first install;
-  an existing older copy should be replaced without a question.
+- [x] ~~Installer should update in place rather than prompt~~ — `decide_install_action`
+  returns NONE / OFFER / UPDATE. A version marker beside the installed exe says what's
+  there; a *newer* installed version is never downgraded by an old exe run out of
+  Downloads, and declining the first-run offer doesn't suppress later updates.
 - [ ] Install flow still unverified end-to-end on a real frozen exe (the v0.2.4 crash
   was exactly this gap — worth a manual run before relying on it).
 - [ ] Windows 11 hides new tray icons in the overflow, so closing the window while
