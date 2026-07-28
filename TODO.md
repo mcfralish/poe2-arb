@@ -32,6 +32,13 @@ what is *not* done and why.
 window widths (Expedition and Gems hide behind arrows at ~1000px). Options
 offered were a smaller tab font or wrapping to two rows. No work started.
 
+**If the user hits the install error again:** it is now on disk regardless of
+whether the dialog was dismissed — `%LOCALAPPDATA%\poe2-arb\poe2-arb.log`,
+grep for `install to ... failed` or `Start Menu shortcut`. Added in v0.2.8
+after discovering that the `--windowed` exe has no console, so every log call
+in the frozen app had been going nowhere. That is also why the original error
+left no trace.
+
 **How to verify GUI work without a display:**
 `QT_QPA_PLATFORM=offscreen`, construct the widget, `app.processEvents()`,
 `widget.grab().save(path)`. This has caught three real bugs that the test
