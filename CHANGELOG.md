@@ -6,7 +6,7 @@ says what changed for you and, where it matters, why.
 Versions follow `MAJOR.MINOR.PATCH`. Until 1.0 the minor number moves for
 anything user-visible.
 
-## [Unreleased]
+## [0.2.8] — 2026-07-28
 
 ### Fixed
 - **The Market tab collapsed to about 50 items after every scan.** A scan only
@@ -19,8 +19,11 @@ anything user-visible.
   Versions before 0.2.7 didn't record which version they installed, so 0.2.7
   read an existing install as an empty folder and offered to install again every
   launch. An unmarked install is now recognised and quietly updated.
-- Install problems are written to the log as well as shown, so a message clicked
-  past isn't lost, and a failed Start Menu shortcut now says *why* it failed.
+- **The app now keeps a log file**, at `poe2-arb.log` next to your cached data.
+  The windowed exe has no console, so until now every internal log message was
+  thrown away — including the details of an install failure, which is exactly
+  the message you'd want after clicking past the dialog. A failed Start Menu
+  shortcut also now says *why* it failed rather than just reporting a number.
 
 ### Changed
 - **The window is narrower and no longer wastes space.** Market columns size to

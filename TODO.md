@@ -1,6 +1,6 @@
 # poe2-arb — TODO
 
-Merged list (yours + mine). Shipped version: **v0.2.7**.
+Merged list (yours + mine). Shipped version: **v0.2.8**.
 
 Per-release detail lives in [CHANGELOG.md](CHANGELOG.md); this file tracks
 what is *not* done and why.
@@ -9,7 +9,7 @@ what is *not* done and why.
 
 ## State of play — read this first
 
-**Shipped:** v0.2.7. Working tree clean, `main` pushed, tag pushed, release built.
+**Shipped:** v0.2.8. Working tree clean, `main` pushed, tag pushed, release built.
 
 **Where things stand on the two big threads:**
 
