@@ -6,6 +6,27 @@ says what changed for you and, where it matters, why.
 Versions follow `MAJOR.MINOR.PATCH`. Until 1.0 the minor number moves for
 anything user-visible.
 
+## [Unreleased]
+
+### Fixed
+- **The Market tab collapsed to about 50 items after every scan.** A scan only
+  looks up the Currency category, and the Market tab was being rebuilt from
+  that, so everything else vanished until you restarted the app — and excluded
+  items showed their internal ids ("soul-core-of-zalatl") instead of their
+  names. Market now always shows the full economy, with the scan's fresher
+  numbers layered on top.
+- **The install prompt kept appearing even when the app was already installed.**
+  Versions before 0.2.7 didn't record which version they installed, so 0.2.7
+  read an existing install as an empty folder and offered to install again every
+  launch. An unmarked install is now recognised and quietly updated.
+- Install problems are written to the log as well as shown, so a message clicked
+  past isn't lost, and a failed Start Menu shortcut now says *why* it failed.
+
+### Changed
+- **The window is narrower and no longer wastes space.** Market columns size to
+  their contents rather than stretching, and the tabs are tighter, so all 15 fit
+  at 900px wide instead of needing 1100px.
+
 ## [0.2.7] — 2026-07-27
 
 ### Changed

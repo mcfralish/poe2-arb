@@ -43,6 +43,21 @@ was predicted. Use it.
 
 ## Aesthetic / UX
 
+- [ ] **Items the exchange trades but poe.ninja doesn't price are missing from the
+  app.** Reported as "some items are missing" — e.g. the game shows five Zarokh's
+  Reliquary Keys, we show one. *Cause is external:* the universe is built entirely
+  from poe.ninja, and **126 of GGG's 753 tradeable items have no poe.ninja price**
+  (Runes 70, Waystones 16, Fragments 9, Essences 8, Expedition 6, Breach 5,
+  Verisium 4, Ritual 4, Currency 2, Abyss 1, Gems 1). *Proposed fix:* merge GGG's
+  `/api/trade2/data/static` catalogue into the universe so the Market lists
+  everything the game lists, with unpriced rows showing "—" instead of a value.
+  **Not a quick change** — `Item.value_divine` is a float that sorting, adaptive
+  units and `convert()` all assume is real, so unpriced items need a `priced` flag
+  and a guard at each of those points. Two further wrinkles: GGG's `sep` entries
+  are separators, not items; and GGG's groups don't map cleanly to in-game tabs for
+  items poe.ninja doesn't categorise (its `Vaal` group holds both Soul Cores and
+  Atziri's Temple), so unpriced items need a group→tab fallback.
+
 - [x] ~~Item icons from poe.ninja~~ — in Market, Book Edges, Quick Lookup and both
   pickers. Fetched from `web.poecdn.com` (GGG's static host, not the rate-limited
   trade API) on demand, cached to `<cache_dir>/icons` keyed on a hash of the CDN

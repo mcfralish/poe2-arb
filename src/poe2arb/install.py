@@ -115,6 +115,7 @@ def decide_install_action(
     already_installed: bool,
     user_declined: bool,
     running_version: str,
+    installed_exists: bool,
     installed: str | None,
 ) -> InstallAction:
     """Decide between staying quiet, offering an install, and updating in place.
@@ -122,17 +123,27 @@ def decide_install_action(
     Updating is deliberately silent: the user already chose to install this app
     once, so re-asking every release is a nag, not a question.
 
-    `installed` is the version found in the install directory, or None when
-    nothing is there. A *newer* installed version means this exe is an old copy
-    someone launched out of Downloads — replacing it would be a silent
-    downgrade, so that case does nothing at all.
+    Two separate facts, because conflating them was a real bug: `installed_exists`
+    says whether an exe is sitting in the install directory at all, and
+    `installed` says which version it claims to be. An exe with no version marker
+    is an install written by 0.2.6 or earlier — markers only started in 0.2.7 —
+    so it is by definition older than anything running this code, and it gets
+    updated rather than treated as "nothing installed". Reading a missing marker
+    as an empty install directory is what made the first-run prompt reappear on
+    every single launch for anyone who already had the app.
+
+    A *newer* installed version means this exe is an old copy someone launched
+    out of Downloads; replacing it would be a silent downgrade, so that does
+    nothing at all.
     """
     if not frozen or platform != "win32" or already_installed:
         return InstallAction.NONE
-    if installed is None:
+    if not installed_exists:
         # `user_declined` only silences the question, never an update: someone
         # who said no has nothing installed to update.
         return InstallAction.NONE if user_declined else InstallAction.OFFER
+    if installed is None:
+        return InstallAction.UPDATE  # pre-marker install, i.e. <= 0.2.6
     if is_newer(running_version, installed):
         return InstallAction.UPDATE
     return InstallAction.NONE
@@ -148,6 +159,7 @@ def should_offer_install(
         already_installed=already_installed,
         user_declined=user_declined,
         running_version="0",
+        installed_exists=False,
         installed=None,
     ) is InstallAction.OFFER
 
@@ -182,13 +194,23 @@ def create_start_menu_shortcut(target: Path, appdata: str | None = None) -> Path
         target, shortcut, "PoE2 currency arbitrage watch (analysis only)"
     )
     creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)  # no console flash
-    subprocess.run(
+    result = subprocess.run(
         ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-        check=True,
         capture_output=True,
+        text=True,
         timeout=30,
         creationflags=creation_flags,
     )
+    if result.returncode != 0:
+        # CalledProcessError's message is just the exit code, which says nothing
+        # about why PowerShell refused. Carry its stderr instead.
+        detail = (result.stderr or result.stdout or "").strip().splitlines()
+        raise OSError(
+            f"powershell exited {result.returncode}"
+            + (f": {detail[0]}" if detail else "")
+        )
+    if not shortcut.exists():
+        raise OSError("powershell reported success but wrote no shortcut")
     return shortcut
 
 
@@ -219,8 +241,8 @@ def perform_install(
     try:
         shortcut = create_start_menu_shortcut(target)
     except (subprocess.SubprocessError, OSError) as e:
-        error = str(e)
-        log.warning("could not create Start Menu shortcut", exc_info=True)
+        error = str(e) or e.__class__.__name__
+        log.warning("could not create Start Menu shortcut: %s", error, exc_info=True)
     return InstallResult(exe_path=target, shortcut_path=shortcut, shortcut_error=error)
 
 

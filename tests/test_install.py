@@ -131,9 +131,14 @@ class TestInstallAction:
     def decide(self, **over):
         base = dict(
             frozen=True, platform="win32", already_installed=False,
-            user_declined=False, running_version="0.2.7", installed=None,
+            user_declined=False, running_version="0.2.7",
+            installed_exists=False, installed=None,
         )
         base.update(over)
+        # Naming a version implies an exe is there to carry it.
+        if base.get("installed") is not None:
+            base.setdefault("installed_exists", True)
+            base["installed_exists"] = True
         return decide_install_action(**base)
 
     def test_first_run_offers(self):
@@ -159,9 +164,19 @@ class TestInstallAction:
         """Different question: they have it installed, this just refreshes it."""
         assert self.decide(user_declined=True, installed="0.2.5") is InstallAction.UPDATE
 
-    def test_unmarked_install_is_left_alone(self):
-        """No marker means an unknown version; overwriting on a guess is worse."""
-        assert self.decide(installed=None, user_declined=True) is InstallAction.NONE
+    def test_an_unmarked_install_is_updated_not_re_offered(self):
+        """Regression: every 0.2.6-or-earlier install had no version marker, so
+        reading a missing marker as "nothing installed" made the first-run
+        prompt reappear on every launch."""
+        assert self.decide(installed_exists=True, installed=None) is InstallAction.UPDATE
+
+    def test_an_unmarked_install_updates_even_after_declining(self):
+        assert self.decide(
+            installed_exists=True, installed=None, user_declined=True
+        ) is InstallAction.UPDATE
+
+    def test_no_exe_at_all_still_offers(self):
+        assert self.decide(installed_exists=False, installed=None) is InstallAction.OFFER
 
     def test_unparseable_installed_version_does_nothing(self):
         assert self.decide(installed="garbage") is InstallAction.NONE

@@ -235,3 +235,72 @@ class TestExclusionListDialog:
 
     def test_empty_list_is_not_an_error(self, app):
         assert ExclusionListDialog([], {}).selected_ids() == []
+
+
+class TestFullEconomyAfterAScan:
+    """Regression: the Market tab collapsed to ~51 items after every scan.
+
+    A scan fetches only the Currency category — that's all the graph trades —
+    so rendering Market from `result.overview` dropped the other ~590 items and
+    fell back to raw ids ("soul-core-of-zalatl") for the names it didn't have,
+    which is what made excluded items look encoded in the exclusion dialog.
+    """
+
+    def inputs(self, universe, overview):
+        from poe2arb.gui.main_window import MainWindow
+        from poe2arb.scan import ScanResult
+
+        class Stub:
+            _universe = universe
+
+        result = ScanResult("T", overview, [], {}, [])
+        return MainWindow._market_inputs(Stub(), result)
+
+    def currency_only(self):
+        return NinjaOverview(
+            league="T", fetched_at=NOW,
+            values={"divine": 1.0, "chaos": 0.11},
+            volumes={"divine": float("inf"), "chaos": 6.0},
+            names={"divine": "Divine Orb", "chaos": "Chaos Orb"},
+        )
+
+    def test_non_currency_items_survive(self, universe):
+        names, values, _ = self.inputs(universe, self.currency_only())
+        assert "tacatis-ire" in values
+        assert len(values) == len(universe.items)
+
+    def test_names_stay_human_readable(self, universe):
+        names, _, _ = self.inputs(universe, self.currency_only())
+        assert names["tacatis-ire"] == "Tacati's Ire"
+
+    def test_scan_values_win_where_it_has_them(self, universe):
+        _, values, _ = self.inputs(universe, self.currency_only())
+        assert values["chaos"] == 0.11  # scan's fresher number, not the universe's
+
+    def test_placeholder_volume_never_displaces_a_real_one(self, universe):
+        """The primary unit is recorded with infinite volume; that's not data."""
+        _, _, volumes = self.inputs(universe, self.currency_only())
+        assert volumes["divine"] == 10.0
+
+    def test_restored_history_does_not_reintroduce_raw_ids(self, universe):
+        """A history record names unknown items after their own id."""
+        restored = NinjaOverview(
+            league="T", fetched_at=NOW,
+            values={"tacatis-ire": 3.0},
+            volumes={"tacatis-ire": 1.0},
+            names={"tacatis-ire": "tacatis-ire"},
+        )
+        names, _, _ = self.inputs(universe, restored)
+        assert names["tacatis-ire"] == "Tacati's Ire"
+
+    def test_works_before_the_universe_has_loaded(self):
+        from poe2arb.gui.main_window import MainWindow
+        from poe2arb.scan import ScanResult
+
+        class Stub:
+            _universe = None
+
+        names, values, _ = MainWindow._market_inputs(
+            Stub(), ScanResult("T", self.currency_only(), [], {}, [])
+        )
+        assert values == {"divine": 1.0, "chaos": 0.11}

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -157,8 +158,11 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"poe2-arb {__version__} — PoE2 arbitrage watch (analysis only)")
-        self.resize(720, 460)
-        self.setMinimumSize(560, 360)
+        # Wide enough for the Market tab bar to show all 15 tabs without
+        # scrolling, and no wider — the columns size to their content, so extra
+        # width buys nothing but dead space.
+        self.resize(900, 620)
+        self.setMinimumSize(700, 400)
         self.setWindowIcon(make_app_icon())
 
         # Startup notices collected before the log widget exists.
@@ -778,13 +782,13 @@ class MainWindow(QMainWindow):
             )
         self.ops_table.setSortingEnabled(True)
 
-        overview = result.overview
         # Excluded items stay visible here now: the Excluded column is how you
         # add and remove them, which needs the prices you're judging in view.
+        market_names, market_values, market_volumes = self._market_inputs(result)
         self.market.render(
-            names=names,
-            values=overview.values,
-            volumes=overview.volumes,
+            names=market_names,
+            values=market_values,
+            volumes=market_volumes,
             in_graph=set(result.nodes),
         )
 
@@ -859,6 +863,37 @@ class MainWindow(QMainWindow):
                 "tab": self.tabs.currentIndex(),
             },
         )
+
+    def _market_inputs(
+        self, result: ScanResult
+    ) -> tuple[dict[str, str], dict[str, float], dict[str, float]]:
+        """The whole economy for the Market tab, with the scan's numbers on top.
+
+        A scan only fetches the Currency category — that's all the graph trades
+        — so rendering Market straight from `result.overview` showed 51 items
+        instead of 639 and fell back to raw ids for every name it didn't have.
+        The universe is the complete picture; the scan overrides only the part
+        it actually refreshed.
+        """
+        names: dict[str, str] = {}
+        values: dict[str, float] = {}
+        volumes: dict[str, float] = {}
+        if self._universe is not None:
+            names = self._universe.names()
+            values = self._universe.values()
+            volumes = {i.id: i.volume_divine for i in self._universe.items.values()}
+
+        overview = result.overview
+        # A history-restored result names unknown items after their own id, so
+        # letting those through would put "soul-core-of-zalatl" back on screen.
+        names.update({k: v for k, v in overview.names.items() if v and v != k})
+        values.update(overview.values)
+        for item_id, volume in overview.volumes.items():
+            # The primary unit is recorded with infinite volume as a placeholder.
+            # That's not a measurement, so it never displaces a real number.
+            if math.isfinite(volume) or item_id not in volumes:
+                volumes[item_id] = volume
+        return names, values, volumes
 
     @staticmethod
     def _set_row(table: QTableWidget, row: int, items: list[QTableWidgetItem]) -> None:

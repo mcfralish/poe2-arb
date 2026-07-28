@@ -137,6 +137,14 @@ class MarketPanel(QWidget):
         self.tabs = QTabBar()
         self.tabs.setExpanding(False)
         self.tabs.setDrawBase(False)
+        # Fifteen tabs at Qt's default padding want 1103px of window before the
+        # last one is reachable. Tightening the padding and dropping a point
+        # brings that to ~863px, which is close enough to the table's own width
+        # that the tab bar stops dictating how wide the window has to be.
+        self.tabs.setStyleSheet("QTabBar::tab { padding: 4px 6px; }")
+        font = self.tabs.font()
+        font.setPointSize(max(7, font.pointSize() - 1))
+        self.tabs.setFont(font)
         self.tabs.addTab(ALL_TAB)
         self.tabs.currentChanged.connect(self._tab_changed)
         layout.addWidget(self.tabs)
@@ -177,9 +185,13 @@ class MarketPanel(QWidget):
         table = QTableWidget(0, len(COLUMNS))
         table.setHorizontalHeaderLabels([c[0] for c in COLUMNS])
         header = table.horizontalHeader()
+        # Nothing stretches. Stretching the name column left a hand's width of
+        # dead space beside every item once the window was wide enough to show
+        # all the tabs; sizing to content means the column is exactly as wide as
+        # the longest name ("Zarokh's Reliquary Key: Against the Darkness") and
+        # the window can be much narrower.
         header.setStretchLastSection(False)
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for i in range(1, len(COLUMNS)):
+        for i in range(len(COLUMNS)):
             header.setSectionResizeMode(i, QHeaderView.ResizeMode.ResizeToContents)
         for i, (_, tip) in enumerate(COLUMNS):
             table.horizontalHeaderItem(i).setToolTip(tip)

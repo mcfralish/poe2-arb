@@ -14,6 +14,7 @@ from ..install import (
     InstallAction,
     decide_install_action,
     install_dir,
+    installed_exe_path,
     installed_version,
     is_frozen,
     is_installed,
@@ -38,6 +39,7 @@ def maybe_offer_install(cfg: Config, parent=None) -> bool:
         already_installed=is_installed(),
         user_declined=cfg.skip_install_prompt,
         running_version=__version__,
+        installed_exists=installed_exe_path().exists(),
         installed=installed_version(),
     )
     if action is InstallAction.NONE:
@@ -76,6 +78,9 @@ def maybe_offer_install(cfg: Config, parent=None) -> bool:
     try:
         result = perform_install(version=__version__)
     except OSError as e:
+        # Logged as well as shown: an install problem is easy to click past,
+        # and then the only record of what went wrong is gone.
+        log.error("install to %s failed: %s", install_dir(), e, exc_info=True)
         QMessageBox.warning(
             parent,
             "Install failed",
@@ -90,9 +95,11 @@ def maybe_offer_install(cfg: Config, parent=None) -> bool:
     if result.shortcut_path is not None:
         detail += "\n\nA Start Menu shortcut has been created."
     elif result.shortcut_error:
+        log.warning("Start Menu shortcut failed: %s", result.shortcut_error)
         detail += (
-            "\n\nThe app was copied, but the Start Menu shortcut could not be "
-            "created. You can pin the installed copy manually."
+            f"\n\nThe app itself installed fine. Only the Start Menu shortcut "
+            f"failed, so you'll need to pin the installed copy yourself:"
+            f"\n{result.shortcut_error}"
         )
     detail += "\n\nThe installed copy will start now."
 
