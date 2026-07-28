@@ -62,6 +62,7 @@ from .ui_state import (
 )
 from .updates import RELEASES_PAGE
 from .lookup import QuickLookup
+from .trends import TrendsTab
 from .worker import ScanWorker, UniverseWorker, UpdateCheckWorker, stop_thread
 
 
@@ -343,10 +344,15 @@ class MainWindow(QMainWindow):
             "Book Edges",
         )
 
+        self.trends = TrendsTab()
+        self.tabs.addTab(self.trends, "Trends")
+
         self.log_view = QPlainTextEdit()
         self.log_view.setReadOnly(True)
         self.log_view.setMaximumBlockCount(2000)
         self.tabs.addTab(self._log_tab(), "Log")
+
+        self.trends.set_history_path(self.cfg.history_path)
 
         self.setCentralWidget(central)
 
@@ -621,6 +627,7 @@ class MainWindow(QMainWindow):
             return
         self._known_currencies = names
         self._currency_values = values
+        self.trends.rename(names)
         if self._worker is not None and self._worker.isRunning():
             return  # a live scan is about to replace these tables anyway
         self._render_market_only(names, values, volumes)
@@ -732,6 +739,9 @@ class MainWindow(QMainWindow):
         self._currency_values = dict(result.overview.values)
         self._refresh_tables(result)
         self._note_longer_cycle(result, names)
+        # History has just gained a record; the tab is showing the one before it.
+        self.trends.reload()
+        self.trends.rename(names)
 
         hint = " — one more outside your search window" if result.longer_cycle else ""
         self.statusBar().showMessage(
