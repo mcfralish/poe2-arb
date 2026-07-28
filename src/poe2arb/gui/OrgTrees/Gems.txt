@@ -1,4 +1,4 @@
-Lineage Support Gems
+Gems
 │
 ├─ Ahn's Citadel
 │ ├─ Ahn's Citadel
@@ -23,6 +23,7 @@ Lineage Support Gems
 │ ├─ Doedre's Undoing
 │ ├─ Dominus' Grasp
 │ ├─ Einhar's Beastrite
+│ ├─ Eonyr's Thunder
 │ ├─ Esh's Prowess
 │ ├─ Esh's Radiance
 │ └─ Garukhan's Resolve
@@ -30,6 +31,7 @@ Lineage Support Gems
 ├─ Guatelitzi's…
 │ ├─ Guatelitzi's Ablation
 │ ├─ Hayoxi's Fulmination
+│ ├─ Helbrym's Hide
 │ ├─ Her Declaration
 │ ├─ Ixchel's Torment
 │ ├─ Kalisa's Crescendo

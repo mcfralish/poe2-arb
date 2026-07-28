@@ -35,12 +35,13 @@ it already announced; hardcoded colours replaced with theme-aware ones.
   in the same order as the columns.
 - [x] ~~Quick Lookup note should say live data is used when available~~ — it now names
   the source and, for live rates, how old the scan was.
-- [ ] **Org tree structures** from `src/poe2arb/gui/OrgTrees/*.txt`. Every file now
-  holds the app's *current* grouping, dumped by `tools/dump_org_trees.py` from the
-  same `by_category_and_tier` call the menus use — so edits start from what the app
-  really does. `Currency.txt` is hand-written and the tool refuses to touch it
-  without `--force`. Files are named for poe.ninja's own categories (Ritual,
-  Delirium, Breach, LineageSupportGems), not the in-game display names.
+- [ ] **Org tree structures** from `src/poe2arb/gui/OrgTrees/*.txt`. **Regenerated
+  2026-07-27 against the in-game tabs** — one file per Currency Exchange tab, named
+  after it (`AtzirisTemple.txt`), dumped by `tools/dump_org_trees.py` from the same
+  `by_tab` / `groups_in_tab` calls the Market tab uses. `LineageSupportGems.txt`
+  became `Gems.txt`; `Verisium.txt` is gone, folded into `Expedition.txt`. The tool
+  now removes files for tabs that no longer exist, and no file is protected —
+  everything, including Currency, is regenerated.
   Base category order, verbatim: Currency, Essences, Runes, Abyss, Omens, Soul
   Cores, Idols, Liquid Emotions, Catalysts, Fragments, Uncut Gems, Lineage Gems,
   Expedition, Verisium. **Waiting on the edited trees.**

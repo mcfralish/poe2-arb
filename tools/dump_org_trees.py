@@ -1,9 +1,13 @@
-"""Write each category's live menu structure out as an OrgTrees text file.
+"""Write each in-game tab's live structure out as an OrgTrees text file.
 
-The OrgTrees files are the hand-edited source of truth for how the pickers
-*should* group things. This dumps how they're grouped *now* — straight from
-`Universe.by_category_and_tier`, the same call the menus are built from — so
-editing starts from what the app actually does rather than from a blank page.
+The OrgTrees files are the hand-edited source of truth for how the app *should*
+group things. This dumps how it groups them *now* — straight from
+`Universe.by_tab` / `groups_in_tab`, the same calls the Market tab is built
+from — so editing starts from what the app actually does rather than a blank
+page.
+
+One file per in-game Currency Exchange tab, named after it: Atziri's Temple
+becomes AtzirisTemple.txt. Files for tabs that no longer exist are removed.
 
 Run it from the repo root:  python tools/dump_org_trees.py [--only Runes]
 
@@ -19,17 +23,19 @@ from pathlib import Path
 
 from poe2arb.client import NinjaClient
 from poe2arb.config import Config
-from poe2arb.market import CATEGORIES, category_label
+from poe2arb.market import INGAME_TABS
 
 TREES_DIR = Path(__file__).resolve().parent.parent / "src" / "poe2arb" / "gui" / "OrgTrees"
 
-# Files whose contents are hand-written and must not be clobbered.
-PROTECTED = {"Currency.txt"}
+
+def file_stem(tab: str) -> str:
+    """'Atziri\'s Temple' -> 'AtzirisTemple'. Tab names have spaces and quotes."""
+    return "".join(part.capitalize() for part in tab.replace("'", "").split())
 
 
-def render(category: str, groups: dict[str, list]) -> str:
-    """One category as a box-drawing tree, in the format already in use."""
-    lines = [category_label(category), "│"]
+def render(tab: str, groups: dict[str, list]) -> str:
+    """One tab as a box-drawing tree, in the format already in use."""
+    lines = [tab, "│"]
 
     # A single group means the menu skips the group level entirely and lists
     # items straight under the category — so the file should too.
@@ -55,11 +61,8 @@ def render(category: str, groups: dict[str, list]) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--only", action="append", help="category to dump (repeatable)")
+    parser.add_argument("--only", action="append", help="tab to dump (repeatable)")
     parser.add_argument("--league", help="default: current temp league")
-    parser.add_argument(
-        "--force", action="store_true", help="overwrite hand-written files too"
-    )
     args = parser.parse_args(argv)
 
     cfg = Config()
@@ -70,22 +73,29 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         client.close()
 
-    grouped = universe.by_category_and_tier()
-    wanted = args.only or list(CATEGORIES)
+    present = universe.by_tab()
+    wanted = args.only or [t for t in INGAME_TABS if t in present]
     TREES_DIR.mkdir(parents=True, exist_ok=True)
 
-    for category in wanted:
-        groups = grouped.get(category)
+    written = set()
+    for tab in wanted:
+        groups = universe.groups_in_tab(tab)
         if not groups:
-            print(f"  {category}: nothing priced in {league}, skipped")
+            print(f"  {tab}: nothing priced in {league}, skipped")
             continue
-        path = TREES_DIR / f"{category}.txt"
-        if path.name in PROTECTED and not args.force:
-            print(f"  {category}: hand-written, left alone (--force to overwrite)")
-            continue
-        path.write_text(render(category, groups), encoding="utf-8")
+        path = TREES_DIR / f"{file_stem(tab)}.txt"
+        path.write_text(render(tab, groups), encoding="utf-8")
+        written.add(path.name)
         count = sum(len(items) for items in groups.values())
-        print(f"  {category}: {len(groups)} group(s), {count} items -> {path.name}")
+        print(f"  {tab}: {len(groups)} group(s), {count} items -> {path.name}")
+
+    if not args.only:
+        # Tabs come and go as the game reorganises; a file for a tab that no
+        # longer exists is worse than no file, because it looks authoritative.
+        for stale in sorted(TREES_DIR.glob("*.txt")):
+            if stale.name not in written:
+                stale.unlink()
+                print(f"  removed {stale.name} (no longer a tab)")
     return 0
 
 

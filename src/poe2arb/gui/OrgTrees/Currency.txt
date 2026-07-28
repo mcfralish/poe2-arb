@@ -1,107 +1,43 @@
 Currency
 │
-├─ Transmutation
-│ ├─ Orb of Transmutation
-│ ├─ Greater Orb of Transmutation
-│ └─ Perfect Orb of Transmutation
-│
-├─ Augmentation
-│ ├─ Orb of Augmentation
-│ ├─ Greater Orb of Augmentation
-│ └─ Perfect Orb of Augmentation
-│
-├─ Regal
-│ ├─ Regal Orb
-│ ├─ Greater Regal Orb
-│ └─ Perfect Regal Orb
-│
-├─ Exalted
-│ ├─ Exalted Orb
-│ ├─ Greater Exalted Orb
-│ └─ Perfect Exalted Orb
-│
-├─ Chaos
-│ ├─ Chaos Orb
-│ ├─ Greater Chaos Orb
-│ └─ Perfect Chaos Orb
-│
-├─ Sockets
-│ ├─ Artificer's Orb
-│ ├─ Lesser Jeweller's Orb
-│ ├─ Greater Jeweller's Orb
-│ └─ Perfect Jeweller's Orb
-│
-├─ High End
-│ ├─ Orb of Alchemy
-│ ├─ Orb of Chance
-│ ├─ Orb of Annulment
-│ ├─ Divine Orb
-│ ├─ Fracturing Orb
-│ ├─ Hinekora's Lock
-│ └─ Mirror of Kalandra
-│
-├─ Corrupted
-│ ├─ Vaal Orb
-│ ├─ Vaal Siphoner
-│ ├─ Yugul's Orb of Sacrifice
-│ ├─ Yaomac's Orb of Sacrifice
-│ ├─ Kopec's Orb of Sacrifice
-│ ├─ Kamasa's Orb of Sacrifice
-│ ├─ Ancient Infuser
-│ ├─ Crystallised Corruption
-│ ├─ Vaal Cultivation Orb
-│ ├─ Core Destabiliser
-│ └─ Architect's Orb
-│
-├─ Quality
-│ ├─ Blacksmith's Whetstone
-│ ├─ Glassblower's Bauble
-│ ├─ Armourer's Scrap
-│ ├─ Gemcutter's Prism
+├─ Standard
 │ ├─ Arcanist's Etcher
-│ ├─ Vaal Blacksmith's Infuser
-│ ├─ Vaal Arcanist's Infuser
-│ ├─ Vaal Armourer's Infuser
-│ └─ Vaal Catalysing Infuser
-│
-├─ Shards
-│ ├─ Scroll of Wisdom
-│ ├─ Transmutation Shard
-│ ├─ Regal Shard
+│ ├─ Armourer's Scrap
+│ ├─ Artificer's Orb
 │ ├─ Artificer's Shard
-│ └─ Chance Shard
+│ ├─ Blacksmith's Whetstone
+│ ├─ Chance Shard
+│ ├─ Chaos Orb
+│ ├─ Cryptic Key
+│ ├─ Divine Orb
+│ ├─ Exalted Orb
+│ ├─ Fracturing Orb
+│ ├─ Gemcutter's Prism
+│ ├─ Glassblower's Bauble
+│ ├─ Hinekora's Lock
+│ ├─ Lesser Jeweller's Orb
+│ ├─ Mirror of Kalandra
+│ ├─ Orb of Alchemy
+│ ├─ Orb of Annulment
+│ ├─ Orb of Augmentation
+│ ├─ Orb of Chance
+│ ├─ Orb of Transmutation
+│ ├─ Regal Orb
+│ ├─ Scroll of Wisdom
+│ └─ Vaal Orb
 │
-└─ Misc.
-  ├─ Cryptic Key
-  └─ Orb of Extraction
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+├─ Greater
+│ ├─ Greater Chaos Orb
+│ ├─ Greater Exalted Orb
+│ ├─ Greater Jeweller's Orb
+│ ├─ Greater Orb of Augmentation
+│ ├─ Greater Orb of Transmutation
+│ └─ Greater Regal Orb
+│
+└─ Perfect
+  ├─ Perfect Chaos Orb
+  ├─ Perfect Exalted Orb
+  ├─ Perfect Jeweller's Orb
+  ├─ Perfect Orb of Augmentation
+  ├─ Perfect Orb of Transmutation
+  └─ Perfect Regal Orb

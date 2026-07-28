@@ -5,6 +5,7 @@ Runes
 │ ├─ Ancient Rune of Control
 │ ├─ Ancient Rune of Decay
 │ ├─ Ancient Rune of Detonation
+│ ├─ Ancient Rune of Discovery
 │ ├─ Ancient Rune of Dueling
 │ ├─ Ancient Rune of Prowess
 │ ├─ Ancient Rune of Retaliation
@@ -19,12 +20,13 @@ Runes
 │ ├─ Lesser Body Rune
 │ ├─ Lesser Desert Rune
 │ ├─ Lesser Glacial Rune
+│ ├─ Lesser Inspiration Rune
 │ ├─ Lesser Iron Rune
 │ ├─ Lesser Mind Rune
+│ ├─ Lesser Rebirth Rune
 │ ├─ Lesser Resolve Rune
 │ ├─ Lesser Robust Rune
 │ ├─ Lesser Storm Rune
-│ ├─ Lesser Vision Rune
 │ └─ Lesser Ward Rune
 │
 ├─ Standard: Adept Rune
@@ -35,6 +37,7 @@ Runes
 │ ├─ Body Rune
 │ ├─ Breath of Aldur
 │ ├─ Cadigan's Epiphany
+│ ├─ Charging Rune
 │ ├─ Countess Seske's Rune of Archery
 │ ├─ Courtesan Mannan's Rune of Cruelty
 │ ├─ Craiceann's Rune of Recovery
@@ -52,7 +55,6 @@ Runes
 │ ├─ Fenumus' Rune of Spinning
 │ ├─ Glacial Rune
 │ ├─ Hedgewitch Assandra's Rune of Wisdom
-│ ├─ Inspiration Rune
 │ ├─ Ire of Aldur
 │ └─ Iron Rune
 │
@@ -68,6 +70,7 @@ Runes
 │ ├─ Robust Rune
 │ ├─ Rune of Accumulation
 │ ├─ Rune of Acrobatics
+│ ├─ Rune of Confrontation
 │ ├─ Rune of Consistency
 │ ├─ Rune of Culmination
 │ ├─ Rune of Foundations
@@ -76,16 +79,16 @@ Runes
 │ ├─ Rune of the Blossom
 │ ├─ Rune of the Hunt
 │ ├─ Rune of the Prism
-│ ├─ Rune of Vital Flame
 │ ├─ Rune of Vitality
 │ ├─ Saqawal's Rune of Erosion
 │ ├─ Saqawal's Rune of Memory
 │ ├─ Saqawal's Rune of the Sky
 │ ├─ Serle's Triumph
-│ ├─ Storm Rune
-│ └─ Thane Girt's Rune of Wildness
+│ ├─ Stone Rune
+│ └─ Storm Rune
 │
-├─ Standard: Thane Grannell's…
+├─ Standard: Thane Girt's Rune…
+│ ├─ Thane Girt's Rune of Wildness
 │ ├─ Thane Grannell's Rune of Mastery
 │ ├─ Thane Leld's Rune of Spring
 │ ├─ Thane Myrk's Rune of Summer
@@ -99,7 +102,6 @@ Runes
 │ ├─ Warding Rune of Annihilation
 │ ├─ Warding Rune of Armature
 │ ├─ Warding Rune of Bodyguards
-│ ├─ Warding Rune of Courage
 │ ├─ Warding Rune of Desperation
 │ ├─ Warding Rune of Disintegration
 │ ├─ Warding Rune of Equinox

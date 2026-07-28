@@ -9,6 +9,7 @@ Idols
 │ ├─ Carved Tenacity
 │ ├─ Cat Idol
 │ ├─ Fox Idol
+│ ├─ Hawk Idol
 │ ├─ Idol of Alira
 │ ├─ Idol of Eeshta
 │ ├─ Idol of Egrin
@@ -16,10 +17,10 @@ Idols
 │ ├─ Idol of Greust
 │ ├─ Idol of Grold
 │ ├─ Idol of Kraityn
-│ └─ Idol of Maxarius
+│ ├─ Idol of Maxarius
+│ └─ Idol of Oak
 │
-└─ Idol of Oak
-  ├─ Idol of Oak
+└─ Idol of Ralakesh
   ├─ Idol of Ralakesh
   ├─ Idol of Silk
   ├─ Idol of Sirrius
@@ -30,8 +31,10 @@ Idols
   ├─ Idol of Yeena
   ├─ Owl Idol
   ├─ Ox Idol
+  ├─ Panther Idol
   ├─ Primate Idol
   ├─ Rabbit Idol
   ├─ Snake Idol
   ├─ Stag Idol
+  ├─ Stoat Idol
   └─ Wolf Idol

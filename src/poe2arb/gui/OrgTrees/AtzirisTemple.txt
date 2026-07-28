@@ -1,0 +1,20 @@
+Atziri's Temple
+│
+├─ Standard
+│ ├─ Ancient Infuser
+│ ├─ Architect's Orb
+│ ├─ Core Destabiliser
+│ ├─ Crystallised Corruption
+│ ├─ Kamasa's Orb of Sacrifice
+│ ├─ Kopec's Orb of Sacrifice
+│ ├─ Orb of Extraction
+│ ├─ Yaomac's Orb of Sacrifice
+│ └─ Yugul's Orb of Sacrifice
+│
+└─ Vaal
+  ├─ Vaal Arcanist's Infuser
+  ├─ Vaal Armourer's Infuser
+  ├─ Vaal Blacksmith's Infuser
+  ├─ Vaal Catalysing Infuser
+  ├─ Vaal Cultivation Orb
+  └─ Vaal Siphoner

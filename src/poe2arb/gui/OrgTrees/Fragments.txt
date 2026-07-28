@@ -12,12 +12,15 @@ Fragments
 ├─ Origin Core
 ├─ Origin Cradle
 ├─ Origin Spark
+├─ Raven's Reflection
 ├─ Ritualistic Reliquary Key
+├─ Shattered Triskelion
 ├─ Simulacrum
 ├─ Simulacrum Splinter
 ├─ Tangmazu's Reliquary Key
 ├─ The Arbiter's Reliquary Key
 ├─ The Trialmaster's Reliquary Key
+├─ The Triskelion Reforged
 ├─ Twilight Reliquary Key
 ├─ Victorious Fate
 ├─ Weathered Crisis Fragment

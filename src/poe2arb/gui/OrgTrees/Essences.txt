@@ -3,24 +3,23 @@ Essences
 ├─ Lesser
 │ ├─ Lesser Essence of Abrasion
 │ ├─ Lesser Essence of Alacrity
-│ ├─ Lesser Essence of Battle
-│ ├─ Lesser Essence of Command
 │ ├─ Lesser Essence of Electricity
 │ ├─ Lesser Essence of Enhancement
 │ ├─ Lesser Essence of Flames
 │ ├─ Lesser Essence of Grounding
 │ ├─ Lesser Essence of Haste
-│ ├─ Lesser Essence of Ice
 │ ├─ Lesser Essence of Insulation
 │ ├─ Lesser Essence of Opulence
 │ ├─ Lesser Essence of Ruin
+│ ├─ Lesser Essence of Seeking
 │ ├─ Lesser Essence of Sorcery
-│ ├─ Lesser Essence of the Body
-│ ├─ Lesser Essence of the Infinite
-│ └─ Lesser Essence of the Mind
+│ ├─ Lesser Essence of Thawing
+│ └─ Lesser Essence of the Infinite
 │
 ├─ Standard
 │ ├─ Essence of Abrasion
+│ ├─ Essence of Alacrity
+│ ├─ Essence of Battle
 │ ├─ Essence of Command
 │ ├─ Essence of Delirium
 │ ├─ Essence of Electricity
