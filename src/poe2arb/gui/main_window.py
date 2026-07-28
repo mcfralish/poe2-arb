@@ -43,9 +43,9 @@ from ..config import (
     save_config,
     user_config_path,
 )
-from ..format import fmt_depth, fmt_pct, fmt_rate, fmt_skew, fmt_value, fmt_volume
+from ..format import fmt_depth, fmt_pct, fmt_rate, fmt_skew
 from ..history import read_recent
-from ..market import ADAPTIVE_BASE, BASE_CURRENCY_CHOICES, Universe, base_abbreviation
+from ..market import BASE_CURRENCY_CHOICES, Universe
 from ..rate_limit import Severity, check_pacing, min_safe_interval, worst_severity
 from ..report import route_str
 from ..scan import ScanResult, result_from_history_record
@@ -63,6 +63,7 @@ from .ui_state import (
 )
 from .updates import RELEASES_PAGE
 from .lookup import QuickLookup
+from .market_panel import MarketPanel
 from .trends import TrendsTab
 from .worker import ScanWorker, UniverseWorker, UpdateCheckWorker, stop_thread
 
@@ -115,27 +116,6 @@ OPS_COLUMNS = [
         "When this opportunity first showed up in a scan. Ones that have "
         "survived several scans tend to be more real than ones that just blinked "
         "into existence.",
-    ),
-]
-
-MARKET_COLUMNS = [
-    Column("Currency", "The currency item, as poe.ninja names it."),
-    Column(
-        "Value (div)",
-        "What one of these is worth in Divine Orbs, according to poe.ninja's "
-        "market data. A Divine Orb itself is 1.0000.",
-    ),
-    Column(
-        "Daily volume (div)",
-        "How much of this currency changes hands in a day, measured in Divine "
-        "Orbs of value. Higher means a busier market, which means your trades "
-        "are more likely to actually fill.",
-    ),
-    Column(
-        "In graph",
-        "A tick means this currency was included in the arbitrage search. "
-        "Quiet or excluded currencies are left out — they produce tempting "
-        "numbers that never actually trade.",
     ),
 ]
 
@@ -331,17 +311,12 @@ class MainWindow(QMainWindow):
         self.ops_split.setStretchFactor(1, 2)
         self.tabs.addTab(self.ops_split, "Opportunities")
 
-        self.market_table = self._make_table(
-            MARKET_COLUMNS, 1, Qt.SortOrder.DescendingOrder  # most valuable first
-        )
-        self._update_market_header()
-        self.market_filter = QLineEdit()
-        self.tabs.addTab(
-            self._filtered(
-                self.market_table, self.market_filter, "Filter currencies…", (0,)
-            ),
-            "Market",
-        )
+        self.market = MarketPanel()
+        self.market.set_exclusions(self.cfg.exclude_currencies)
+        self.market.set_base_currency(self.cfg.base_currency)
+        self.market.set_icons(self.icons)
+        self.market.exclusions_changed.connect(self._exclusions_changed)
+        self.tabs.addTab(self.market, "Market")
 
         self.edges_table = self._make_table(
             EDGE_COLUMNS, 4, Qt.SortOrder.DescendingOrder  # deepest books first
@@ -474,7 +449,7 @@ class MainWindow(QMainWindow):
         if not chosen or chosen == self.cfg.base_currency:
             return
         self.cfg.base_currency = chosen
-        self._update_market_header()
+        self.market.set_base_currency(chosen)
         self._reapply_view_settings()
         self.lookup.set_base_currency(chosen)
         try:
@@ -482,23 +457,6 @@ class MainWindow(QMainWindow):
         except OSError:
             log.warning("could not save base currency", exc_info=True)
         self._log(f"showing prices in {self._universe.name(chosen) if self._universe else chosen}")
-
-    def _update_market_header(self) -> None:
-        """Market value column names whichever currency the user picked."""
-        item = self.market_table.horizontalHeaderItem(1)
-        if self.cfg.base_currency == ADAPTIVE_BASE:
-            item.setText("Value")
-            item.setToolTip(
-                "What one of these is worth, shown in whichever currency reads "
-                "most clearly for its price. Change the unit in the toolbar."
-            )
-            return
-        label = dict(BASE_CURRENCY_CHOICES).get(self.cfg.base_currency, "Divine Orb")
-        item.setText(f"Value ({base_abbreviation(self.cfg.base_currency)})")
-        item.setToolTip(
-            f"What one of these is worth in {label}s, according to poe.ninja's "
-            f"market data. Change the unit in the toolbar."
-        )
 
     def _build_tray(self) -> None:
         # No tray on some Linux desktops and under WSLg (no StatusNotifierWatcher).
@@ -621,6 +579,7 @@ class MainWindow(QMainWindow):
         """Full economy data arrived: feed the pickers and the lookup tool."""
         self._universe = universe
         self.icons.set_images(universe.images())
+        self.market.set_universe(universe)
         self.lookup.set_icons(self.icons)
         self.lookup.set_universe(universe)
         self.lookup.set_base_currency(self.cfg.base_currency)
@@ -820,49 +779,20 @@ class MainWindow(QMainWindow):
         self.ops_table.setSortingEnabled(True)
 
         overview = result.overview
-        # Excluded items stay cached and logged, they're just not shown — the
-        # point of excluding something is to stop having to look at it.
-        excluded = {c.strip().lower() for c in self.cfg.exclude_currencies}
-        rows = sorted(
-            (c for c in overview.values if c not in excluded),
-            key=lambda c: -overview.values[c],
+        # Excluded items stay visible here now: the Excluded column is how you
+        # add and remove them, which needs the prices you're judging in view.
+        self.market.render(
+            names=names,
+            values=overview.values,
+            volumes=overview.volumes,
+            in_graph=set(result.nodes),
         )
-        self.market_table.setSortingEnabled(False)
-        self.market_table.setRowCount(len(rows))
-        in_graph = set(result.nodes)
-        adaptive = self.cfg.base_currency == ADAPTIVE_BASE
-        base_rate = 1.0 if adaptive else (overview.values.get(self.cfg.base_currency) or 1.0)
-        for r, cid in enumerate(rows):
-            vol = overview.volumes.get(cid, 0.0)
-            divine_value = overview.values[cid]
-            if adaptive and self._universe is not None and self._universe.get(cid):
-                unit = self._universe.adaptive_unit(cid)
-                shown = self._universe.convert(cid, unit) or 0.0
-                text = f"{shown:,.2f} {base_abbreviation(unit)}"
-            else:
-                text = f"{divine_value / base_rate:,.2f}"
-            tick = TextItem("✔" if cid in in_graph else "")
-            tick.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            font = tick.font()
-            font.setPointSize(max(11, font.pointSize() + 3))
-            tick.setFont(font)
-            name_cell = TextItem(names.get(cid, cid))
-            name_cell.setIcon(self.icons.icon(cid))
-            self._set_row(
-                self.market_table,
-                r,
-                [
-                    name_cell,
-                    # Sorts on the divine value so mixed adaptive units still
-                    # order correctly.
-                    NumericItem(text, divine_value),
-                    NumericItem(fmt_volume(vol), vol),
-                    tick,
-                ],
-            )
-        self.market_table.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
-        self.market_table.setSortingEnabled(True)
 
+        # Book Edges still hides excluded items, unlike Market. An excluded item
+        # is never a graph node, so a fresh scan has no edges for it anyway;
+        # this only bites on stale data — re-rendering the previous scan after
+        # an exclusion, or restoring edges from history recorded before it.
+        excluded = {c.strip().lower() for c in self.cfg.exclude_currencies}
         edges = sorted(
             (
                 e for e in result.edges.values()
@@ -977,8 +907,23 @@ class MainWindow(QMainWindow):
             self.cfg = dlg.result_config()
             save_config(self.cfg, user_config_path())
             self._log(f"settings saved to {user_config_path()}")
-            self._update_market_header()
+            self.market.set_exclusions(self.cfg.exclude_currencies)
             self._reapply_view_settings()
+
+    def _exclusions_changed(self, excluded: list[str]) -> None:
+        """Persist a tick from the Market tab straight away.
+
+        No OK button stands between the click and the effect, so saving here is
+        what makes the change survive a restart. The next scan picks it up;
+        nothing is re-rendered, because the row the user just ticked should
+        stay exactly where it is under their cursor.
+        """
+        self.cfg.exclude_currencies = list(excluded)
+        try:
+            save_config(self.cfg, user_config_path())
+        except OSError:
+            log.warning("could not save exclusions", exc_info=True)
+        self._log(f"{len(excluded)} item(s) excluded from the search")
 
     def _reapply_view_settings(self) -> None:
         """Re-render tables after a settings change, without a fresh scan."""

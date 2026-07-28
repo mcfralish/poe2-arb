@@ -47,30 +47,26 @@ it already announced; hardcoded colours replaced with theme-aware ones.
 - [x] ~~Extend the selection marker to parent sections in the exclusion picker~~ —
   `_refresh_markers` now counts recursively, so a category keeps its `• N` when the
   selection lives in a group submenu beneath it.
-- [ ] **Market tab: tabs instead of one very long list**, with an **All** tab keeping
-  the full list.
-- [ ] **Market tab: real filters over the first and second level of categorisation.**
-  Build against the current `by_category_and_tier` grouping; the hand-written
-  OrgTrees replace it once they land.
-- [ ] **Exclusions become a Market column, not a Settings field.** Market should stop
-  hiding excluded items and instead show an "Excluded" checkbox column that adds and
-  removes them from the list in place. Then **remove the exclusion picker from
-  Settings**, and put a **"View exclusion list" button on the Market tab**.
-  Book Edges keeps hiding excluded items: an excluded item is never a graph node,
-  so a *fresh* scan has no edges for it anyway. The filter still earns its place
-  for stale data — excluding something re-renders the previous scan's result, and
-  history backload restores edges recorded before the exclusion.
-- [ ] **Rename the Market "Filter currencies…" box to "Search".**
+- [x] ~~Market tab: tabs instead of one very long list~~ — a QTabBar in the game's own
+  order, plus **All**. Empty tabs are omitted.
+- [x] ~~Market tab: real filters over the first and second level of categorisation~~ —
+  tab (first level) and a group dropdown (second level) compose with search; all
+  three narrow together. `Universe.groups_in_tab` merges the categories that share
+  a tab (Expedition + Verisium) while keeping their groups distinguishable.
+  Swap in the hand-written OrgTrees when they land.
+- [x] ~~Exclusions become a Market column, not a Settings field~~ — checkbox column,
+  excluded items stay visible, picker gone from Settings, `Excluded (n)` button opens
+  the full list with Clear all. Saves on tick, with no re-render so the row stays put
+  under the cursor. Book Edges still hides them: an excluded item is never a graph
+  node, so that filter only ever acts on stale data, which is when it should.
+- [x] ~~Rename the Market "Filter currencies…" box to "Search"~~.
 - [x] ~~Restore Defaults button in Settings~~ — resets the widgets only, so Cancel
   still undoes it, and deliberately leaves the exclusion list alone (that's the
   user's curation, not a setting with a default).
-- [ ] **Split the Vaal / Atziri's Temple items out of Currency.** In-game they have
-  their own tab; poe.ninja files them under Currency. GGG's static data names them
-  exactly — 15 of poe.ninja's 51 Currency items, highest-value first: Architect's Orb,
-  Vaal Catalysing Infuser, Core Destabiliser, Crystallised Corruption, Vaal
-  Cultivation Orb, Vaal Armourer's Infuser, Orb of Extraction, Vaal Blacksmith's
-  Infuser, Ancient Infuser, and the Kamasa's / Kopec's / Yaomac's / Yugul's Orbs of
-  Sacrifice, Vaal Siphoner, Vaal Arcanist's Infuser. Currency.txt changes as a result.
+- [x] ~~Split the Vaal / Atziri's Temple items out of Currency~~ — `VAAL_CURRENCY_IDS`
+  in `market.py`, taken from GGG's static data rather than guessed from names
+  ("Orb of Extraction" and "Ancient Infuser" carry no Vaal wording but belong;
+  Vaal Orb itself does not). `Currency.txt` still needs regenerating.
 - [ ] Large values still read oddly in fixed non-adaptive units (a Mirror in `ex`).
   Adaptive mode covers the default case; decide whether fixed modes need scaling too.
 - [x] ~~Window position not remembered~~ — geometry, splitter and active tab are kept

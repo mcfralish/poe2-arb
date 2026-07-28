@@ -8,6 +8,22 @@ anything user-visible.
 
 ## [Unreleased]
 
+### Changed
+- **The Market tab now follows the in-game Currency Exchange.** Tabs in the
+  game's own order — Currency, Essences, Delirium, Breach, Abyss, Atziri's
+  Temple, Fragments, Runes, Ritual, Soul Cores, Idols, Uncut Gems, Expedition,
+  Gems — plus an **All** tab for the full list. A second dropdown narrows to a
+  group within the tab, and the search box (renamed from "Filter currencies")
+  works on top of both.
+- **Excluding an item moved out of Settings and into the Market tab.** Excluded
+  items are no longer hidden from Market; they stay visible with a tick in a new
+  **Excluded** column, and that tick is how you add and remove them — so you can
+  see an item's price and volume while deciding. An **Excluded (n)** button
+  shows the whole list in one place, with a Clear all. Changes save immediately.
+- Atziri's Temple items (Architect's Orb, the Infusers, the Orbs of Sacrifice
+  and the rest) now sit on their own tab rather than being buried in Currency,
+  matching the game. Vaal Orb itself stays in Currency, as it does in game.
+
 ### Added
 - **Item icons everywhere** — Market, Book Edges, Quick Lookup and both item
   pickers. They're fetched from the game's own asset CDN as items are shown and

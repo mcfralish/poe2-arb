@@ -18,8 +18,6 @@ from PySide6.QtWidgets import (
 )
 
 from ..config import Config
-from ..market import BASE_CURRENCY_CHOICES
-from .item_picker import ExclusionPicker
 from .theme import error_color, muted_color, warning_color
 from ..rate_limit import (
     Severity,
@@ -93,14 +91,6 @@ class SettingsDialog(QDialog):
             "markets show tempting prices that never actually fill."
         )
         form.addRow("Liquidity floor (daily volume)", self.liquidity)
-
-        self.exclusions = ExclusionPicker(cfg.exclude_currencies, self._universe)
-        self.exclusions.setToolTip(
-            "Tick anything to keep out of the search, and out of the\n"
-            "Market and Book edges tabs. Grouped by category — hover a\n"
-            "category to see what's in it."
-        )
-        form.addRow("Exclude currencies", self.exclusions)
 
         self.max_value = self._dspin(
             cfg.max_currency_value_divines, 0.0, 1_000_000.0, 5.0, " div", decimals=0
@@ -279,7 +269,6 @@ class SettingsDialog(QDialog):
     def result_config(self) -> Config:
         return replace(
             self._cfg,
-            exclude_currencies=self.exclusions.selected_ids(),
             max_currency_value_divines=self.max_value.value(),
             rate_limit_safety_fraction=self.safety.value() / 100.0,
             league=self.league.text().strip() or None,

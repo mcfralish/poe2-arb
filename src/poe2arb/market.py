@@ -79,6 +79,8 @@ def category_label(category: str) -> str:
     return _DISPLAY_NAMES.get(category, category)
 
 
+
+
 # Tier words that appear in item names, ranked weakest to strongest.
 #
 # Ranks were checked against live median values rather than guessed, because
@@ -213,6 +215,87 @@ class Item:
         return tier_for(self.name)
 
 
+# ---------------------------------------------------------------------------
+# In-game Currency Exchange tabs
+#
+# The UI follows the game, not poe.ninja and not GGG's trade API. All three
+# disagree, and the API is the worst of the three for display: it merges Soul
+# Cores with Atziri's Temple and Idols with Ritual, both of which the game keeps
+# apart. poe.ninja is closer but still differs in three places, handled below.
+# ---------------------------------------------------------------------------
+
+ATZIRIS_TEMPLE = "Atziri's Temple"
+
+# Tab order exactly as the game lists it.
+INGAME_TABS: tuple[str, ...] = (
+    "Currency",
+    "Essences",
+    "Delirium",
+    "Breach",
+    "Abyss",
+    ATZIRIS_TEMPLE,
+    "Fragments",
+    "Runes",
+    "Ritual",
+    "Soul Cores",
+    "Idols",
+    "Uncut Gems",
+    "Expedition",
+    "Gems",
+)
+
+ALL_TAB = "All"
+
+# poe.ninja category -> in-game tab. Verisium has no tab of its own (the game
+# files it under Expedition) and LineageSupportGems is simply called Gems.
+_CATEGORY_TO_TAB: dict[str, str] = {
+    "Currency": "Currency",
+    "Essences": "Essences",
+    "Delirium": "Delirium",
+    "Breach": "Breach",
+    "Abyss": "Abyss",
+    "Fragments": "Fragments",
+    "Runes": "Runes",
+    "Ritual": "Ritual",
+    "SoulCores": "Soul Cores",
+    "Idols": "Idols",
+    "UncutGems": "Uncut Gems",
+    "Expedition": "Expedition",
+    "Verisium": "Expedition",
+    "LineageSupportGems": "Gems",
+}
+
+# The one split poe.ninja doesn't express: these live in its Currency category
+# but have their own tab in game. Taken from GGG's own static trade data
+# (`/api/trade2/data/static`, group "Vaal") on 2026-07-27 rather than guessed
+# from names — "Orb of Extraction" and "Ancient Infuser" carry no Vaal wording
+# but belong here, and Vaal Orb itself does *not*.
+VAAL_CURRENCY_IDS: frozenset[str] = frozenset({
+    "ancient-infuser",
+    "architects-orb",
+    "core-destabiliser",
+    "crystallised-corruption",
+    "kamasas-orb-of-sacrifice",
+    "kopecs-orb-of-sacrifice",
+    "orb-of-extraction",
+    "vaal-arcanists-infuser",
+    "vaal-armourers-infuser",
+    "vaal-blacksmiths-infuser",
+    "vaal-catalysing-infuser",
+    "vaal-cultivation-orb",
+    "vaal-siphoner",
+    "yaomacs-orb-of-sacrifice",
+    "yuguls-orb-of-sacrifice",
+})
+
+
+def ingame_tab(item: Item) -> str:
+    """Which Currency Exchange tab the game shows this item on."""
+    if item.id in VAAL_CURRENCY_IDS:
+        return ATZIRIS_TEMPLE
+    return _CATEGORY_TO_TAB.get(item.category, item.category)
+
+
 @dataclass(frozen=True)
 class Universe:
     """Every priced item in the league, keyed by id."""
@@ -291,6 +374,48 @@ class Universe:
                     final[sub_label] = piece
             grouped[category] = final
         return grouped
+
+    def by_tab(self) -> dict[str, list[Item]]:
+        """Items grouped by in-game tab, in the game's own tab order.
+
+        Only tabs that actually hold something are returned — an empty tab is
+        a dead end for the user to click on.
+        """
+        grouped: dict[str, list[Item]] = {}
+        for item in self.items.values():
+            grouped.setdefault(ingame_tab(item), []).append(item)
+        for items in grouped.values():
+            items.sort(key=lambda i: natural_key(i.name))
+        order = {tab: i for i, tab in enumerate(INGAME_TABS)}
+        return dict(
+            sorted(grouped.items(), key=lambda kv: (order.get(kv[0], len(order)), kv[0]))
+        )
+
+    def groups_in_tab(self, tab: str) -> dict[str, list[Item]]:
+        """Second-level grouping within one tab, reusing the tier/group logic.
+
+        Expedition holds two poe.ninja categories (its own plus Verisium), so
+        the split is done per category and merged — otherwise Verisium's
+        Alloys/Ores grouping would be lost the moment it shares a tab.
+        """
+        wanted = [i for i in self.items.values() if ingame_tab(i) == tab]
+        if not wanted:
+            return {}
+        by_category = Universe(
+            league=self.league, fetched_at=self.fetched_at,
+            items={i.id: i for i in wanted},
+        ).by_category_and_tier()
+        merged: dict[str, list[Item]] = {}
+        multi = len(by_category) > 1
+        for category, groups in by_category.items():
+            for label, items in groups.items():
+                # Disambiguate only when a tab really does hold more than one
+                # category; otherwise every group would gain a useless prefix.
+                key = f"{category_label(category)}: {label}" if multi else label
+                merged.setdefault(key, []).extend(items)
+        for items in merged.values():
+            items.sort(key=lambda i: natural_key(i.name))
+        return merged
 
     def adaptive_unit(self, item_id: str) -> str:
         """Pick the unit that shows this item's price most legibly.
