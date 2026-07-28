@@ -3,7 +3,7 @@
 Edge A->B answers: "if I pay 1 A into the order book right now, how many B do I
 actually receive?" — priced by walking the book to a configurable fill depth
 (marginal rate, not top-of-book, which is bait-listing territory), then applying
-a per-hop fee haircut.
+a per-hop safety margin (see Config.safety_margin_pct — not a fee).
 
 Detection runs two ways and cross-checks:
   1. Bellman-Ford on -log(rate) weights: a negative cycle == a profitable loop.
@@ -24,8 +24,8 @@ from .client import Offer
 class Edge:
     src: str
     dst: str
-    rate: float       # effective dst per 1 src, after fee haircut
-    raw_rate: float   # marginal book rate before haircut
+    rate: float       # dst per 1 src after the safety margin
+    raw_rate: float   # marginal book rate, before the margin
     depth_filled_divines: float  # book depth actually available at <= raw_rate
     # When the order book behind this edge was fetched. None means unknown
     # (synthetic edges in tests, or history written before this was recorded).
@@ -92,7 +92,7 @@ def build_graph(
     values: dict[str, float],
     nodes: list[str],
     *,
-    fee_pct: float,
+    margin_pct: float,
     depth_divines: float,
     bait_filter_ratio: float,
     min_accounts: int = 1,
@@ -104,7 +104,7 @@ def build_graph(
         if o.pay_currency in node_set and o.get_currency in node_set:
             by_pair.setdefault((o.pay_currency, o.get_currency), []).append(o)
 
-    haircut = 1.0 - fee_pct / 100.0
+    haircut = 1.0 - margin_pct / 100.0
     edges: dict[tuple[str, str], Edge] = {}
     for (src, dst), pair_offers in by_pair.items():
         src_v, dst_v = values.get(src), values.get(dst)
@@ -185,7 +185,7 @@ def brute_force_cycles(
     """Enumerate all simple 2..max_len cycles; report those above the threshold.
 
     2-cycles are included deliberately: a "crossed book" on a single pair
-    (A->B->A multiplying above 1 despite the fee) is the most common real
+    (A->B->A multiplying above 1 despite the margin) is the most common real
     arbitrage, and Bellman-Ford would flag it anyway.
     """
     nodes = sorted({n for e in edges for n in e})

@@ -71,7 +71,17 @@ class Config:
 
     # Signal filtering
     profit_threshold_pct: float = 3.0   # min net profit per loop to report
-    fee_pct: float = 1.5                # haircut per hop (gold fee + fill slippage)
+    # Conservatism margin taken off every hop. **Not** a fee, despite what the
+    # old `fee_pct` name claimed. The two things that name pointed at both fail:
+    # the exchange fee is gold-denominated, and gold isn't tradeable or priced in
+    # divines, so charging it as a percentage of divine value is a category
+    # error; and slippage is already captured by walking the book to
+    # depth_divines, so charging it again double-counts.
+    # What's left is genuine but different: fill risk. The offer you found may
+    # be gone by the time you get there, and a partial fill strands you holding
+    # the wrong currency mid-loop. That's worth a margin if you want one, so the
+    # knob stays — but it defaults to nothing rather than to a guess.
+    safety_margin_pct: float = 0.0
     liquidity_floor_divines: float = 20.0  # min daily volume (poe.ninja volumePrimaryValue)
     max_currencies: int = 10            # top-N by volume included in the graph
     max_cycle_len: int = 4              # 3 or 4
@@ -135,12 +145,28 @@ def load_config(path: Path | None = None) -> Config:
         path = candidate
     with open(path, "rb") as f:
         data = tomllib.load(f)
+    _rename_legacy_keys(data)
     known = {f.name for f in fields(Config)}
     unknown = set(data) - known
     if unknown:
         raise ValueError(f"unknown config keys in {path}: {sorted(unknown)}")
     _unpin_legacy_paths(data)
     return Config(**data)
+
+
+# Old key -> current key. Unknown keys are a hard error (they're usually typos),
+# so a rename has to be translated here or every existing config stops loading.
+LEGACY_KEYS = {"fee_pct": "safety_margin_pct"}
+
+
+def _rename_legacy_keys(data: dict) -> None:
+    for old, new in LEGACY_KEYS.items():
+        if old not in data:
+            continue
+        value = data.pop(old)
+        # An explicitly-set new key wins; the old one is just dropped.
+        data.setdefault(new, value)
+        log.info("config key %r has been renamed to %r", old, new)
 
 
 def _unpin_legacy_paths(data: dict) -> None:

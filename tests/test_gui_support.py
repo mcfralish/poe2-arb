@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from poe2arb.config import Config, load_config, save_config
 from poe2arb.gui.updates import is_newer, parse_version
 
@@ -46,12 +48,45 @@ class TestVersions:
         assert result.stdout.strip() == "CLEAN"
 
 
+class TestLegacyKeyRename:
+    """`load_config` rejects unknown keys, so a rename must be translated."""
+
+    def test_old_fee_pct_still_loads(self, tmp_path: Path):
+        path = tmp_path / "poe2arb.toml"
+        path.write_text("fee_pct = 1.5\n", encoding="utf-8")
+        assert load_config(path).safety_margin_pct == 1.5
+
+    def test_old_key_does_not_survive_a_resave(self, tmp_path: Path):
+        path = tmp_path / "poe2arb.toml"
+        path.write_text("fee_pct = 2.5\n", encoding="utf-8")
+        cfg = load_config(path)
+        save_config(cfg, path)
+        text = path.read_text(encoding="utf-8")
+        assert "fee_pct" not in text
+        assert "safety_margin_pct = 2.5" in text
+
+    def test_new_key_wins_when_both_are_present(self, tmp_path: Path):
+        path = tmp_path / "poe2arb.toml"
+        path.write_text("fee_pct = 1.5\nsafety_margin_pct = 0.25\n", encoding="utf-8")
+        assert load_config(path).safety_margin_pct == 0.25
+
+    def test_the_default_is_now_nothing(self):
+        """Neither justification for the old 1.5% survives — see config.py."""
+        assert Config().safety_margin_pct == 0.0
+
+    def test_a_genuine_typo_is_still_an_error(self, tmp_path: Path):
+        path = tmp_path / "poe2arb.toml"
+        path.write_text("fee_pcnt = 1.5\n", encoding="utf-8")
+        with pytest.raises(ValueError, match="unknown config keys"):
+            load_config(path)
+
+
 class TestConfigRoundTrip:
     def test_save_then_load_preserves_values(self, tmp_path: Path):
         cfg = Config(
             league="Test League",
             profit_threshold_pct=4.5,
-            fee_pct=2.0,
+            safety_margin_pct=2.0,
             watch_interval_minutes=15,
             alert_sound=False,
             max_currencies=8,
@@ -62,7 +97,7 @@ class TestConfigRoundTrip:
         loaded = load_config(path)
         assert loaded.league == "Test League"
         assert loaded.profit_threshold_pct == 4.5
-        assert loaded.fee_pct == 2.0
+        assert loaded.safety_margin_pct == 2.0
         assert loaded.watch_interval_minutes == 15
         assert loaded.alert_sound is False
         assert loaded.max_currencies == 8

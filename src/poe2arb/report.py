@@ -88,7 +88,7 @@ def print_rates(
     table.add_column("Direction")
     table.add_column("Pair")
     table.add_column("Book rate", justify="right")
-    table.add_column("Effective (after fee)", justify="right")
+    table.add_column("After margin", justify="right")
     table.add_column("Depth (div)", justify="right")
     for e in sell:
         table.add_row(

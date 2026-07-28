@@ -6,7 +6,22 @@ says what changed for you and, where it matters, why.
 Versions follow `MAJOR.MINOR.PATCH`. Until 1.0 the minor number moves for
 anything user-visible.
 
-## [Unreleased]
+## [0.2.6] — 2026-07-27
+
+### Changed
+- **The per-hop "fee" is gone, and profits will read higher as a result.** It was
+  charging 1.5% per hop for two things that don't hold up: the Currency Exchange
+  fee is paid in gold, which isn't tradeable or priced in Divine Orbs, so taking
+  it as a percentage of divine value was a category error; and slippage was
+  already handled by pricing each edge at the depth you set, so charging it again
+  double-counted. A 3-hop loop was losing about 4.4% to this.
+  The setting survives as **Safety margin per hop**, now defaulting to 0, for the
+  cost that *is* real: the offer may be gone when you get there, and a partial
+  fill can strand you mid-loop. Existing configs keep working — `fee_pct` is read
+  as `safety_margin_pct`. Expect to see smaller opportunities that were previously
+  being suppressed.
+- The **After fee** column is now **After margin**, and matches the book rate
+  exactly while the margin is 0.
 
 ### Added
 - **Spread column on Opportunities.** A scan checks one currency at a time,

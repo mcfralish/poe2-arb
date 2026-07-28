@@ -84,8 +84,13 @@ are exactly where genuinely hostile files land.
    the edge rate — the rate you could actually fill at that size. Books too thin to
    fill the depth are dropped entirely (thin markets produce phantom arbs that never
    fill).
-4. Apply a per-hop haircut of `fee_pct` (the in-game Currency Exchange gold fee plus
-   fill slippage).
+4. Apply a per-hop haircut of `safety_margin_pct`, which **defaults to 0**. This is
+   not a fee: the Currency Exchange charges gold, which isn't tradeable or priced in
+   divines, so taking it as a percentage of divine value would be a category error;
+   and slippage is already handled by step 3, so charging it here would double-count.
+   What the knob is actually for is fill risk — the offer may be gone when you get
+   there, and a partial fill strands you mid-loop. Set it if you want that caution;
+   at 0 the app reports what the books say.
 
 **Finding cycles:** the currencies form a directed graph with those effective rates.
 A loop A→B→…→A whose rates multiply to more than 1 is free money (in expectation).
@@ -100,8 +105,7 @@ Two independent detectors cross-check each other:
   found nothing, the tool tells you the profit lives in a longer loop or below your
   threshold.
 
-Surviving loops are filtered by `profit_threshold_pct` (default 3%, clearing fees and
-slippage) and ranked. Depth shown per loop is the bottleneck edge — the most value the
+Surviving loops are filtered by `profit_threshold_pct` (default 3%) and ranked. Depth shown per loop is the bottleneck edge — the most value the
 loop supports at the quoted rates.
 
 ## Install from source
@@ -224,7 +228,7 @@ python -m pytest
 ```
 
 Tests cover the cycle math on synthetic graphs with planted cycles (including one whose
-gross profit sits just below the fee haircut and must not be reported) and the parsers
+gross profit sits just below the safety margin and must not be reported) and the parsers
 against saved real API responses in `tests/fixtures/`.
 
 ## Legal

@@ -44,7 +44,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--config", type=Path, help="TOML config file (default: ./poe2arb.toml)")
     p.add_argument("--league", help="league name (default: auto-detect current league)")
     p.add_argument("--threshold", type=float, help="min profit %% per loop to report")
-    p.add_argument("--fee", type=float, help="fee/slippage haircut %% per hop")
+    # --fee kept as an alias: it was the documented flag before the rename.
+    p.add_argument("--margin", "--fee", type=float, dest="margin",
+                   help="safety margin %% per hop (fill risk); default 0")
     p.add_argument("--max-currencies", type=int, help="graph size cap (top-N by volume)")
     p.add_argument("--max-cycle-len", type=int, choices=(3, 4), help="max loop length")
     p.add_argument("--cache-dir", type=Path)
@@ -64,8 +66,8 @@ def apply_overrides(cfg: Config, args: argparse.Namespace) -> Config:
         cfg.league = args.league
     if args.threshold is not None:
         cfg.profit_threshold_pct = args.threshold
-    if args.fee is not None:
-        cfg.fee_pct = args.fee
+    if args.margin is not None:
+        cfg.safety_margin_pct = args.margin
     if args.max_currencies is not None:
         cfg.max_currencies = args.max_currencies
     if args.max_cycle_len is not None:

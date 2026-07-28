@@ -11,7 +11,10 @@ base_currency = "divine"
 
 # --- signal filtering ---
 profit_threshold_pct = 3.0        # min net profit per loop to report
-fee_pct = 1.5                     # haircut per hop: exchange gold fee + fill slippage
+safety_margin_pct = 0.0           # haircut per hop for fill risk. NOT a fee: the
+                                  # exchange charges gold, which isn't priced in
+                                  # divines, and slippage is already handled by
+                                  # depth_divines. 0 = report what the books say.
 liquidity_floor_divines = 20.0    # ignore currencies under this daily volume (poe.ninja)
 max_currencies = 10               # graph size cap, top-N by volume (main request-budget knob)
 max_cycle_len = 4                 # 3 or 4 (2-cycles are always scanned)

@@ -19,9 +19,9 @@ from poe2arb.graph import (
 )
 
 
-def make_edges(rates: dict[tuple[str, str], float], fee_pct: float = 0.0) -> dict:
+def make_edges(rates: dict[tuple[str, str], float], margin_pct: float = 0.0) -> dict:
     """Synthetic edge dict from plain rates, mimicking build_graph's haircut."""
-    haircut = 1.0 - fee_pct / 100.0
+    haircut = 1.0 - margin_pct / 100.0
     return {
         (a, b): Edge(src=a, dst=b, rate=r * haircut, raw_rate=r, depth_filled_divines=10.0)
         for (a, b), r in rates.items()
@@ -51,15 +51,15 @@ class TestPlantedCycles:
         assert three[0].profit_pct == pytest.approx(10.0, abs=0.01)
         assert bellman_ford_has_negative_cycle(edges)
 
-    def test_profit_below_fee_haircut_not_reported(self):
-        # Gross +4.04% on the 3-loop (2% on each of two edges), but a 1.5%/hop fee
+    def test_profit_below_the_safety_margin_not_reported(self):
+        # Gross +4.04% on the 3-loop (2% on each of two edges), but a 1.5%/hop margin
         # across 3 hops (~4.4%) eats it: net = 1.0404 * 0.985^3 ≈ 0.994 -> must NOT
         # be reported at any threshold. Spread across two edges so no single pair's
         # book is crossed (a crossed pair would be a legitimate 2-cycle arb).
         rates = consistent_rates({"div": 1.0, "ex": 1 / 400, "chaos": 1 / 9})
         rates[("ex", "chaos")] *= 1.02
         rates[("chaos", "div")] *= 1.02
-        edges = make_edges(rates, fee_pct=1.5)
+        edges = make_edges(rates, margin_pct=1.5)
         ops = brute_force_cycles(edges, max_len=3, min_profit_pct=0.0)
         assert ops == []
         assert not bellman_ford_has_negative_cycle(edges)
@@ -69,7 +69,7 @@ class TestPlantedCycles:
         # the classic buy-low/sell-high arb on a single pair.
         rates = consistent_rates({"div": 1.0, "ex": 1 / 400, "chaos": 1 / 9})
         rates[("chaos", "div")] *= 1.08  # 0.985^2 * 1.08 ≈ 1.048
-        edges = make_edges(rates, fee_pct=1.5)
+        edges = make_edges(rates, margin_pct=1.5)
         ops = brute_force_cycles(edges, max_len=3, min_profit_pct=3.0)
         assert any(set(op.cycle) == {"chaos", "div"} for op in ops)
         assert bellman_ford_has_negative_cycle(edges)
@@ -267,7 +267,7 @@ class TestEffectiveRate:
 
 
 class TestBuildGraph:
-    def test_build_graph_applies_haircut_and_drops_thin_pairs(self):
+    def test_build_graph_applies_margin_and_drops_thin_pairs(self):
         values = {"div": 1.0, "chaos": 1 / 9}
         offers = [
             Offer("div", 1.0, "chaos", 9.0, stock=90.0),   # liquid: 10 div depth
@@ -275,7 +275,7 @@ class TestBuildGraph:
         ]
         edges = build_graph(
             offers, values, ["div", "chaos"],
-            fee_pct=2.0, depth_divines=5.0, bait_filter_ratio=1.5,
+            margin_pct=2.0, depth_divines=5.0, bait_filter_ratio=1.5,
         )
         assert ("div", "chaos") in edges
         assert ("chaos", "div") not in edges

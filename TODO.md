@@ -1,6 +1,6 @@
 # poe2-arb — TODO
 
-Merged list (yours + mine). Shipped version: **v0.2.5**.
+Merged list (yours + mine). Shipped version: **v0.2.6**.
 
 **Landed in v0.2.5** — Bellman-Ford now names the loop it found instead of
 just asserting one exists; Quick Lookup prefers live order-book rates and says
@@ -104,14 +104,12 @@ it already announced; hardcoded colours replaced with theme-aware ones.
   older than that, a loop reappearing is genuinely news.
 - [ ] `depth_divines` is one global number; 5 divines means something different for
   chaos than for mirrors.
-- [ ] **Fee model is a flat per-hop percentage and both its justifications fail.**
-  Gold isn't divine-denominated, so charging it as a percentage of divine value is a
-  category error; slippage is already captured by the depth walk, so charging it again
-  double-counts. *Recommendation:* default to 0, keep the knob for fill risk (the offer
-  may be gone, partial fills strand you mid-loop), rename `fee_pct` →
-  `safety_margin_pct` with a back-compat alias — `load_config` raises on unknown keys,
-  so a bare rename breaks every existing config. Note this raises reported profit by
-  ~4.4% on a 3-hop loop, i.e. it lowers the noise floor. **Awaiting your call.**
+- [x] ~~Fee model is a flat per-hop percentage and both its justifications fail~~ —
+  gold isn't divine-denominated so charging it as a percentage of divine value was a
+  category error, and slippage was already captured by the depth walk. Now
+  `safety_margin_pct`, defaulting to 0, documented as covering fill risk only.
+  `fee_pct` is still accepted and translated on load, since `load_config` rejects
+  unknown keys. Raises reported profit ~4.4% on a 3-hop loop: the noise floor moved.
 - [x] ~~Temporal integrity: edges within one cycle are never observed at the same
   moment~~ — `Edge.observed_at` (from the cache's fetch time, not `now`) and
   `Opportunity.skew_s`, surfaced as a **Spread** column in both UIs and persisted to

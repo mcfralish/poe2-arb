@@ -76,7 +76,7 @@ class TestEdgeStamping:
     def test_edge_carries_the_observation_time(self):
         edges = build_graph(
             self.offers(at(42)), {"div": 1.0, "chaos": 1 / 9}, ["div", "chaos"],
-            fee_pct=0.0, depth_divines=5.0, bait_filter_ratio=1.5,
+            margin_pct=0.0, depth_divines=5.0, bait_filter_ratio=1.5,
         )
         assert edges[("div", "chaos")].observed_at == at(42)
 
@@ -88,14 +88,14 @@ class TestEdgeStamping:
         ]
         edges = build_graph(
             offers, {"div": 1.0, "chaos": 1 / 9}, ["div", "chaos"],
-            fee_pct=0.0, depth_divines=5.0, bait_filter_ratio=1.5,
+            margin_pct=0.0, depth_divines=5.0, bait_filter_ratio=1.5,
         )
         assert edges[("div", "chaos")].observed_at == at(10)
 
     def test_unstamped_offers_leave_the_edge_unstamped(self):
         edges = build_graph(
             self.offers(None), {"div": 1.0, "chaos": 1 / 9}, ["div", "chaos"],
-            fee_pct=0.0, depth_divines=5.0, bait_filter_ratio=1.5,
+            margin_pct=0.0, depth_divines=5.0, bait_filter_ratio=1.5,
         )
         assert edges[("div", "chaos")].observed_at is None
 

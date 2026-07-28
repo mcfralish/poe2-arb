@@ -60,8 +60,15 @@ class SettingsDialog(QDialog):
         self.threshold = self._dspin(cfg.profit_threshold_pct, 0.0, 100.0, 0.1, "%")
         form.addRow("Profit threshold", self.threshold)
 
-        self.fee = self._dspin(cfg.fee_pct, 0.0, 20.0, 0.1, "%")
-        form.addRow("Fee haircut per hop", self.fee)
+        self.margin = self._dspin(cfg.safety_margin_pct, 0.0, 20.0, 0.1, "%")
+        self.margin.setToolTip(
+            "Extra caution subtracted from every step of a loop.\n"
+            "Not a fee: the exchange charges gold, which isn't priced in\n"
+            "divines, and slippage is already handled by pricing each edge\n"
+            "at the depth you set. This covers the offer being gone when\n"
+            "you get there. 0 reports what the books actually say."
+        )
+        form.addRow("Safety margin per hop", self.margin)
 
         self.interval = self._dspin(
             cfg.watch_interval_minutes, 0.5, 240.0, 0.5, " min", decimals=1
@@ -241,7 +248,7 @@ class SettingsDialog(QDialog):
             rate_limit_safety_fraction=self.safety.value() / 100.0,
             league=self.league.text().strip() or None,
             profit_threshold_pct=self.threshold.value(),
-            fee_pct=self.fee.value(),
+            safety_margin_pct=self.margin.value(),
             watch_interval_minutes=self.interval.value(),
             max_currencies=self.max_currencies.value(),
             max_cycle_len=int(self.max_cycle_len.currentText()),

@@ -175,7 +175,7 @@ class QuickLookup(QGroupBox):
         """Book rate for this direction, if a recent scan priced it.
 
         The book rate before fees, which is what the pair is being offered at —
-        the after-fee number belongs to the profit calculation, not to a "what
+        the margin-adjusted number belongs to the profit calculation, not to a "what
         is this worth" lookup.
         """
         if not self._edges or self._stale():

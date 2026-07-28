@@ -101,7 +101,7 @@ def run_scan(
             offers,
             overview.values,
             nodes,
-            fee_pct=cfg.fee_pct,
+            margin_pct=cfg.safety_margin_pct,
             depth_divines=cfg.depth_divines,
             bait_filter_ratio=cfg.bait_filter_ratio,
             min_accounts=cfg.min_accounts,

@@ -146,9 +146,10 @@ EDGE_COLUMNS = [
         "listed on the official trade site — not a theoretical price.",
     ),
     Column(
-        "After fee",
-        "The same rate once the exchange fee and expected slippage are taken "
-        "off. This is the number the profit calculation actually uses.",
+        "After margin",
+        "The same rate with your safety margin taken off. This is the number "
+        "the profit calculation uses. With the margin at 0 (the default) it "
+        "matches the book rate exactly.",
     ),
     Column(
         "Depth (div)",
