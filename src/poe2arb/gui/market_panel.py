@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QComboBox,
     QDialog,
     QDialogButtonBox,
     QHBoxLayout,
@@ -24,7 +23,6 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QPushButton,
-    QTabBar,
     QTableWidget,
     QVBoxLayout,
     QWidget,
@@ -32,6 +30,8 @@ from PySide6.QtWidgets import (
 
 from ..market import ALL_TAB, ADAPTIVE_BASE, Universe, base_abbreviation, ingame_tab
 from ..format import fmt_volume
+from .flow_tabs import TabStrip
+from .multi_select import MultiSelect
 from .table_items import NumericItem, TextItem
 from .theme import muted_color
 
@@ -39,26 +39,30 @@ ANY_GROUP = "All groups"
 
 COLUMNS = [
     ("Currency", "The item, as poe.ninja names it."),
-    ("Value", "What one of these is worth. Change the unit in the toolbar."),
+    (
+        "Value",
+        "What one of these is worth. Taken from the in-game Currency Exchange "
+        "where it trades there, and from poe.ninja's consensus otherwise — the "
+        "count at the bottom says how many of each. Change the unit in the "
+        "toolbar.",
+    ),
     (
         "Daily volume (div)",
         "How much of this changes hands in a day, measured in Divine Orbs of "
         "value. Higher means a busier market, so your trades are likelier to fill.",
     ),
     (
-        "In graph",
-        "A tick means this was included in the last arbitrage search. Only "
-        "currencies liquid enough to trade are.",
-    ),
-    (
         "Excluded",
-        "Tick to keep this out of the arbitrage search. Excluded items still "
-        "show here and still work in Quick Lookup — they're only kept out of "
-        "the scan.",
+        "Tick to keep this out of the sweep. Excluded items still show here "
+        "and still work in Quick Lookup — they're only kept out of the search "
+        "for trades.",
     ),
 ]
 
-EXCLUDED_COLUMN = 4
+EXCLUDED_COLUMN = 3
+# Everything but the name reads as a figure, and figures compare far better
+# down a centred column than ragged against the left edge.
+NAME_COLUMN = 0
 
 
 class ExclusionListDialog(QDialog):
@@ -125,7 +129,6 @@ class MarketPanel(QWidget):
         self._names: dict[str, str] = {}
         self._values: dict[str, float] = {}
         self._volumes: dict[str, float] = {}
-        self._in_graph: set[str] = set()
         self._base_id = ADAPTIVE_BASE
         # Set while filling the table so programmatic check-state changes aren't
         # mistaken for the user ticking a box.
@@ -134,17 +137,10 @@ class MarketPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        self.tabs = QTabBar()
-        self.tabs.setExpanding(False)
-        self.tabs.setDrawBase(False)
-        # Fifteen tabs at Qt's default padding want 1103px of window before the
-        # last one is reachable. Tightening the padding and dropping a point
-        # brings that to ~863px, which is close enough to the table's own width
-        # that the tab bar stops dictating how wide the window has to be.
-        self.tabs.setStyleSheet("QTabBar::tab { padding: 4px 6px; }")
-        font = self.tabs.font()
-        font.setPointSize(max(7, font.pointSize() - 1))
-        self.tabs.setFont(font)
+        # A wrapping strip rather than a QTabBar: fifteen categories never fit
+        # on one row at a sane window width, and QTabBar's answer to that is to
+        # hide the overflow behind scroll arrows.
+        self.tabs = TabStrip()
         self.tabs.addTab(ALL_TAB)
         self.tabs.currentChanged.connect(self._tab_changed)
         layout.addWidget(self.tabs)
@@ -156,10 +152,9 @@ class MarketPanel(QWidget):
         self.search.textChanged.connect(self._apply_filters)
         controls.addWidget(self.search, stretch=2)
 
-        self.group_box = QComboBox()
-        self.group_box.addItem(ANY_GROUP)
-        self.group_box.setToolTip("Narrow to one group inside this tab.")
-        self.group_box.currentIndexChanged.connect(self._apply_filters)
+        self.group_box = MultiSelect(ANY_GROUP)
+        self.group_box.setToolTip("Narrow to one or more groups inside this tab.")
+        self.group_box.selection_changed.connect(self._apply_filters)
         controls.addWidget(self.group_box, stretch=1)
 
         self.exclusions_button = QPushButton()
@@ -225,12 +220,10 @@ class MarketPanel(QWidget):
         names: dict[str, str],
         values: dict[str, float],
         volumes: dict[str, float],
-        in_graph: set[str],
     ) -> None:
         self._names = names
         self._values = values
         self._volumes = volumes
-        self._in_graph = set(in_graph)
         self._fill_table()
 
     # ------------------------------------------------------------------ tabs
@@ -260,26 +253,28 @@ class MarketPanel(QWidget):
         self._apply_filters()
 
     def _rebuild_groups(self) -> None:
-        """Repopulate the group dropdown for whichever tab is showing."""
-        blocked = self.group_box.blockSignals(True)
-        self.group_box.clear()
-        self.group_box.addItem(ANY_GROUP)
+        """Repopulate the group picker for whichever tab is showing."""
         tab = self._current_tab()
+        groups: list[str] = []
         if self._universe is not None and tab != ALL_TAB:
-            for group in self._universe.groups_in_tab(tab):
-                self.group_box.addItem(group)
+            groups = list(self._universe.groups_in_tab(tab))
+        blocked = self.group_box.blockSignals(True)
+        self.group_box.set_options(groups)
         # A tab with one group offers no choice worth making.
-        self.group_box.setEnabled(self.group_box.count() > 2)
+        self.group_box.setEnabled(len(groups) > 1)
         self.group_box.blockSignals(blocked)
 
     def _group_members(self) -> set[str] | None:
-        """Item ids in the chosen group, or None when no group is selected."""
-        group = self.group_box.currentText()
+        """Item ids in the chosen groups, or None when none are selected."""
+        chosen = self.group_box.selected()
         tab = self._current_tab()
-        if group == ANY_GROUP or tab == ALL_TAB or self._universe is None:
+        if not chosen or tab == ALL_TAB or self._universe is None:
             return None
-        items = self._universe.groups_in_tab(tab).get(group)
-        return {i.id for i in items} if items else set()
+        in_tab = self._universe.groups_in_tab(tab)
+        members: set[str] = set()
+        for group in chosen:
+            members.update(i.id for i in in_tab.get(group, []))
+        return members
 
     # ------------------------------------------------------------------ table
 
@@ -313,12 +308,6 @@ class MarketPanel(QWidget):
             if self._icons is not None:
                 name_cell.setIcon(self._icons.icon(cid))
 
-            tick = TextItem("✔" if cid in self._in_graph else "")
-            tick.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            font = tick.font()
-            font.setPointSize(max(11, font.pointSize() + 3))
-            tick.setFont(font)
-
             exclude = TextItem("")
             exclude.setFlags(exclude.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             exclude.setCheckState(
@@ -332,9 +321,10 @@ class MarketPanel(QWidget):
                 name_cell,
                 NumericItem(text, divine_value),
                 NumericItem(fmt_volume(volume), volume),
-                tick,
                 exclude,
             ]):
+                if col != NAME_COLUMN:
+                    cell.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.table.setItem(r, col, cell)
         self.table.setSortingEnabled(True)
         self._populating = False
@@ -366,10 +356,14 @@ class MarketPanel(QWidget):
 
     def _update_status(self, shown: int) -> None:
         total = self.table.rowCount()
-        if shown == total:
-            self.status.setText(f"{total} item(s)")
-        else:
-            self.status.setText(f"{shown} of {total} item(s)")
+        counted = f"{total} item(s)" if shown == total else f"{shown} of {total} item(s)"
+        ce = len(self._universe.ce_priced) if self._universe is not None else 0
+        if ce:
+            counted += (
+                f"  ·  {ce} priced from the Currency Exchange, "
+                f"{total - ce} from poe.ninja"
+            )
+        self.status.setText(counted)
 
     # ------------------------------------------------------------------ exclusions
 

@@ -72,8 +72,9 @@ def select_sweep_items(snapshot: CeSnapshot, cfg: Config) -> list[str]:
 def run_sweep(
     cfg: Config,
     *,
-    progress: Callable[[int, int], None] | None = None,
+    progress: Callable[[int, int, str], None] | None = None,
     should_cancel: Callable[[], bool] | None = None,
+    on_budget: Callable[..., None] | None = None,
     ggg: GggExchangeClient | None = None,
     snapshot: CeSnapshot | None = None,
 ) -> SweepResult:
@@ -87,7 +88,7 @@ def run_sweep(
     started = datetime.now(timezone.utc)
     own_ggg = ggg is None
     own_scout = snapshot is None
-    ggg = ggg or GggExchangeClient(cfg, should_cancel)
+    ggg = ggg or GggExchangeClient(cfg, should_cancel, on_budget)
     scout: ScoutClient | None = None
     errors: dict[str, str] = {}
     try:
@@ -115,6 +116,10 @@ def run_sweep(
 
         listings: list[Listing] = []
         for n, item_id in enumerate(items, 1):
+            # Announced before the fetch, not after: the label should name what
+            # is being waited on, which is the whole point of watching it.
+            if progress is not None:
+                progress(n, len(items), names.get(item_id, item_id))
             try:
                 listings.extend(ggg.fetch_listings(league, item_id))
             except ScanCancelled:
@@ -122,8 +127,6 @@ def run_sweep(
             except Exception as e:  # noqa: BLE001 - one bad item must not end the sweep
                 log.warning("sweep: %s failed: %s", item_id, e)
                 errors[item_id] = str(e)
-            if progress is not None:
-                progress(n, len(items))
 
         candidates = rank_candidates(
             build_candidates(
@@ -132,10 +135,11 @@ def run_sweep(
                 names,
                 min_gap=cfg.min_gap_ratio,
                 max_gap=cfg.max_gap_ratio,
-                bankroll_divines=cfg.bankroll_divines,
+                bankroll=cfg.bankroll(),
                 sale_unit_divines=sale_unit,
                 min_profit_divines=cfg.min_profit_divines,
-            )
+            ),
+            risk_appetite=cfg.risk_appetite,
         )
         log.info(
             "cross-venue sweep: %d listings -> %d candidates (%d plausible)",

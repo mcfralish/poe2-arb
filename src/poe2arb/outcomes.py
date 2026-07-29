@@ -20,6 +20,7 @@ Two design choices worth keeping:
 from __future__ import annotations
 
 import json
+import os
 import logging
 import statistics
 import uuid
@@ -29,7 +30,6 @@ from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 
-from .history import prune
 
 log = logging.getLogger(__name__)
 
@@ -84,6 +84,83 @@ class Attempt:
     # What the trade actually cleared, when the user tells us. Left None on a
     # fill we weren't given a figure for, which is not the same as zero.
     actual_profit_divines: float | None = None
+
+
+# --- retention -------------------------------------------------------------
+# Moved here from history.py when the scan log went: this is now the only
+# append-only file the app keeps.
+
+# Don't bother rewriting the file below this size. A record is a few KB, so
+# this is thousands of attempts — and it keeps the common
+# case (append, do nothing else) free.
+PRUNE_MIN_BYTES = 2 * 1024 * 1024
+
+
+def _timestamp(line: str) -> datetime | None:
+    try:
+        return datetime.fromisoformat(json.loads(line)["ts"])
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+        return None
+
+
+def _oldest_timestamp(path: Path) -> datetime | None:
+    """Timestamp of the first readable record, without loading the file."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                ts = _timestamp(line)
+                if ts is not None:
+                    return ts
+    except OSError:
+        return None
+    return None
+
+
+def prune(path: Path, retention_days: float, *, min_bytes: int = PRUNE_MIN_BYTES) -> int:
+    """Drop records older than `retention_days`. Returns how many went.
+
+    Skipped entirely unless the file is both large enough to be worth rewriting
+    and actually holds something expired — so the usual case costs one stat and
+    one short read rather than a full rewrite on every scan.
+
+    Best-effort, like the rest of this module: history is a convenience, and
+    failing to prune it must never take the app down. The rewrite goes through
+    a temporary file so an interruption can't truncate real data.
+    """
+    if retention_days <= 0:
+        return 0
+    try:
+        if path.stat().st_size < min_bytes:
+            return 0
+    except OSError:
+        return 0
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+    oldest = _oldest_timestamp(path)
+    if oldest is None or oldest >= cutoff:
+        return 0
+
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    dropped = 0
+    try:
+        with open(path, encoding="utf-8") as src, open(tmp, "w", encoding="utf-8") as dst:
+            for line in src:
+                if not line.strip():
+                    continue
+                ts = _timestamp(line)
+                # Unreadable lines go too — read_recent already skips them, so
+                # keeping them only grows the file no one can use.
+                if ts is None or ts < cutoff:
+                    dropped += 1
+                    continue
+                dst.write(line if line.endswith("\n") else line + "\n")
+        os.replace(tmp, path)
+    except OSError:
+        log.warning("could not prune history at %s", path, exc_info=True)
+        tmp.unlink(missing_ok=True)
+        return 0
+    log.info("pruned %d history record(s) older than %g days", dropped, retention_days)
+    return dropped
 
 
 def _new_id() -> str:

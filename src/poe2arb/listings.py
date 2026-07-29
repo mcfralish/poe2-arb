@@ -128,7 +128,7 @@ def plan_trade(
     ce_divines: float,
     pay_unit_divines: float = 1.0,
     sale_unit_divines: float = 1.0,
-    bankroll_divines: float = 0.0,
+    bankroll_units: float = 0.0,
 ) -> TradePlan | None:
     """Best number of whole lots to buy, or None if no quantity profits.
 
@@ -148,7 +148,11 @@ def plan_trade(
     profit. Defaults to 1.0 (settle in divines) because that is the pessimistic
     reading, and understating profit is the safe direction to be wrong in.
 
-    `bankroll_divines` of 0 means unbounded. Iterating rather than solving
+    `bankroll_units` is how much of the *seller's* currency you hold — not a
+    divine total. A seller wanting exalted can only be paid in exalted, and
+    converting divines to exalted on the CE costs the spread, so a pooled
+    divine figure would promise quantities you cannot actually buy. 0 means
+    unbounded. Iterating rather than solving
     analytically because the floor makes profit non-monotonic in k: with a
     3.79 rate and a 3.5 cost, successive lots add 3 or 4 divines alternately,
     so the largest affordable k is not always the best one.
@@ -164,8 +168,8 @@ def plan_trade(
         return None
 
     max_by_stock = int(stock // get_amount)
-    if bankroll_divines > 0:
-        max_by_bankroll = int(bankroll_divines // lot_cost)
+    if bankroll_units > 0:
+        max_by_bankroll = int(bankroll_units // pay_amount)
     else:
         max_by_bankroll = MAX_LOTS
     k_max = min(max_by_stock, max_by_bankroll, MAX_LOTS)
@@ -256,7 +260,7 @@ def build_candidates(
     *,
     min_gap: float,
     max_gap: float,
-    bankroll_divines: float = 0.0,
+    bankroll: dict[str, float] | None = None,
     sale_unit_divines: float = 1.0,
     min_profit_divines: float = 0.0,
 ) -> list[Candidate]:
@@ -271,7 +275,13 @@ def build_candidates(
     arithmetically profitable. A candidate worth +0.02 divines is real and still
     not worth the message; the floor no longer filters those out, so something
     has to.
+
+    `bankroll` maps currency id to how many of that currency you hold. A
+    currency absent from it is unconstrained — you are assumed to have enough
+    for anything the seller asks. That is the right default: capping a currency
+    you never told the app about would silently hide trades.
     """
+    bankroll = bankroll or {}
     out: list[Candidate] = []
     for listing in listings:
         ce = ce_price.get(listing.item_id)
@@ -287,7 +297,7 @@ def build_candidates(
             ce_divines=ce,
             pay_unit_divines=pay_unit,
             sale_unit_divines=sale_unit_divines,
-            bankroll_divines=bankroll_divines,
+            bankroll_units=bankroll.get(listing.pay_currency, 0.0),
         )
         if plan is None or plan.profit_divines < min_profit_divines:
             continue
@@ -306,12 +316,39 @@ def build_candidates(
     return out
 
 
-def rank_candidates(candidates: list[Candidate]) -> list[Candidate]:
-    """Whisper order: plausible first, ghosts last, most profitable within each.
+# Roughly how often a band has been seen to fill. Plausible is the only one
+# with fills behind it (2 of ~4 whispers); ghost is 0 of ~10; thin sits in
+# between with too few attempts to call. Deliberately coarse — these weight a
+# sort, they are not probabilities anyone should quote.
+FILL_PRIOR = {
+    Band.PLAUSIBLE: 1.0,
+    Band.THIN: 0.5,
+    Band.GHOST: 0.0,
+}
+
+
+def fill_weight(band: Band, risk_appetite: float) -> float:
+    """How much of a band's profit to believe, at a given risk appetite.
+
+    At 0 the priors apply in full, so ghosts score nothing and sink. At 1 they
+    are flattened away entirely and ranking is pure expected profit — which is
+    what someone chasing the rare 12x listing actually wants. In between, the
+    long shots climb gradually rather than appearing all at once.
+    """
+    appetite = min(1.0, max(0.0, risk_appetite))
+    prior = FILL_PRIOR.get(band, 0.0)
+    return prior + appetite * (1.0 - prior)
+
+
+def rank_candidates(
+    candidates: list[Candidate], *, risk_appetite: float = 0.0
+) -> list[Candidate]:
+    """Whisper order, by profit discounted for how likely the band is to fill.
 
     Ghosts sort to the bottom rather than being hidden. They are the visible
     evidence for why the ranking works this way, and a user who wants to test a
-    12x listing should be able to find it — just not be led to it first.
+    12x listing should be able to find it — at appetite 0, just not be led to
+    it first.
 
     Sorted on explicit tiebreaks down to the account name so the order is stable
     between runs; anything derived from set or dict iteration would reshuffle,
@@ -320,6 +357,7 @@ def rank_candidates(candidates: list[Candidate]) -> list[Candidate]:
     return sorted(
         candidates,
         key=lambda c: (
+            -c.profit_divines * fill_weight(c.band, risk_appetite),
             c.band.rank,
             -c.profit_divines,
             c.gap,

@@ -64,7 +64,6 @@ def panel(app, universe):
         names=universe.names(),
         values=universe.values(),
         volumes={i.id: i.volume_divine for i in universe.items.values()},
-        in_graph={"divine", "chaos"},
     )
     return p
 
@@ -149,13 +148,25 @@ class TestFilters:
         select_tab(panel, "Expedition")
         groups = list(universe.groups_in_tab("Expedition"))
         target = [g for g in groups if g.startswith("Verisium")][0]
-        panel.group_box.setCurrentText(target)
+        panel.group_box.set_selected([target])
         assert visible_names(panel) == ["Liquid Verisium"]
+
+    def test_several_groups_can_be_picked_at_once(self, panel, universe):
+        """Single-select made you look at one family at a time, or all of them."""
+        select_tab(panel, "Expedition")
+        whole_tab = visible_names(panel)
+        groups = list(universe.groups_in_tab("Expedition"))
+        assert len(groups) > 1
+        panel.group_box.set_selected(groups[:1])
+        one = visible_names(panel)
+        panel.group_box.set_selected(groups)
+        assert visible_names(panel) == whole_tab
+        assert one != whole_tab       # the filter really was doing something
 
     def test_group_box_resets_when_the_tab_changes(self, panel):
         select_tab(panel, "Expedition")
         select_tab(panel, "Currency")
-        assert panel.group_box.currentText() == "All groups"
+        assert panel.group_box.selected() == []
 
     def test_status_reports_the_narrowing(self, panel):
         select_tab(panel, "Currency")
@@ -204,7 +215,6 @@ class TestExclusions:
             names=universe.names(),
             values=universe.values(),
             volumes={i.id: i.volume_divine for i in universe.items.values()},
-            in_graph=set(),
         )
         assert seen == []
 
@@ -237,70 +247,45 @@ class TestExclusionListDialog:
         assert ExclusionListDialog([], {}).selected_ids() == []
 
 
-class TestFullEconomyAfterAScan:
-    """Regression: the Market tab collapsed to ~51 items after every scan.
+class TestFullEconomy:
+    """Market shows the whole economy from poe.ninja, and nothing else.
 
-    A scan fetches only the Currency category — that's all the graph trades —
-    so rendering Market from `result.overview` dropped the other ~590 items and
-    fell back to raw ids ("soul-core-of-zalatl") for the names it didn't have,
-    which is what made excluded items look encoded in the exclusion dialog.
+    It used to merge a scan's order-book figures over the top for the handful
+    of currencies the scan fetched. With the scan gone the universe is simply
+    the only source, which is what this pins.
     """
 
-    def inputs(self, universe, overview):
+    def test_it_renders_from_the_universe_alone(self, app, universe, tmp_path,
+                                                monkeypatch):
         from poe2arb.gui.main_window import MainWindow
-        from poe2arb.scan import ScanResult
 
-        class Stub:
-            _universe = universe
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+        monkeypatch.setattr(MainWindow, "_check_updates", lambda self: None)
+        monkeypatch.setattr(MainWindow, "_preload_currencies", lambda self: None)
+        w = MainWindow()
+        try:
+            w._universe_loaded(universe)
+            shown = {
+                w.market.table.item(r, 0).text()
+                for r in range(w.market.table.rowCount())
+            }
+            assert shown == set(universe.names().values())
+        finally:
+            w._quitting = True
+            w.close()
 
-        result = ScanResult("T", overview, [], {}, [])
-        return MainWindow._market_inputs(Stub(), result)
-
-    def currency_only(self):
-        return NinjaOverview(
-            league="T", fetched_at=NOW,
-            values={"divine": 1.0, "chaos": 0.11},
-            volumes={"divine": float("inf"), "chaos": 6.0},
-            names={"divine": "Divine Orb", "chaos": "Chaos Orb"},
-        )
-
-    def test_non_currency_items_survive(self, universe):
-        names, values, _ = self.inputs(universe, self.currency_only())
-        assert "tacatis-ire" in values
-        assert len(values) == len(universe.items)
-
-    def test_names_stay_human_readable(self, universe):
-        names, _, _ = self.inputs(universe, self.currency_only())
-        assert names["tacatis-ire"] == "Tacati's Ire"
-
-    def test_scan_values_win_where_it_has_them(self, universe):
-        _, values, _ = self.inputs(universe, self.currency_only())
-        assert values["chaos"] == 0.11  # scan's fresher number, not the universe's
-
-    def test_placeholder_volume_never_displaces_a_real_one(self, universe):
-        """The primary unit is recorded with infinite volume; that's not data."""
-        _, _, volumes = self.inputs(universe, self.currency_only())
-        assert volumes["divine"] == 10.0
-
-    def test_restored_history_does_not_reintroduce_raw_ids(self, universe):
-        """A history record names unknown items after their own id."""
-        restored = NinjaOverview(
-            league="T", fetched_at=NOW,
-            values={"tacatis-ire": 3.0},
-            volumes={"tacatis-ire": 1.0},
-            names={"tacatis-ire": "tacatis-ire"},
-        )
-        names, _, _ = self.inputs(universe, restored)
-        assert names["tacatis-ire"] == "Tacati's Ire"
-
-    def test_works_before_the_universe_has_loaded(self):
+    def test_nothing_renders_before_the_universe_arrives(self, app, tmp_path,
+                                                         monkeypatch):
+        """No scan to fall back on any more — it must simply do nothing."""
         from poe2arb.gui.main_window import MainWindow
-        from poe2arb.scan import ScanResult
 
-        class Stub:
-            _universe = None
-
-        names, values, _ = MainWindow._market_inputs(
-            Stub(), ScanResult("T", self.currency_only(), [], {}, [])
-        )
-        assert values == {"divine": 1.0, "chaos": 0.11}
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+        monkeypatch.setattr(MainWindow, "_check_updates", lambda self: None)
+        monkeypatch.setattr(MainWindow, "_preload_currencies", lambda self: None)
+        w = MainWindow()
+        try:
+            w._render_market()          # must not raise
+            assert w.market.table.rowCount() == 0
+        finally:
+            w._quitting = True
+            w.close()

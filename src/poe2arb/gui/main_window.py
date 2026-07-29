@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import NamedTuple
 
-from PySide6.QtCore import QSize, Qt, QTimer, QUrl
+from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
@@ -18,7 +18,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QLineEdit,
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
@@ -36,7 +35,6 @@ from PySide6.QtWidgets import (
 )
 
 from .. import __version__
-from ..client import NinjaOverview
 from ..config import (
     Config,
     load_config,
@@ -44,18 +42,15 @@ from ..config import (
     save_config,
     user_config_path,
 )
-from ..format import fmt_depth, fmt_pct, fmt_rate, fmt_skew
-from ..history import read_recent
+from ..format import fmt_depth, fmt_pct, fmt_skew
 from ..market import BASE_CURRENCY_CHOICES, Universe
 from ..rate_limit import Severity, check_pacing, min_safe_interval, worst_severity
-from ..report import route_str
-from ..scan import ScanResult, result_from_history_record
 from ..trade_queue import TradeQueue
 from .icon import make_app_icon
-from .icon_provider import ICON_SIZE, IconProvider
+from .icon_provider import IconProvider
 from .settings_dialog import SettingsDialog
 from .table_items import NumericItem, TextItem
-from .theme import banner_style
+from .theme import banner_style, budget_style
 from .ui_state import (
     decode_geometry,
     encode_geometry,
@@ -66,13 +61,12 @@ from .ui_state import (
 from .updates import RELEASES_PAGE
 from .lookup import QuickLookup
 from .market_panel import MarketPanel
-from .trends import TrendsTab
+from .results import ResultsTab
 from .hotkey import GlobalHotkey, format_hotkey
 from .queue_panel import QueuePanel
 from .sweep_panel import SweepPanel
 from .worker import (
     RecheckWorker,
-    ScanWorker,
     SweepWorker,
     UniverseWorker,
     UpdateCheckWorker,
@@ -93,64 +87,6 @@ ALERT_MEMORY_HOURS = 1.0
 class Column(NamedTuple):
     title: str
     tooltip: str
-
-
-# Tooltips are written for someone who plays the game but doesn't trade
-# professionally — no jargon, no maths, just what the number means for them.
-OPS_COLUMNS = [
-    Column(
-        "Route",
-        "The chain of trades to make, in order. You end up back in the currency "
-        "you started with — hopefully holding more of it than when you began.",
-    ),
-    Column(
-        "Profit/loop",
-        "How much more you'd finish with after going all the way around once, "
-        "if every trade fills at the price currently listed. Fees and a bit of "
-        "slippage are already subtracted.",
-    ),
-    Column(
-        "Depth (div)",
-        "Roughly how much this trade can absorb, in Divine Orbs, before you run "
-        "out of people offering these prices. The tightest step in the chain "
-        "sets the limit. Trade bigger than this and the profit shrinks.",
-    ),
-    Column(
-        "Spread",
-        "How far apart in time the prices in this chain were actually checked. "
-        "A scan asks about one currency at a time, several seconds apart, so no "
-        "loop is ever seen all at once. A small spread means the prices were "
-        "close to simultaneous and the loop is more likely to be real; a large "
-        "one means the far end may already have moved.",
-    ),
-    Column(
-        "First seen",
-        "When this opportunity first showed up in a scan. Ones that have "
-        "survived several scans tend to be more real than ones that just blinked "
-        "into existence.",
-    ),
-]
-
-EDGE_COLUMNS = [
-    Column("Pay", "The currency you hand over."),
-    Column("Receive", "The currency you get back."),
-    Column(
-        "Book rate",
-        "How many you'd receive for paying 1, based on real offers currently "
-        "listed on the official trade site — not a theoretical price.",
-    ),
-    Column(
-        "After margin",
-        "The same rate with your safety margin taken off. This is the number "
-        "the profit calculation uses. With the margin at 0 (the default) it "
-        "matches the book rate exactly.",
-    ),
-    Column(
-        "Depth (div)",
-        "How much value, in Divine Orbs, is available at this rate before you'd "
-        "have to accept worse prices.",
-    ),
-]
 
 
 def _play_alert_sound() -> None:
@@ -179,27 +115,24 @@ class MainWindow(QMainWindow):
         # Startup notices collected before the log widget exists.
         self._pending_log: list[str] = []
         self.cfg = self._load_cfg()
-        self._worker: ScanWorker | None = None
         self._sweep_worker: SweepWorker | None = None
-        self._known: dict[tuple[str, ...], float] = {}
-        self._known_longer: tuple[str, ...] | None = None
-        self._first_seen: dict[tuple[str, ...], str] = {}
+        self._next_sweep_at: float | None = None
         # id -> display name from the last scan, so Settings can accept
         # in-game currency names and flag typos.
         self._known_currencies: dict[str, str] = {}
         self._currency_values: dict[str, float] = {}
         self._universe: Universe | None = None
-        self._last_result: ScanResult | None = None
-        self._backload_record: dict | None = None
-        self._next_scan_at: float | None = None
+        # Kept so the long-shots slider can re-rank without another sweep.
+        self._last_sweep = None
         self._quitting = False
-        # (table, search field, columns worth matching) — see _filtered.
-        self._filters: list[tuple[QTableWidget, QLineEdit, tuple[int, ...]]] = []
 
         self.trade_queue = TradeQueue(
             offer_window_s=self.cfg.offer_window_s,
             available_ttl_s=self.cfg.available_ttl_s,
             awaiting_timeout_s=self.cfg.awaiting_timeout_s,
+            # Any appetite above zero means the user asked to see long shots,
+            # so they have to be allowed into the queue to be offered at all.
+            queue_ghosts=self.cfg.risk_appetite > 0.0,
         )
 
         self.icons = IconProvider(self.cfg.cache_dir, self)
@@ -214,19 +147,19 @@ class MainWindow(QMainWindow):
         # Timers first: _build_central wires widgets that reference them.
         self._build_timers()
         self._build_toolbar()
+        self._build_status_bar()
         self._build_central()
         self._restore_ui_state()
         for line in self._pending_log:
             self._log(line)
         self._pending_log.clear()
         self._build_tray()
-        self._backload_from_history()
         self._check_updates()
         self._preload_currencies()
 
         if not self.statusBar().currentMessage():
             self.statusBar().showMessage(
-                "Ready — press Scan now, or Watch to scan continuously"
+                "Ready — press Find trades to start looking"
             )
 
     # ------------------------------------------------------------------ setup
@@ -264,23 +197,18 @@ class MainWindow(QMainWindow):
         tb.setMovable(False)
         self.addToolBar(tb)
 
-        self.scan_action = QAction("Scan now", self)
-        self.scan_action.triggered.connect(self.start_scan)
-        tb.addAction(self.scan_action)
-
-        self.watch_action = QAction("Watch", self)
-        self.watch_action.setCheckable(True)
-        self.watch_action.toggled.connect(self._watch_toggled)
-        tb.addAction(self.watch_action)
-
-        self.stop_action = QAction("Stop", self)
-        self.stop_action.setToolTip(
-            "Cancel the scan in progress and stop watching. A scan can take "
-            "several minutes, so this is how you get out of one early."
+        # One toggle, not a button and a checkbox. A sweep takes minutes and
+        # the listings it finds go stale in minutes, so the useful mode is
+        # "keep looking" — a one-shot run is just this switched off again.
+        self.sweep_action = QAction("Find trades", self)
+        self.sweep_action.setCheckable(True)
+        self.sweep_action.setToolTip(
+            "Keep checking live listings against Currency Exchange prices.\n"
+            "Runs a sweep now and another every few minutes until switched off.\n"
+            "Anything worth acting on appears on the Opportunities tab."
         )
-        self.stop_action.setEnabled(False)
-        self.stop_action.triggered.connect(self.stop_scan)
-        tb.addAction(self.stop_action)
+        self.sweep_action.toggled.connect(self._sweep_toggled)
+        tb.addAction(self.sweep_action)
 
         settings_action = QAction("Settings", self)
         settings_action.triggered.connect(self.open_settings)
@@ -323,16 +251,17 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs)
 
-        # The cycle detector's table used to live here. It found nothing for
-        # eight versions because it was fed the wrong market (see TODO.md), so
-        # this tab now holds the trade queue — the thing actually worth acting
-        # on. `ops_table` still exists, unparented, because the dormant cycle
-        # path and its history backload still write to it.
-        self.ops_table = self._make_table(
-            OPS_COLUMNS, 1, Qt.SortOrder.DescendingOrder
-        )
         self.queue_panel = QueuePanel()
         self.queue_panel.set_icons(self.icons)
+        self.queue_panel.bankroll.set_values({
+            "divine": self.cfg.bankroll_divines,
+            "exalted": self.cfg.bankroll_exalted,
+        })
+        self.queue_panel.bankroll.changed.connect(self._bankroll_changed)
+        self.queue_panel.bankroll.set_appetite(self.cfg.risk_appetite)
+        self.queue_panel.bankroll.set_settlement(self.cfg.sale_currency)
+        self.queue_panel.bankroll.settlement_changed.connect(self._settlement_changed)
+        self.queue_panel.bankroll.appetite_changed.connect(self._appetite_changed)
         self.queue_panel.take_requested.connect(self._queue_take)
         self.queue_panel.outcome_reported.connect(self._queue_outcome)
         self.queue_panel.dismiss_requested.connect(self._queue_dismiss)
@@ -353,78 +282,28 @@ class MainWindow(QMainWindow):
 
         self.sweep = SweepPanel()
         self.sweep.set_icons(self.icons)
-        self.sweep.set_bankroll(self.cfg.bankroll_divines)
-        self.sweep.sweep_requested.connect(self.start_sweep)
-        self.sweep.stop_requested.connect(self.stop_sweep)
-        self.sweep.bankroll_changed.connect(self._bankroll_changed)
         self.sweep.attempt_copied.connect(self._attempt_copied)
         self.sweep.recheck_requested.connect(self._recheck)
         self._setup_hotkey()
         self.sweep.outcome_reported.connect(self._outcome_reported)
         self.tabs.addTab(self.sweep, "Trades")
 
-        self.edges_table = self._make_table(
-            EDGE_COLUMNS, 4, Qt.SortOrder.DescendingOrder  # deepest books first
-        )
-        self.edges_filter = QLineEdit()
-        self.tabs.addTab(
-            self._filtered(
-                self.edges_table, self.edges_filter, "Filter pairs…", (0, 1)
-            ),
-            "Book Edges",
-        )
+        # Book Edges is gone. It was a raw dump of the triangular search's
+        # graph — every pay/receive edge with its depth — and that search is
+        # the thing 0.3.0 established was pointed at the wrong market. Quick
+        # Lookup answers "what is this pair trading at" without the dump.
 
-        self.trends = TrendsTab()
-        self.tabs.addTab(self.trends, "Trends")
+        self.results = ResultsTab()
+        self.tabs.addTab(self.results, "Results")
 
         self.log_view = QPlainTextEdit()
         self.log_view.setReadOnly(True)
         self.log_view.setMaximumBlockCount(2000)
         self.tabs.addTab(self._log_tab(), "Log")
 
-        self.trends.set_history_path(self.cfg.history_path)
+        self.results.set_path(self.cfg.outcomes_path)
 
         self.setCentralWidget(central)
-
-    def _filtered(
-        self, table: QTableWidget, field: QLineEdit, hint: str,
-        columns: tuple[int, ...],
-    ) -> QWidget:
-        """A table with a search box above it, hiding rows that don't match.
-
-        Hiding rows rather than rebuilding the table keeps the sort order,
-        the selection and the scroll position intact while typing.
-
-        `columns` names the ones holding text worth matching on. Market keeps
-        its currency name in column 0 and a value in column 1; Book Edges has
-        a currency in both. Searching the value columns as well would mean
-        typing "12" hides every row whose rate happens not to contain it.
-        """
-        field.setPlaceholderText(hint)
-        field.setClearButtonEnabled(True)
-        field.textChanged.connect(
-            lambda text: self._apply_filter(table, text, columns)
-        )
-        self._filters.append((table, field, columns))
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(field)
-        layout.addWidget(table)
-        return page
-
-    @staticmethod
-    def _apply_filter(
-        table: QTableWidget, text: str, columns: tuple[int, ...] = (0,)
-    ) -> None:
-        query = text.strip().lower()
-        for row in range(table.rowCount()):
-            if not query:
-                table.setRowHidden(row, False)
-                continue
-            cells = [table.item(row, col) for col in columns]
-            hit = any(c is not None and query in c.text().lower() for c in cells)
-            table.setRowHidden(row, not hit)
 
     def _log_tab(self) -> QWidget:
         page = QWidget()
@@ -503,6 +382,29 @@ class MainWindow(QMainWindow):
             log.warning("could not save base currency", exc_info=True)
         self._log(f"showing prices in {self._universe.name(chosen) if self._universe else chosen}")
 
+    def _build_status_bar(self) -> None:
+        """A permanent budget readout in the opposite corner from the progress.
+
+        GGG reports the IP's usage on every reply, and the IP is shared with
+        anything else the player runs against the trade API — so this is the
+        only honest answer to "am I about to get locked out for 30 minutes".
+        """
+        self.budget_label = QLabel()
+        self.budget_label.setToolTip(
+            "Requests this IP has spent in the tightest rate-limit window, as "
+            "reported by GGG. Counts every trade tool you're running, not just "
+            "this one. Goes red once the window is nearly spent."
+        )
+        self.statusBar().addPermanentWidget(self.budget_label)
+        self._show_budget(None)
+
+    def _show_budget(self, budget) -> None:
+        if budget is None:
+            self.budget_label.clear()
+            return
+        self.budget_label.setText(budget.label)
+        self.budget_label.setStyleSheet(budget_style(self, budget))
+
     def _build_tray(self) -> None:
         # No tray on some Linux desktops and under WSLg (no StatusNotifierWatcher).
         # Hiding to a tray that doesn't exist strands the window with no way to
@@ -536,9 +438,10 @@ class MainWindow(QMainWindow):
         self.tray.show()
 
     def _build_timers(self) -> None:
-        self.watch_timer = QTimer(self)
-        self.watch_timer.setSingleShot(True)
-        self.watch_timer.timeout.connect(self.start_scan)
+        # Waits out the gap between sweeps while "Find trades" is on.
+        self.sweep_timer = QTimer(self)
+        self.sweep_timer.setSingleShot(True)
+        self.sweep_timer.timeout.connect(self.start_sweep)
 
         self.countdown_timer = QTimer(self)
         self.countdown_timer.setInterval(1000)
@@ -557,71 +460,6 @@ class MainWindow(QMainWindow):
         self._bankroll_save_timer.setInterval(1500)
         self._bankroll_save_timer.timeout.connect(self._persist_bankroll)
 
-    def _backload_from_history(self) -> None:
-        """Repopulate the log and tables from recent scans on disk.
-
-        A restart otherwise looks like a blank slate even though the app has
-        hours of results banked. Only the last BACKLOAD_HOURS are replayed —
-        older readings describe a market that has since moved on.
-        """
-        records = read_recent(self.cfg.history_path, BACKLOAD_HOURS)
-        if not records:
-            return
-
-        seen: dict[tuple[str, ...], float] = {}
-        for record in records:
-            ts = datetime.fromisoformat(record["ts"]).astimezone()
-            current = {
-                tuple(o["cycle"]): float(o["profit_pct"])
-                for o in record.get("opportunities", [])
-            }
-            for key, profit in current.items():
-                if key not in seen:
-                    route = " → ".join(key) + f" → {key[0]}"
-                    self._log(f"NEW  {route}: +{profit:.2f}%", ts=ts)
-                    self._first_seen.setdefault(key, ts.strftime("%H:%M:%S"))
-            for key in set(seen) - set(current):
-                route = " → ".join(key) + f" → {key[0]}"
-                self._log(f"gone  {route} (was +{seen[key]:.2f}%)", ts=ts)
-                self._first_seen.pop(key, None)
-            seen = current
-
-        latest = records[-1]
-        latest_ts = datetime.fromisoformat(latest["ts"]).astimezone()
-        self._backload_record = latest
-        self._refresh_tables(result_from_history_record(latest, self._known_currencies))
-        self._log(
-            f"restored {len(records)} scan(s) from the last "
-            f"{BACKLOAD_HOURS:g}h — newest {latest_ts.strftime('%H:%M:%S')}"
-        )
-        self._carry_forward_alerts(seen, latest_ts)
-        self.statusBar().showMessage(
-            f"Showing saved results from {latest_ts.strftime('%H:%M:%S')} — "
-            f"press Scan now to refresh"
-        )
-
-    def _carry_forward_alerts(
-        self, seen: dict[tuple[str, ...], float], latest_ts: datetime
-    ) -> None:
-        """Treat the newest restored scan's loops as already announced.
-
-        Without this, restarting re-fires a toast for every opportunity that
-        was live before — the app has genuinely seen them, it just forgot on
-        the way through the door. Only while the record is fresh: a loop last
-        seen hours ago is worth announcing again, because by then it's news
-        rather than a repeat.
-        """
-        if not seen:
-            return
-        age = datetime.now().astimezone() - latest_ts
-        if age > timedelta(hours=ALERT_MEMORY_HOURS):
-            return
-        self._known = dict(seen)
-        self._log(
-            f"{len(seen)} opportunity(ies) still live from before the restart — "
-            f"you won't be alerted about them twice"
-        )
-
     def _preload_currencies(self) -> None:
         """Populate the currency list before any scan has run.
 
@@ -630,68 +468,68 @@ class MainWindow(QMainWindow):
         """
         self._currency_worker = UniverseWorker(self.cfg, self)
         self._currency_worker.loaded.connect(self._universe_loaded)
+        self._currency_worker.ce_loaded.connect(self._ce_prices_loaded)
         self._currency_worker.start()
+
+    def _ce_prices_loaded(self, ce: dict) -> None:
+        """Re-price the catalogue from the Currency Exchange where it can.
+
+        Arrives after the universe, so everything is already on screen with
+        poe.ninja's consensus and this only improves it. An empty dict means
+        poe2scout was unreachable, which costs the better prices and nothing
+        else.
+        """
+        if self._universe is None:
+            return
+        if not ce:
+            self._log("Currency Exchange prices unavailable — using poe.ninja")
+            return
+        self._universe = self._universe.with_ce_prices(ce)
+        priced = len(self._universe.ce_priced)
+        self._log(
+            f"{priced} of {len(self._universe)} items priced from the Currency "
+            f"Exchange; the rest from poe.ninja"
+        )
+        self._push_universe()
 
     def _universe_loaded(self, universe: Universe) -> None:
         """Full economy data arrived: feed the pickers and the lookup tool."""
         self._universe = universe
         self.icons.set_images(universe.images())
-        self.market.set_universe(universe)
         self.lookup.set_icons(self.icons)
-        self.lookup.set_universe(universe)
-        self.lookup.set_base_currency(self.cfg.base_currency)
         self._log(
             f"loaded {len(universe)} items across "
             f"{len(universe.by_category())} categories from poe.ninja"
         )
-        names = universe.names()
-        values = universe.values()
-        volumes = {i.id: i.volume_divine for i in universe.items.values()}
-        self._currencies_loaded(names, values, volumes)
+        self._push_universe()
 
-    def _currencies_loaded(self, names: dict, values: dict, volumes: dict) -> None:
-        # A completed scan is a better source; don't overwrite it.
-        if self._known_currencies:
+    def _push_universe(self) -> None:
+        """Hand the current catalogue to everything that displays prices."""
+        universe = self._universe
+        if universe is None:
             return
-        self._known_currencies = names
-        self._currency_values = values
-        self.trends.rename(names)
-        if self._worker is not None and self._worker.isRunning():
-            return  # a live scan is about to replace these tables anyway
-        self._render_market_only(names, values, volumes)
+        self.market.set_universe(universe)
+        self.lookup.set_universe(universe)
+        self.lookup.set_base_currency(self.cfg.base_currency)
+        self._known_currencies = universe.names()
+        self._currency_values = universe.values()
+        self._render_market()
 
-    def _render_market_only(self, names: dict, values: dict, volumes: dict) -> None:
-        """Show fresh poe.ninja prices without disturbing restored scan data.
+    def _render_market(self) -> None:
+        """Fill the Market tab from the economy snapshot.
 
-        Rebuilds the Market tab from the newer figures while keeping whatever
-        Opportunities and Book edges were restored from history — those need a
-        real scan (order books) and can't come from poe.ninja alone.
+        poe.ninja is now the only source. The scan used to overlay its own
+        order-book figures for the handful of currencies it fetched; with that
+        gone the universe is simply the whole picture.
         """
-        base = self._backload_record
-        if base is not None:
-            record = dict(base)
-            ninja_ts = datetime.now(timezone.utc).isoformat()
-            # Use whichever price snapshot is newer for the Market tab.
-            if record["ts"] < ninja_ts:
-                record["ninja_values_divine"] = values
-                record["ninja_volumes_divine"] = volumes
-            self._refresh_tables(result_from_history_record(record, names))
+        if self._universe is None:
             return
-        overview = NinjaOverview(
-            league=self.cfg.league or "?",
-            fetched_at=datetime.now(timezone.utc),
-            values=values,
-            volumes=volumes,
-            names=names,
-        )
-        self._refresh_tables(
-            ScanResult(
-                league=overview.league,
-                overview=overview,
-                nodes=[],
-                edges={},
-                opportunities=[],
-            )
+        self.market.render(
+            names=self._universe.names(),
+            values=self._universe.values(),
+            volumes={
+                i.id: i.volume_divine for i in self._universe.items.values()
+            },
         )
 
     def _check_updates(self) -> None:
@@ -701,86 +539,89 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ scanning
 
-    def start_scan(self) -> None:
-        if self._worker is not None and self._worker.isRunning():
-            return
-        self.scan_action.setEnabled(False)
-        self.stop_action.setEnabled(True)
-        self.statusBar().showMessage("Scanning — fetching order books…")
-        self._worker = ScanWorker(self.cfg, self)
-        self._worker.progress.connect(
-            lambda i, n: self.statusBar().showMessage(f"Scanning — order books {i}/{n}…")
-        )
-        self._worker.finished_ok.connect(self._scan_done)
-        self._worker.failed.connect(self._scan_failed)
-        # Runs on every exit path, including cancellation — which emits no
-        # result signal at all, so the buttons would otherwise stay disabled.
-        self._worker.finished.connect(self._scan_thread_finished)
-        self._worker.start()
-
-    def stop_scan(self) -> None:
-        """Cancel the running scan and stop watching."""
-        now = datetime.now().strftime("%H:%M:%S")
-        was_watching = self.watch_action.isChecked()
-        if was_watching:
-            self.watch_action.setChecked(False)  # also stops the timer
-        if self._worker is not None and self._worker.isRunning():
-            self._worker.cancel()
-            self._log("stopping scan…")
-            self.statusBar().showMessage("Stopping…")
-        elif was_watching:
-            self._log("watch stopped")
-        self.watch_timer.stop()
-        self._next_scan_at = None
-
-    def _scan_thread_finished(self) -> None:
-        self.scan_action.setEnabled(True)
-        self.stop_action.setEnabled(self.watch_action.isChecked())
-        if self._worker is not None and self._worker.was_cancelled:
-            now = datetime.now().strftime("%H:%M:%S")
-            self._log("scan stopped")
-            self.statusBar().showMessage("Scan stopped")
-
-    # ------------------------------------------------------------------ sweeping
-
     def start_sweep(self) -> None:
-        """Run a cross-venue sweep.
-
-        Refuses while a scan is running rather than queueing: both spend the
-        same paced GGG request budget, so overlapping them would halve each
-        one's rate and risk the shared rate limit.
-        """
+        """Run one cross-venue sweep. A second request while one runs is ignored."""
         if self._sweep_worker is not None and self._sweep_worker.isRunning():
             return
-        if self._worker is not None and self._worker.isRunning():
-            self.sweep.set_status("A scan is running — stop it first, they share the request budget.")
-            return
+        self.sweep_timer.stop()
         self.sweep.set_running(True)
         self.sweep.set_status("Checking Currency Exchange prices…")
         self._log("cross-venue sweep started")
         self._sweep_worker = SweepWorker(self.cfg, self)
-        self._sweep_worker.progress.connect(
-            lambda i, n: self.sweep.set_status(f"Checking listings — item {i} of {n}…")
-        )
+        self._sweep_worker.progress.connect(self._sweep_progress)
+        self._sweep_worker.budget.connect(self._show_budget)
         self._sweep_worker.finished_ok.connect(self._sweep_done)
         self._sweep_worker.failed.connect(self._sweep_failed)
         self._sweep_worker.finished.connect(self._sweep_thread_finished)
         self._sweep_worker.start()
 
     def stop_sweep(self) -> None:
+        """Switch the toggle off, which cancels anything in flight."""
+        self.sweep_action.setChecked(False)
+
+    def _sweep_toggled(self, on: bool) -> None:
+        if on:
+            self._log("looking for trades")
+            self.start_sweep()
+            return
+        self.sweep_timer.stop()
+        self._next_sweep_at = None
         if self._sweep_worker is not None and self._sweep_worker.isRunning():
             self._sweep_worker.cancel()
             self.sweep.set_status("Stopping…")
             self._log("stopping sweep…")
+        else:
+            self._log("stopped looking for trades")
+            self.statusBar().showMessage("Stopped")
+
+    def _schedule_next_sweep(self) -> None:
+        """Wait out the gap, then sweep again.
+
+        The gap exists because listings churn slower than a sweep runs, and
+        because back-to-back sweeps would spend the whole rate-limit budget on
+        re-reading the same listings.
+        """
+        if not self.sweep_action.isChecked():
+            return
+        interval_ms = int(self.cfg.sweep_interval_minutes * 60_000)
+        self.sweep_timer.start(interval_ms)
+        self._next_sweep_at = time.monotonic() + interval_ms / 1000
+
+    def _tick_countdown(self) -> None:
+        """Count down to the next sweep in the status bar."""
+        if self._next_sweep_at is None:
+            return
+        if self._sweep_worker is not None and self._sweep_worker.isRunning():
+            return
+        remaining = int(self._next_sweep_at - time.monotonic())
+        if remaining < 0:
+            return
+        mins, secs = divmod(remaining, 60)
+        self.statusBar().showMessage(f"Next sweep in {mins}:{secs:02d}")
+
+    def _sweep_progress(self, done: int, total: int, item: str) -> None:
+        """Name the item being fetched, on the tab and in the status bar.
+
+        A sweep is minutes of waiting on paced requests. "item 14 of 69" says
+        nothing about whether it is stuck; the item's name does.
+        """
+        message = f"Checking {item} — {done} of {total}"
+        self.sweep.set_status(message)
+        self.statusBar().showMessage(message)
 
     def _sweep_thread_finished(self) -> None:
+        """Runs on every exit path, including cancellation, which emits no result."""
         self.sweep.set_running(False)
         if self._sweep_worker is not None and self._sweep_worker.was_cancelled:
             self.sweep.set_status("Sweep stopped.")
             self._log("sweep stopped")
+            self.statusBar().showMessage("Stopped")
+            return
+        self._schedule_next_sweep()
 
     def _sweep_done(self, result) -> None:
-        self.sweep.set_result(result)
+        self._last_sweep = result
+        self.sweep.set_result(result, risk_appetite=self.cfg.risk_appetite)
         added = self.trade_queue.submit(result.candidates)
         if added:
             self._log(f"{added} new trade(s) queued")
@@ -830,6 +671,7 @@ class MainWindow(QMainWindow):
             assert self.cfg.outcomes_path is not None
             record_outcome(self.cfg.outcomes_path, trade.attempt_id, trade.outcome)
         self._log(f"{trade.candidate.item_name}: no reply (timed out)")
+        self.results.reload()
 
     def _announce_offer(self, trade) -> None:
         """One toast per offer, and only while no other offer is live.
@@ -895,6 +737,7 @@ class MainWindow(QMainWindow):
         )
         self._log(f"whisper copied: {c.item_name} from "
                   f"{c.listing.character or c.listing.account}")
+        self.results.reload()
         self.queue_panel.refresh(self.trade_queue)
 
     def _queue_outcome(self, trade_id: str, outcome) -> None:
@@ -910,6 +753,7 @@ class MainWindow(QMainWindow):
             assert self.cfg.outcomes_path is not None
             record_outcome(self.cfg.outcomes_path, resolved.attempt_id, outcome)
         self._log(f"{resolved.candidate.item_name}: {outcome.value}")
+        self.results.reload()
         self.trade_queue.forget_resolved()
         self.queue_panel.refresh(self.trade_queue)
 
@@ -957,6 +801,7 @@ class MainWindow(QMainWindow):
             retention_days=self.cfg.history_retention_days,
         )
         self.sweep.note_attempt(candidate, attempt_id)
+        self.results.reload()
         self._log(
             f"whisper copied — {candidate.plan.units:g} × {candidate.item_name} "
             f"from {candidate.listing.character or candidate.listing.account} "
@@ -969,15 +814,44 @@ class MainWindow(QMainWindow):
         assert self.cfg.outcomes_path is not None
         record_outcome(self.cfg.outcomes_path, attempt_id, outcome)
         self._log(f"trade outcome recorded: {outcome.value}")
+        self.results.reload()
 
-    def _bankroll_changed(self, divines: float) -> None:
+    def _bankroll_changed(self, currency: str, held: float) -> None:
         """Take the new bankroll immediately, persist it lazily.
 
         The spin box fires on every step, so the config write is deferred to
         when editing settles — the in-memory value is what the next sweep reads,
         and that is already correct.
         """
-        self.cfg.bankroll_divines = divines
+        field = f"bankroll_{currency}"
+        if not hasattr(self.cfg, field):
+            log.warning("no bankroll field for %r", currency)
+            return
+        setattr(self.cfg, field, held)
+        self._bankroll_save_timer.start()
+
+    def _appetite_changed(self, appetite: float) -> None:
+        """Re-rank what's already on screen, then persist lazily.
+
+        Waiting for the next sweep would be a fifteen-minute round trip to see
+        the effect of moving a slider.
+        """
+        self.cfg.risk_appetite = appetite
+        self.trade_queue.queue_ghosts = appetite > 0.0
+        if self._last_sweep is not None:
+            self.sweep.set_result(self._last_sweep, risk_appetite=appetite)
+        self._bankroll_save_timer.start()
+
+    def _settlement_changed(self, currency: str) -> None:
+        """Takes effect on the next sweep — every Profit figure is recomputed.
+
+        Unlike the appetite slider this cannot re-rank what is on screen: the
+        settlement unit feeds `plan_trade`'s rounding, so the profits already
+        shown were computed against the old one and would have to be rebuilt
+        from the listings.
+        """
+        self.cfg.sale_currency = currency
+        self._log(f"settling sales in {currency} from the next sweep")
         self._bankroll_save_timer.start()
 
     def _persist_bankroll(self) -> None:
@@ -985,150 +859,6 @@ class MainWindow(QMainWindow):
             save_config(self.cfg, user_config_path())
         except OSError:
             log.warning("could not save bankroll", exc_info=True)
-
-    def _scan_done(self, result: ScanResult) -> None:
-        now = datetime.now().strftime("%H:%M:%S")
-        names = result.overview.names
-
-        current = {op.key: op for op in result.opportunities}
-        new_keys = [k for k in current if k not in self._known]
-        gone_keys = [k for k in self._known if k not in current]
-
-        for k in new_keys:
-            op = current[k]
-            self._first_seen.setdefault(k, now)
-            msg = f"NEW  {route_str(op, names)}: +{op.profit_pct:.2f}% (depth {op.min_depth_divines:.1f} div)"
-            self._log(msg)
-            self._notify("Arbitrage opportunity", msg)
-        for k in gone_keys:
-            self._log(f"gone  {' → '.join(k)} (was +{self._known[k]:.2f}%)")
-            self._first_seen.pop(k, None)
-        if not new_keys and not gone_keys:
-            self._log(f"scan complete — {len(current)} above threshold, no changes")
-
-        self._known = {k: op.profit_pct for k, op in current.items()}
-        self._backload_record = None
-        self._known_currencies = dict(names)
-        self._currency_values = dict(result.overview.values)
-        self._refresh_tables(result)
-        self._note_longer_cycle(result, names)
-        # History has just gained a record; the tab is showing the one before it.
-        self.trends.reload()
-        self.trends.rename(names)
-
-        hint = " — one more outside your search window" if result.longer_cycle else ""
-        self.statusBar().showMessage(
-            f"{result.league} — scanned {now} — {len(current)} opportunity(ies){hint}"
-        )
-        if self.watch_action.isChecked():
-            self._schedule_next()
-
-    def _note_longer_cycle(self, result: ScanResult, names: dict[str, str]) -> None:
-        """Log the loop Bellman-Ford found outside the reporting window.
-
-        It goes to the log rather than the table because it isn't a signal to
-        act on: it sits below the profit threshold or beyond the maximum loop
-        length. It's a nudge that the current settings are hiding something —
-        and now that the route is named, one worth judging for yourself.
-        """
-        op = result.longer_cycle
-        key = op.cycle if op is not None else None
-        if key == self._known_longer:
-            return
-        self._known_longer = key
-        if op is None:
-            return
-        self._log(
-            f"outside window  {route_str(op, names)}: {op.profit_pct:+.2f}% "
-            f"(depth {op.min_depth_divines:.1f} div) — raise the max loop length "
-            f"or lower the profit threshold to have it reported"
-        )
-
-    def _scan_failed(self, message: str) -> None:
-        now = datetime.now().strftime("%H:%M:%S")
-        self._log(f"scan failed: {message}")
-        self.statusBar().showMessage(f"Scan failed: {message}")
-        if self.watch_action.isChecked():
-            self._schedule_next()  # keep watching; next interval may succeed
-
-    def _refresh_tables(self, result: ScanResult) -> None:
-        self._last_result = result
-        names = result.overview.names
-        # Unfiltered on purpose: Quick Lookup ignores the exclusion list, so it
-        # gets the whole book rather than the trimmed view the tables show.
-        self.lookup.set_edges(result.edges, result.overview.fetched_at)
-
-        ops = result.opportunities
-        self.ops_table.setSortingEnabled(False)
-        self.ops_table.setRowCount(len(ops))
-        for r, op in enumerate(ops):
-            self._set_row(
-                self.ops_table,
-                r,
-                [
-                    TextItem(route_str(op, names)),
-                    NumericItem(fmt_pct(op.profit_pct), op.profit_pct),
-                    NumericItem(fmt_depth(op.min_depth_divines), op.min_depth_divines),
-                    # Unstamped loops sort to the end rather than the top: an
-                    # unknown spread is the worst case, not the best.
-                    NumericItem(
-                        fmt_skew(op.skew_s),
-                        op.skew_s if op.skew_s is not None else float("inf"),
-                    ),
-                    TextItem(self._first_seen.get(op.key, "—")),
-                ],
-            )
-        self.ops_table.setSortingEnabled(True)
-
-        # Excluded items stay visible here now: the Excluded column is how you
-        # add and remove them, which needs the prices you're judging in view.
-        market_names, market_values, market_volumes = self._market_inputs(result)
-        self.market.render(
-            names=market_names,
-            values=market_values,
-            volumes=market_volumes,
-            in_graph=set(result.nodes),
-        )
-
-        # Book Edges still hides excluded items, unlike Market. An excluded item
-        # is never a graph node, so a fresh scan has no edges for it anyway;
-        # this only bites on stale data — re-rendering the previous scan after
-        # an exclusion, or restoring edges from history recorded before it.
-        excluded = {c.strip().lower() for c in self.cfg.exclude_currencies}
-        edges = sorted(
-            (
-                e for e in result.edges.values()
-                if e.src not in excluded and e.dst not in excluded
-            ),
-            key=lambda e: (e.src, e.dst),
-        )
-        self.edges_table.setSortingEnabled(False)
-        self.edges_table.setRowCount(len(edges))
-        for r, e in enumerate(edges):
-            src_cell = TextItem(names.get(e.src, e.src))
-            src_cell.setIcon(self.icons.icon(e.src))
-            dst_cell = TextItem(names.get(e.dst, e.dst))
-            dst_cell.setIcon(self.icons.icon(e.dst))
-            self._set_row(
-                self.edges_table,
-                r,
-                [
-                    src_cell,
-                    dst_cell,
-                    NumericItem(fmt_rate(e.raw_rate), e.raw_rate),
-                    NumericItem(fmt_rate(e.rate), e.rate),
-                    NumericItem(fmt_depth(e.depth_filled_divines), e.depth_filled_divines),
-                ],
-            )
-        self.edges_table.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
-        self.edges_table.setSortingEnabled(True)
-
-        # New rows arrive visible, so a filter typed before a scan finished
-        # would silently stop applying.
-        for table, field, columns in self._filters:
-            self._apply_filter(table, field.text(), columns)
-
-    # ------------------------------------------------------------------ ui state
 
     def _restore_ui_state(self) -> None:
         """Put the window back where it was, if that's still a sensible place."""
@@ -1162,71 +892,12 @@ class MainWindow(QMainWindow):
             },
         )
 
-    def _market_inputs(
-        self, result: ScanResult
-    ) -> tuple[dict[str, str], dict[str, float], dict[str, float]]:
-        """The whole economy for the Market tab, with the scan's numbers on top.
-
-        A scan only fetches the Currency category — that's all the graph trades
-        — so rendering Market straight from `result.overview` showed 51 items
-        instead of 639 and fell back to raw ids for every name it didn't have.
-        The universe is the complete picture; the scan overrides only the part
-        it actually refreshed.
-        """
-        names: dict[str, str] = {}
-        values: dict[str, float] = {}
-        volumes: dict[str, float] = {}
-        if self._universe is not None:
-            names = self._universe.names()
-            values = self._universe.values()
-            volumes = {i.id: i.volume_divine for i in self._universe.items.values()}
-
-        overview = result.overview
-        # A history-restored result names unknown items after their own id, so
-        # letting those through would put "soul-core-of-zalatl" back on screen.
-        names.update({k: v for k, v in overview.names.items() if v and v != k})
-        values.update(overview.values)
-        for item_id, volume in overview.volumes.items():
-            # The primary unit is recorded with infinite volume as a placeholder.
-            # That's not a measurement, so it never displaces a real number.
-            if math.isfinite(volume) or item_id not in volumes:
-                volumes[item_id] = volume
-        return names, values, volumes
-
     @staticmethod
     def _set_row(table: QTableWidget, row: int, items: list[QTableWidgetItem]) -> None:
         for col, item in enumerate(items):
             table.setItem(row, col, item)
 
     # ------------------------------------------------------------------ watch loop
-
-    def _watch_toggled(self, on: bool) -> None:
-        if on:
-            self._log("watch started")
-            self.stop_action.setEnabled(True)
-            self.start_scan()
-        else:
-            self._log("watch stopped")
-            self.watch_timer.stop()
-            self._next_scan_at = None
-
-    def _schedule_next(self) -> None:
-        interval_ms = int(self.cfg.watch_interval_minutes * 60_000)
-        self.watch_timer.start(interval_ms)
-        self._next_scan_at = time.monotonic() + interval_ms / 1000
-
-    def _tick_countdown(self) -> None:
-        if self._next_scan_at is None or (self._worker and self._worker.isRunning()):
-            return
-        remaining = int(self._next_scan_at - time.monotonic())
-        if remaining > 0:
-            mins, secs = divmod(remaining, 60)
-            self.statusBar().showMessage(
-                self.statusBar().currentMessage().split(" | next scan")[0]
-                + f" | next scan in {mins}:{secs:02d}"
-            )
-
-    # ------------------------------------------------------------------ misc
 
     def open_settings(self) -> None:
         dlg = SettingsDialog(
@@ -1255,6 +926,7 @@ class MainWindow(QMainWindow):
         self.trade_queue.offer_window_s = self.cfg.offer_window_s
         self.trade_queue.available_ttl_s = self.cfg.available_ttl_s
         self.trade_queue.awaiting_timeout_s = self.cfg.awaiting_timeout_s
+        self.trade_queue.queue_ghosts = self.cfg.risk_appetite > 0.0
 
         rebind = (
             previous.trade_hotkey != self.cfg.trade_hotkey
@@ -1291,9 +963,8 @@ class MainWindow(QMainWindow):
         self._log(f"{len(excluded)} item(s) excluded from the search")
 
     def _reapply_view_settings(self) -> None:
-        """Re-render tables after a settings change, without a fresh scan."""
-        if self._last_result is not None:
-            self._refresh_tables(self._last_result)
+        """Re-render the Market tab after a settings or icon change."""
+        self._render_market()
 
     def _notify(self, title: str, message: str) -> None:
         if self.tray is not None and self.tray.isVisible():
@@ -1309,7 +980,15 @@ class MainWindow(QMainWindow):
         self.update_banner.show()
 
     def _log(self, line: str, ts: datetime | None = None) -> None:
-        """Append a log line, timestamped. `ts` overrides for replayed history."""
+        """Append a log line, timestamped. `ts` overrides for replayed history.
+
+        Anything logged before the Log tab is built is buffered instead —
+        setup logs from the middle of _build_central, and a startup crash in
+        the logger would take down the whole window before it ever appeared.
+        """
+        if getattr(self, "log_view", None) is None:
+            self._pending_log.append(line)
+            return
         stamp = (ts or datetime.now()).strftime("%H:%M:%S")
         self.log_view.appendPlainText(f"[{stamp}] {line}")
 
@@ -1326,11 +1005,10 @@ class MainWindow(QMainWindow):
         """Stop timers and join worker threads before the event loop goes away."""
         self._save_ui_state()
         self.icons.shutdown()
-        self.watch_timer.stop()
+        self.sweep_timer.stop()
         self.countdown_timer.stop()
         if getattr(self, "_hotkey", None) is not None:
             self._hotkey.unregister()
-        stop_thread(self._worker)
         stop_thread(self._sweep_worker)
         stop_thread(getattr(self, "_recheck_worker", None), timeout_ms=2000)
         stop_thread(getattr(self, "_update_worker", None), timeout_ms=2000)
@@ -1339,7 +1017,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:
         # While watching, closing hides to tray so alerts keep coming — but only
         # where a tray actually exists, otherwise the window would be unreachable.
-        if self.watch_action.isChecked() and self.tray_available and not self._quitting:
+        if self.sweep_action.isChecked() and self.tray_available and not self._quitting:
             event.ignore()
             self.hide()
             self.tray.showMessage(

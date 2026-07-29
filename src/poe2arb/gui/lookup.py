@@ -28,14 +28,9 @@ from PySide6.QtWidgets import (
 )
 
 from ..format import fmt_num
-from ..graph import Edge
 from ..market import Universe
 from .item_picker import ItemPicker
 from .theme import muted_color
-
-# Past this, "from the last scan" is overstating it — the book has moved.
-LIVE_RATE_MAX_AGE_MINUTES = 45.0
-
 
 def ratio_parts(want_per_have: float) -> tuple[float, float]:
     """Normalise a rate to an `x : y` pair with the smaller side at exactly 1.
@@ -48,27 +43,11 @@ def ratio_parts(want_per_have: float) -> tuple[float, float]:
     return 1.0, 1.0 / want_per_have
 
 
-def fmt_age(fetched_at: datetime | None) -> str:
-    """'4 minutes ago' — or empty when there's no timestamp to report."""
-    if fetched_at is None:
-        return ""
-    if fetched_at.tzinfo is None:
-        fetched_at = fetched_at.replace(tzinfo=timezone.utc)
-    minutes = (datetime.now(timezone.utc) - fetched_at).total_seconds() / 60.0
-    if minutes < 1.5:
-        return "just now"
-    if minutes < 90:
-        return f"{round(minutes)} minutes ago"
-    return f"{round(minutes / 60)} hours ago"
-
-
 class QuickLookup(QGroupBox):
     def __init__(self, parent=None):
         super().__init__("Quick Lookup", parent)
         self._universe: Universe | None = None
         self._base_id = "adaptive"
-        self._edges: dict[tuple[str, str], Edge] = {}
-        self._edges_at: datetime | None = None
 
         outer = QVBoxLayout(self)
         grid = QGridLayout()
@@ -150,14 +129,6 @@ class QuickLookup(QGroupBox):
             self.want_picker.rebuild(self._universe, base_id)
             self.have_picker.rebuild(self._universe, base_id)
 
-    def set_edges(
-        self, edges: dict[tuple[str, str], Edge], fetched_at: datetime | None = None
-    ) -> None:
-        """Supply the last scan's order book, so lookups can prefer live rates."""
-        self._edges = edges or {}
-        self._edges_at = fetched_at
-        self._recalculate()
-
     def _swap(self) -> None:
         want, have = self.want_picker.current_id(), self.have_picker.current_id()
         self.want_picker.set_current(have)
@@ -165,28 +136,6 @@ class QuickLookup(QGroupBox):
         self._recalculate()
 
     # ------------------------------------------------------------------ pricing
-
-    def _stale(self) -> bool:
-        """True once the stored book is too old to call a live rate."""
-        if self._edges_at is None:
-            return False  # no timestamp offered; trust the caller
-        at = self._edges_at
-        if at.tzinfo is None:
-            at = at.replace(tzinfo=timezone.utc)
-        minutes = (datetime.now(timezone.utc) - at).total_seconds() / 60.0
-        return minutes > LIVE_RATE_MAX_AGE_MINUTES
-
-    def live_rate(self, have_id: str, want_id: str) -> float | None:
-        """Book rate for this direction, if a recent scan priced it.
-
-        The book rate before fees, which is what the pair is being offered at —
-        the margin-adjusted number belongs to the profit calculation, not to a "what
-        is this worth" lookup.
-        """
-        if not self._edges or self._stale():
-            return None
-        edge = self._edges.get((have_id, want_id))
-        return edge.raw_rate if edge is not None and edge.raw_rate > 0 else None
 
     def _recalculate(self) -> None:
         want_id = self.want_picker.current_id()
@@ -201,8 +150,7 @@ class QuickLookup(QGroupBox):
             self._show_message("Those are the same item.")
             return
 
-        live = self.live_rate(have_id, want_id)
-        rate = live if live is not None else self._universe.convert(have_id, want_id)
+        rate = self._universe.convert(have_id, want_id)
         if rate is None or rate <= 0:
             self._show_message("No price available for that pair.")
             return
@@ -216,19 +164,25 @@ class QuickLookup(QGroupBox):
             f" &nbsp;·&nbsp; "
             f"<b>1 {want.name}</b> costs <b>{fmt_num(1.0 / rate, 2)} {have.name}</b>"
         )
-        self.note.setText(self._source_note(live is not None))
+        self.note.setText(self._source_note(want_id, have_id))
 
-    def _source_note(self, is_live: bool) -> str:
-        if is_live:
-            age = fmt_age(self._edges_at)
-            when = f" from the scan {age}" if age else " from the last scan"
+    def _source_note(self, want_id: str, have_id: str) -> str:
+        """Which price source this ratio came from, and what it's worth.
+
+        Both sides have to be Currency Exchange priced for the ratio to be a
+        Currency Exchange ratio — mixing one CE price with one consensus price
+        gives a number that is neither.
+        """
+        priced = self._universe.ce_priced if self._universe is not None else frozenset()
+        if want_id in priced and have_id in priced:
             return (
-                f"Live order-book rate{when} — what people are actually offering, "
-                f"at the fill depth you configured. Exchange fees aren't included."
+                "In-game Currency Exchange rate — what this pair is actually "
+                "trading at on the venue you'd use. Fees aren't included."
             )
         return (
-            "poe.ninja fair value — a guide, not a live offer. Real trades fill "
-            "at whatever people are listing. Scan the pair for a live rate."
+            "poe.ninja consensus — a guide, not a live rate. The Currency "
+            "Exchange doesn't publish a price for both sides of this pair, "
+            "which usually means one of them barely trades."
         )
 
     def _show_message(self, text: str) -> None:

@@ -6,6 +6,81 @@ says what changed for you and, where it matters, why.
 Versions follow `MAJOR.MINOR.PATCH`. Until 1.0 the minor number moves for
 anything user-visible.
 
+## [0.4.0] — unreleased
+
+0.3.0 established that the triangular loop search was reading the wrong market.
+This release removes it. Everything that existed to serve it — the Scan and
+Watch buttons, the Book Edges tab, the Trends charts, half the Settings dialog —
+is gone, and what's left is the part that actually finds trades.
+
+### Removed
+
+- **Scan now and Watch.** They ran the loop search. It never found a real trade
+  in nine versions, because the prices it was reading describe a market nobody
+  uses. One toolbar toggle, **Find trades**, replaces both.
+- **The Book Edges tab.** A raw dump of the loop search's graph. Quick Lookup
+  answers "what is this pair worth" without it.
+- **The Trends tab**, replaced by **Results** — see below. It charted the scan
+  history, so on a sweep-only workflow it plotted a flat line at zero.
+- **Eight settings** that only tuned the loop search: profit threshold, safety
+  margin per hop, watch interval, currencies in graph, max loop length,
+  liquidity floor, skip currencies worth over, fill depth per edge.
+- **The `scan`, `watch` and `rates` CLI commands.** `poe2-arb sweep` remains.
+
+If your config file has any of the removed settings in it, they're ignored with
+a note in the log — the app will not refuse to start over them.
+
+### Added
+
+- **Find trades is a toggle, not a button.** Switch it on and it sweeps, waits,
+  and sweeps again until you switch it off. Listings go stale in minutes, so
+  "keep looking" is the useful mode; the gap between sweeps is settable.
+- **A Results tab**, over the log of every whisper you've copied. Fill rates and
+  divines earned, broken down by discount size, listing age and whether the
+  seller was AFK — the three things that might predict whether a whisper gets
+  answered. **It refuses to quote a rate from fewer than 10 attempts**, because
+  a fill rate from three whispers is noise with a percent sign on it. Once
+  there's enough, it names the discount range earning you the most per whisper.
+- **Your request budget, bottom right.** GGG reports how much of the rate limit
+  your IP has spent on every reply — including requests from other trade tools
+  you're running. It goes amber near the limit and red during a lockout.
+- **Market tabs wrap onto a second row** instead of hiding the last few behind
+  scroll arrows, and the group filter takes more than one selection at a time.
+- **Prices now come from the in-game Currency Exchange** wherever it trades the
+  item — 226 of the 637 in the catalogue — with poe.ninja's consensus as the
+  fallback for the rest. The Currency Exchange is the venue you'd actually sell
+  into, and the only source that's been checked against the game itself. The
+  Market tab's status line says how many came from each; Quick Lookup names its
+  source per pair. (Where both have a price they agree closely — median 3.3%,
+  and under 1% on the busiest items — so expect small changes, not upheaval.)
+
+### Changed
+
+- **Bankroll is split into divines and exalted**, and lives on the Opportunities
+  tab next to the trades it constrains. One pooled divine figure was wrong: a
+  seller wanting exalted can only be paid in exalted, and converting on the
+  Currency Exchange costs the spread — so a single number promised quantities
+  you couldn't actually buy.
+- **A Long shots slider**, also on Opportunities. Left ranks by what has actually
+  been seen to fill and buries the huge discounts; right ranks on profit alone
+  and puts them first. Nothing is ever hidden — only the order changes.
+- **Settlement currency moved out of Settings** onto the Opportunities tab. It
+  changes every Profit figure by a large factor, which is not something to bury
+  in a dialog.
+- Sweep progress **names the item being fetched** rather than counting to 69.
+- The Trades tab's first column is now labelled **Odds**, and its tooltip says
+  what ●, ○ and × mean.
+- Market drops the "In graph" column, and centres everything but the item name.
+
+### Fixed
+
+- **The app would not start a second time once the hotkey was enabled.** The
+  hotkey setup logs a line, and it ran before the Log tab existed. First launch
+  was fine because the hotkey is off by default — so the crash only appeared
+  after you turned it on, and then on every launch after that. There are now
+  tests that build the whole window; previously nothing did, which is how this
+  shipped.
+
 ## [0.3.0] — 2026-07-29
 
 The app was looking at the wrong market. This release moves it to the right one,

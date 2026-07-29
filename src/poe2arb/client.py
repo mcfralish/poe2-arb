@@ -22,7 +22,7 @@ import httpx
 
 from .config import Config
 from .market import CATEGORIES, Universe, merge_overviews
-from .rate_limit import parse_state, parse_windows
+from .rate_limit import BudgetState, parse_state, parse_windows, tightest_window
 
 log = logging.getLogger(__name__)
 
@@ -438,9 +438,18 @@ class GggExchangeClient:
     honors rate-limit headers.
     """
 
-    def __init__(self, cfg: Config, should_cancel: Callable[[], bool] | None = None):
+    def __init__(
+        self,
+        cfg: Config,
+        should_cancel: Callable[[], bool] | None = None,
+        on_budget: Callable[[BudgetState], None] | None = None,
+    ):
         self.cfg = cfg
         self.cache = DiskCache(cfg.cache_dir)
+        # Called with the tightest window's usage after every reply that
+        # carries the headers, so the UI can show what's left of the budget.
+        self._on_budget = on_budget
+        self.budget: BudgetState | None = None
         self._http = httpx.Client(
             headers={"User-Agent": cfg.user_agent, "Content-Type": "application/json"},
             timeout=30,
@@ -469,6 +478,9 @@ class GggExchangeClient:
             return
         windows = parse_windows(limit_header)
         state = parse_state(state_header)
+        self.budget = tightest_window(windows, state)
+        if self.budget is not None and self._on_budget is not None:
+            self._on_budget(self.budget)
         backoff = 0.0
         for w in windows:
             used, restricted_for = state.get(w.period_s, (0, 0))

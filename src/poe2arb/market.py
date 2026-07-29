@@ -12,7 +12,7 @@ So a single flat id -> Item map is safe and values are directly comparable.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 
 # Exchange-overview categories, as poe.ninja's `type` parameter spells them.
@@ -303,9 +303,38 @@ class Universe:
     league: str
     fetched_at: datetime
     items: dict[str, Item] = field(default_factory=dict)
+    # Items whose value came from the Currency Exchange rather than poe.ninja.
+    ce_priced: frozenset[str] = frozenset()
 
     def __len__(self) -> int:
         return len(self.items)
+
+    def with_ce_prices(self, ce: dict[str, float]) -> Universe:
+        """A copy priced from the Currency Exchange wherever it has a price.
+
+        The CE is the venue you would actually sell into, and it is the only
+        source ever checked against the game itself. But it only prices items
+        with real traded volume — 226 of 637 in the league this was measured in
+        — so poe.ninja's consensus stays as the fallback rather than the whole
+        catalogue losing its prices.
+
+        Returns a new Universe; the poe.ninja figures are left intact so the
+        two can be compared. `ce_priced` records which items were overridden.
+        """
+        if not ce:
+            return self
+        items = {
+            item_id: (
+                replace(item, value_divine=ce[item_id]) if ce.get(item_id) else item
+            )
+            for item_id, item in self.items.items()
+        }
+        return Universe(
+            league=self.league,
+            fetched_at=self.fetched_at,
+            items=items,
+            ce_priced=frozenset(ce) & set(self.items),
+        )
 
     def get(self, item_id: str) -> Item | None:
         return self.items.get(item_id)

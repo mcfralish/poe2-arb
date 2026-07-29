@@ -36,7 +36,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..listings import Band, whisper_text
+from ..listings import Band, rank_candidates, whisper_text
 from ..outcomes import Outcome
 from .table_items import NumericItem, TextItem
 from .theme import muted_color
@@ -44,7 +44,13 @@ from .theme import muted_color
 log = logging.getLogger(__name__)
 
 COLUMNS = [
-    ("", "Whether the discount is one that has been seen to fill."),
+    (
+        "Odds",
+        "Whether this is the kind of discount that has been seen to fill.\n"
+        "●  plausible — a real seller under market. These are the ones that fill.\n"
+        "○  thin — the discount is inside the Exchange price's own margin of error.\n"
+        "×  ghost — far below market; measured fill rate on these is zero.",
+    ),
     ("Item", "What you'd be buying."),
     (
         "Listed",
@@ -91,9 +97,6 @@ BAND_TIP = {
 class SweepPanel(QWidget):
     """Ranked cross-venue candidates, with one-click whisper copying."""
 
-    sweep_requested = Signal()
-    stop_requested = Signal()
-    bankroll_changed = Signal(float)
     attempt_copied = Signal(object)          # Candidate
     recheck_requested = Signal(object)       # Candidate
     outcome_reported = Signal(str, object)   # (attempt id, Outcome)
@@ -112,37 +115,10 @@ class SweepPanel(QWidget):
 
         layout = QVBoxLayout(self)
 
+        # Starting and stopping lives on the toolbar toggle: two ways to run
+        # the same thing, one of them a one-shot and one a loop, is a way to
+        # end up with two sweeps arguing over the request budget.
         controls = QHBoxLayout()
-        self.sweep_btn = QPushButton("Find trades")
-        self.sweep_btn.setToolTip(
-            "Check live listings for every tracked item against Currency Exchange "
-            "prices. Takes a few minutes — requests to the trade API are paced."
-        )
-        self.sweep_btn.clicked.connect(self.sweep_requested)
-        controls.addWidget(self.sweep_btn)
-
-        self.stop_btn = QPushButton("Stop")
-        self.stop_btn.setEnabled(False)
-        self.stop_btn.clicked.connect(self.stop_requested)
-        controls.addWidget(self.stop_btn)
-
-        controls.addSpacing(12)
-        controls.addWidget(QLabel("Bankroll:"))
-        self.bankroll = QDoubleSpinBox()
-        self.bankroll.setRange(0.0, 1_000_000.0)
-        self.bankroll.setDecimals(0)
-        self.bankroll.setSingleStep(10.0)
-        self.bankroll.setSuffix(" div")
-        self.bankroll.setSpecialValueText("no limit")
-        self.bankroll.setToolTip(
-            "Divines you have to spend. Trades you can't afford are still listed, "
-            "but the quantity is capped at what your bankroll reaches. "
-            "0 means don't cap."
-        )
-        self.bankroll.valueChanged.connect(self.bankroll_changed)
-        controls.addWidget(self.bankroll)
-
-        controls.addSpacing(12)
         self.hide_ghosts = QCheckBox("Hide ghosts")
         self.hide_ghosts.setToolTip(BAND_TIP[Band.GHOST])
         self.hide_ghosts.toggled.connect(self._apply_filter)
@@ -218,7 +194,7 @@ class SweepPanel(QWidget):
         layout.addLayout(bottom)
 
         self.set_status(
-            "No sweep yet. \"Find trades\" checks live listings against "
+            "No sweep yet. Switch on Find trades to check live listings against "
             "Currency Exchange prices."
         )
 
@@ -234,22 +210,27 @@ class SweepPanel(QWidget):
         binding without caring which of them uses it.
         """
 
-    def set_bankroll(self, divines: float) -> None:
-        blocked = self.bankroll.blockSignals(True)
-        self.bankroll.setValue(divines)
-        self.bankroll.blockSignals(blocked)
-
     def set_running(self, running: bool) -> None:
-        self.sweep_btn.setEnabled(not running)
-        self.stop_btn.setEnabled(running)
+        """No-op hook: the toolbar toggle owns the run/stop state now.
+
+        Kept so the window drives both panels through the same calls.
+        """
 
     def set_status(self, text: str) -> None:
         self.status.setText(text)
 
     # --- content -----------------------------------------------------------
 
-    def set_result(self, result) -> None:
-        self._candidates = list(result.candidates)
+    def set_result(self, result, *, risk_appetite: float = 0.0) -> None:
+        """Show a sweep. Re-callable with the same result to re-rank in place.
+
+        Moving the long-shots slider has to reorder what is already on screen —
+        waiting for the next sweep is a fifteen-minute round trip to see the
+        effect of dragging a slider.
+        """
+        self._candidates = rank_candidates(
+            list(result.candidates), risk_appetite=risk_appetite
+        )
         self._attempt_ids.clear()
         self._rechecked.clear()
         self._last_copied = None

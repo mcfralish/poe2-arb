@@ -204,8 +204,24 @@ def test_cancellation_aborts_the_sweep(snapshot):
 def test_progress_is_reported_per_item(snapshot):
     seen = []
     items = select_sweep_items(snapshot, cfg())
-    run_sweep(cfg(), ggg=FakeGgg(), snapshot=snapshot, progress=lambda n, t: seen.append((n, t)))
-    assert seen == [(i, len(items)) for i in range(1, len(items) + 1)]
+    run_sweep(
+        cfg(), ggg=FakeGgg(), snapshot=snapshot,
+        progress=lambda n, t, what: seen.append((n, t, what)),
+    )
+    assert [(n, t) for n, t, _ in seen] == [
+        (i, len(items)) for i in range(1, len(items) + 1)
+    ]
+
+
+def test_progress_names_the_item_being_fetched(snapshot):
+    """"item 14 of 69" can't be told apart from a stall; a name can."""
+    seen = []
+    run_sweep(
+        cfg(), ggg=FakeGgg(), snapshot=snapshot,
+        progress=lambda n, t, what: seen.append(what),
+    )
+    names = {i.name for i in snapshot.items.values()}
+    assert seen and all(what in names for what in seen)
 
 
 def test_injected_clients_are_not_closed_by_the_sweep(snapshot):

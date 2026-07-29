@@ -91,15 +91,15 @@ class TestConfigPersistence:
 
     def test_changed_values_are_written(self, tmp_path):
         path = tmp_path / "poe2arb.toml"
-        save_config(Config(profit_threshold_pct=1.0, max_currencies=15), path)
+        save_config(Config(min_profit_divines=1.0, sweep_items=15), path)
         text = path.read_text()
-        assert "profit_threshold_pct = 1.0" in text
-        assert "max_currencies = 15" in text
+        assert "min_profit_divines = 1.0" in text
+        assert "sweep_items = 15" in text
 
     def test_saved_config_follows_new_defaults(self, tmp_path):
         """A user who never touched pacing picks up a safer default later."""
         path = tmp_path / "poe2arb.toml"
-        save_config(Config(profit_threshold_pct=2.0), path)
+        save_config(Config(min_profit_divines=2.0), path)
         assert load_config(path).request_interval_s == Config().request_interval_s
 
     def test_explicit_custom_path_survives(self, tmp_path):
@@ -112,3 +112,37 @@ class TestConfigPersistence:
         path = tmp_path / "poe2arb.toml"
         save_config(Config(), path)
         assert load_config(path) == Config()
+
+
+class TestExampleConfig:
+    """The shipped example must stay loadable and stay true.
+
+    It drifted silently before: it still documented `max_cycle_len` and
+    `profit_threshold_pct` after both were removed.
+    """
+
+    PATH = Path(__file__).resolve().parent.parent / "poe2arb.example.toml"
+
+    def test_it_loads(self):
+        assert load_config(self.PATH).sweep_items > 0
+
+    def test_it_documents_no_setting_that_no_longer_exists(self):
+        import tomllib
+
+        from poe2arb.config import RETIRED_KEYS
+
+        with open(self.PATH, "rb") as f:
+            keys = set(tomllib.load(f))
+        assert not (keys & RETIRED_KEYS)
+
+    def test_its_values_match_the_shipped_defaults(self):
+        """An example that disagrees with the code teaches the wrong thing."""
+        import tomllib
+
+        with open(self.PATH, "rb") as f:
+            written = tomllib.load(f)
+        default = Config()
+        for key, value in written.items():
+            if key in ("cache_dir", "outcomes_path", "user_agent", "league"):
+                continue
+            assert getattr(default, key) == value, key

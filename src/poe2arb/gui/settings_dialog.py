@@ -1,4 +1,12 @@
-"""Settings dialog: edits the Config fields that matter day-to-day."""
+"""Settings dialog: edits the Config fields that matter day-to-day.
+
+Grouped by which of the app's two jobs a setting belongs to. That grouping is
+the point, not decoration: 0.3.0 established that the triangular cycle search
+was reading the wrong market, so its knobs — loop length, graph size, per-hop
+margin — no longer describe anything the app finds trades with. They still work,
+and they are still here, but sitting unlabelled beside the live settings they
+read as advice about how to find trades, which they are not.
+"""
 
 from __future__ import annotations
 
@@ -13,20 +21,15 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QLabel,
     QLineEdit,
+    QScrollArea,
     QSpinBox,
     QVBoxLayout,
+    QWidget,
 )
 
 from ..config import Config
 from .theme import error_color, muted_color, warning_color
-from ..rate_limit import (
-    Severity,
-    check_pacing,
-    min_safe_interval,
-    requests_per_scan,
-    scan_duration_estimate_s,
-    worst_severity,
-)
+from ..rate_limit import Severity, check_pacing, min_safe_interval, worst_severity
 
 
 class SettingsDialog(QDialog):
@@ -48,62 +51,21 @@ class SettingsDialog(QDialog):
         self._universe = universe
 
         layout = QVBoxLayout(self)
-        form = QFormLayout()
-        layout.addLayout(form)
+        # The form is taller than a 1080p screen once every section is open,
+        # and a dialog that runs off the bottom hides its own OK button.
+        page = QWidget()
+        form = QFormLayout(page)
+        scroll = QScrollArea()
+        scroll.setWidget(page)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        layout.addWidget(scroll, stretch=1)
+
+        self._section(form, "General")
 
         self.league = QLineEdit(cfg.league or "")
         self.league.setPlaceholderText("blank = auto-detect current league")
         form.addRow("League", self.league)
-
-        self.threshold = self._dspin(cfg.profit_threshold_pct, 0.0, 100.0, 0.1, "%")
-        form.addRow("Profit threshold", self.threshold)
-
-        self.margin = self._dspin(cfg.safety_margin_pct, 0.0, 20.0, 0.1, "%")
-        self.margin.setToolTip(
-            "Extra caution subtracted from every step of a loop.\n"
-            "Not a fee: the exchange charges gold, which isn't priced in\n"
-            "divines, and slippage is already handled by pricing each edge\n"
-            "at the depth you set. This covers the offer being gone when\n"
-            "you get there. 0 reports what the books actually say."
-        )
-        form.addRow("Safety margin per hop", self.margin)
-
-        self.interval = self._dspin(
-            cfg.watch_interval_minutes, 0.5, 240.0, 0.5, " min", decimals=1
-        )
-        form.addRow("Watch interval", self.interval)
-
-        self.max_currencies = QSpinBox()
-        self.max_currencies.setRange(3, 20)
-        self.max_currencies.setValue(cfg.max_currencies)
-        form.addRow("Currencies in graph (top-N by volume)", self.max_currencies)
-
-        self.max_cycle_len = QComboBox()
-        self.max_cycle_len.addItems(["3", "4"])
-        self.max_cycle_len.setCurrentText(str(cfg.max_cycle_len))
-        form.addRow("Max loop length", self.max_cycle_len)
-
-        self.liquidity = self._dspin(
-            cfg.liquidity_floor_divines, 0.0, 100000.0, 1.0, " div", decimals=0
-        )
-        self.liquidity.setToolTip(
-            "Ignore currencies that trade less than this much per day. Quiet "
-            "markets show tempting prices that never actually fill."
-        )
-        form.addRow("Liquidity floor (daily volume)", self.liquidity)
-
-        self.max_value = self._dspin(
-            cfg.max_currency_value_divines, 0.0, 1_000_000.0, 5.0, " div", decimals=0
-        )
-        self.max_value.setSpecialValueText("no limit")
-        self.max_value.setToolTip(
-            "Also skip any currency worth more than this per unit.\n"
-            "Set to 0 for no limit."
-        )
-        form.addRow("Skip currencies worth over", self.max_value)
-
-        self.depth = self._dspin(cfg.depth_divines, 0.5, 1000.0, 0.5, " div", decimals=1)
-        form.addRow("Fill depth per edge", self.depth)
 
         self.request_interval = self._dspin(
             cfg.request_interval_s, 1.0, 120.0, 0.1, " s", decimals=1
@@ -140,6 +102,67 @@ class SettingsDialog(QDialog):
         self.sound = QCheckBox("Play sound with notifications")
         self.sound.setChecked(cfg.alert_sound)
         form.addRow("", self.sound)
+
+        self._section(form, "Finding trades")
+
+        self.sweep_items = QSpinBox()
+        self.sweep_items.setRange(5, 300)
+        self.sweep_items.setValue(cfg.sweep_items)
+        self.sweep_items.setToolTip(
+            "How many items each sweep checks, busiest on the Currency Exchange\n"
+            "first. More is more thorough and takes proportionally longer — the\n"
+            "requests are paced, so this is the main thing that sets sweep length."
+        )
+        form.addRow("Items per sweep", self.sweep_items)
+
+        self.sweep_interval = self._dspin(
+            cfg.sweep_interval_minutes, 1.0, 240.0, 1.0, " min", decimals=0
+        )
+        self.sweep_interval.setToolTip(
+            "How long to wait after one sweep before starting the next, while\n"
+            "Find trades is on. Listings churn slower than a sweep runs, so\n"
+            "back-to-back sweeps mostly re-read the same listings."
+        )
+        form.addRow("Wait between sweeps", self.sweep_interval)
+
+        self.sweep_min_value = self._dspin(
+            cfg.sweep_min_value_divines, 0.0, 1000.0, 0.5, " div", decimals=1
+        )
+        self.sweep_min_value.setToolTip(
+            "Skip items worth less than this each. Stock on this venue is in\n"
+            "single digits, so a cheap item cannot clear enough profit in one\n"
+            "trade to be worth the message."
+        )
+        form.addRow("Skip items worth under", self.sweep_min_value)
+
+        self.min_profit = self._dspin(
+            cfg.min_profit_divines, 0.0, 100.0, 0.25, " div", decimals=2
+        )
+        self.min_profit.setToolTip(
+            "Drop trades that clear less than this. Settling in exalted makes\n"
+            "tiny trades arithmetically profitable; +0.02 divines is real and\n"
+            "still not worth whispering a stranger about."
+        )
+        form.addRow("Minimum profit per trade", self.min_profit)
+
+        self.min_gap = self._dspin(cfg.min_gap_ratio, 1.0, 3.0, 0.01, "x", decimals=2)
+        self.min_gap.setToolTip(
+            "Below this, a discount is inside the Exchange price's own margin\n"
+            "of error — the reference ran 0.4%-4.7% under the live game — so\n"
+            "neither the gap nor the profit means much. Marked thin, not hidden."
+        )
+        form.addRow("Discount is credible from", self.min_gap)
+
+        self.max_gap = self._dspin(cfg.max_gap_ratio, 1.0, 20.0, 0.05, "x", decimals=2)
+        self.max_gap.setToolTip(
+            "Above this, a listing is treated as a ghost. Across ~10 whispers at\n"
+            "3.8x-12.5x, none filled: they are mistakes, stale listings, or\n"
+            "already sold. Use the Long shots slider to decide how far to chase\n"
+            "them anyway."
+        )
+        form.addRow("Ghost above", self.max_gap)
+
+        self._section(form, "The trade queue")
 
         self.offer_window = self._dspin(
             cfg.offer_window_s, 5.0, 300.0, 5.0, " s", decimals=0
@@ -196,6 +219,7 @@ class SettingsDialog(QDialog):
         self.budget_label = QLabel()
         self.budget_label.setWordWrap(True)
         layout.addWidget(self.budget_label)
+        self.setMinimumWidth(560)
 
         self.buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
@@ -214,7 +238,7 @@ class SettingsDialog(QDialog):
         layout.addWidget(self.buttons)
 
         for widget in (
-            self.request_interval, self.max_currencies, self.interval, self.safety
+            self.request_interval, self.sweep_items, self.sweep_interval, self.safety
         ):
             widget.valueChanged.connect(self._revalidate)
         self._revalidate()
@@ -229,14 +253,7 @@ class SettingsDialog(QDialog):
         """
         d = Config()
         self.league.setText("")
-        self.threshold.setValue(d.profit_threshold_pct)
-        self.margin.setValue(d.safety_margin_pct)
-        self.interval.setValue(d.watch_interval_minutes)
-        self.max_currencies.setValue(d.max_currencies)
-        self.max_cycle_len.setCurrentText(str(d.max_cycle_len))
-        self.liquidity.setValue(d.liquidity_floor_divines)
-        self.max_value.setValue(d.max_currency_value_divines)
-        self.depth.setValue(d.depth_divines)
+        self.sweep_interval.setValue(d.sweep_interval_minutes)
         self.request_interval.setValue(d.request_interval_s)
         self.safety.setValue(round(d.rate_limit_safety_fraction * 100))
         self.retention.setValue(d.history_retention_days)
@@ -246,6 +263,11 @@ class SettingsDialog(QDialog):
         self.awaiting_timeout.setValue(d.awaiting_timeout_s)
         self.hotkey_enabled.setChecked(d.trade_hotkey_enabled)
         self.hotkey.setText(d.trade_hotkey)
+        self.sweep_items.setValue(d.sweep_items)
+        self.sweep_min_value.setValue(d.sweep_min_value_divines)
+        self.min_profit.setValue(d.min_profit_divines)
+        self.min_gap.setValue(d.min_gap_ratio)
+        self.max_gap.setValue(d.max_gap_ratio)
         # Exclusions are the user's own curation, not a setting with a sensible
         # default — wiping a long list on a button labelled "restore defaults"
         # would be a nasty surprise. Clear All inside the picker still exists.
@@ -265,19 +287,19 @@ class SettingsDialog(QDialog):
         issues = check_pacing(interval, safety_fraction=fraction)
         severity = worst_severity(issues)
 
-        n = requests_per_scan(self.max_currencies.value(), self._cfg.have_chunk)
-        duration = scan_duration_estimate_s(
-            self.max_currencies.value(), self._cfg.have_chunk, interval
-        )
+        # A sweep is one request per item, paced by the interval.
+        n = self.sweep_items.value()
+        duration = max(0, n - 1) * interval
         summary = (
-            f"One full scan: {n} requests, about {duration / 60:.1f} minutes "
-            f"(cached data is reused, so most scans are shorter)."
+            f"One sweep: {n} requests, about {duration / 60:.1f} minutes "
+            f"(cached data is reused, so most sweeps are shorter)."
         )
-        if duration > self.interval.value() * 60:
+        gap = self.sweep_interval.value() * 60
+        if duration > gap:
             summary += (
-                f"<br>That's longer than your {self.interval.value()}-minute watch "
-                f"interval, so scanning would run almost continuously. Consider "
-                f"fewer currencies or a longer interval."
+                f"<br>That's longer than the {self.sweep_interval.value():g}-minute "
+                f"gap between sweeps, so it would run almost continuously. "
+                f"Consider fewer items or a longer gap."
             )
 
         if severity is Severity.ERROR:
@@ -338,6 +360,21 @@ class SettingsDialog(QDialog):
             return str(e)
         return ""
 
+    def _section(self, form, title: str, note: str = "") -> None:
+        """A bold heading spanning the form, optionally with an explanation."""
+        label = QLabel(title)
+        font = label.font()
+        font.setBold(True)
+        label.setFont(font)
+        if form.rowCount():
+            label.setContentsMargins(0, 12, 0, 0)
+        form.addRow(label)
+        if note:
+            explain = QLabel(note)
+            explain.setWordWrap(True)
+            explain.setStyleSheet(f"color: {muted_color(self)};")
+            form.addRow(explain)
+
     @staticmethod
     def _dspin(
         value: float, lo: float, hi: float, step: float, suffix: str,
@@ -354,16 +391,9 @@ class SettingsDialog(QDialog):
     def result_config(self) -> Config:
         return replace(
             self._cfg,
-            max_currency_value_divines=self.max_value.value(),
             rate_limit_safety_fraction=self.safety.value() / 100.0,
             league=self.league.text().strip() or None,
-            profit_threshold_pct=self.threshold.value(),
-            safety_margin_pct=self.margin.value(),
-            watch_interval_minutes=self.interval.value(),
-            max_currencies=self.max_currencies.value(),
-            max_cycle_len=int(self.max_cycle_len.currentText()),
-            liquidity_floor_divines=self.liquidity.value(),
-            depth_divines=self.depth.value(),
+            sweep_interval_minutes=self.sweep_interval.value(),
             request_interval_s=self.request_interval.value(),
             history_retention_days=self.retention.value(),
             alert_sound=self.sound.isChecked(),
@@ -372,4 +402,9 @@ class SettingsDialog(QDialog):
             awaiting_timeout_s=self.awaiting_timeout.value(),
             trade_hotkey=self.hotkey.text().strip(),
             trade_hotkey_enabled=self.hotkey_enabled.isChecked(),
+            sweep_items=self.sweep_items.value(),
+            sweep_min_value_divines=self.sweep_min_value.value(),
+            min_profit_divines=self.min_profit.value(),
+            min_gap_ratio=self.min_gap.value(),
+            max_gap_ratio=self.max_gap.value(),
         )

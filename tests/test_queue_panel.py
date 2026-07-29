@@ -103,7 +103,7 @@ def test_an_empty_queue_says_what_to_do(qapp):
     p = QueuePanel()
     p.refresh(None)
     qapp.processEvents()
-    assert "sweep" in p.hint.text().lower()
+    assert "find trades" in p.hint.text().lower()
 
 
 # --- one-click actions -----------------------------------------------------

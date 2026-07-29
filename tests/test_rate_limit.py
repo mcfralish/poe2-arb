@@ -11,10 +11,10 @@ from poe2arb.rate_limit import (
     check_pacing,
     max_hits_in_window,
     min_safe_interval,
+    BudgetState,
     parse_state,
     parse_windows,
-    requests_per_scan,
-    scan_duration_estimate_s,
+    tightest_window,
     worst_severity,
 )
 
@@ -86,22 +86,6 @@ class TestWindowMath:
         assert worst_severity(check_pacing(120.0, windows=strict)) is Severity.OK
 
 
-class TestScanCost:
-    def test_requests_per_scan_matches_observed(self):
-        # 10 currencies, chunk 6 -> 2 chunks each -> 20 requests, as seen live.
-        assert requests_per_scan(10, 6) == 20
-
-    def test_fifteen_currencies_is_much_worse(self):
-        assert requests_per_scan(15, 6) == 45
-
-    def test_trivial_graphs_cost_nothing(self):
-        assert requests_per_scan(1, 6) == 0
-
-    def test_duration_estimate(self):
-        # 20 requests at 13s spacing = 19 gaps.
-        assert scan_duration_estimate_s(10, 6, 13.0) == pytest.approx(247.0)
-
-
 class TestRealWorldConfigs:
     def test_users_15_currency_config_at_10s_is_rejected(self):
         """The exact settings that prompted this guard."""
@@ -110,3 +94,39 @@ class TestRealWorldConfigs:
     def test_all_default_windows_covered(self):
         issues = check_pacing(0.1)
         assert {i.window.period_s for i in issues} == {w.period_s for w in DEFAULT_WINDOWS}
+
+
+class TestBudgetReadout:
+    """What the status bar shows: how close the IP is to a lockout."""
+
+    WINDOWS = parse_windows("5:15:60,10:90:300,30:300:1800")
+
+    def tightest(self, state_header):
+        return tightest_window(self.WINDOWS, parse_state(state_header))
+
+    def test_picks_the_window_closest_to_its_limit(self):
+        """4/5 in 15s bites long before 8/30 in 300s does."""
+        budget = self.tightest("4:15:0,8:90:0,8:300:0")
+        assert (budget.used, budget.limit, budget.period_s) == (4, 5, 15)
+
+    def test_an_active_penalty_outranks_any_fraction(self):
+        """A forecast loses to a lockout that is already happening."""
+        budget = self.tightest("5:15:0,1:90:45,1:300:0")
+        assert budget.restricted_for_s == 45
+        assert budget.period_s == 90
+
+    def test_unreported_windows_read_as_unused(self):
+        budget = self.tightest("2:15:0")
+        assert budget.used == 2 and budget.limit == 5
+
+    def test_no_windows_means_nothing_to_show(self):
+        assert tightest_window((), {}) is None
+
+    def test_the_label_names_the_window(self):
+        assert self.tightest("4:15:0").label == "4/5 requests per 15s"
+
+    def test_a_penalty_says_so_instead_of_counting(self):
+        assert "Rate limited" in self.tightest("5:15:0,1:90:120,1:300:0").label
+
+    def test_fraction_survives_a_zero_limit(self):
+        assert BudgetState(0, 0, 15).fraction == 0.0

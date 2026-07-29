@@ -309,3 +309,61 @@ class TestMenuSizeCap:
         for groups in u.by_category_and_tier().values():
             for items in groups.values():
                 assert len(items) <= MAX_ITEMS_PER_MENU
+
+
+class TestCurrencyExchangePricing:
+    """poe.ninja prices everything; the Currency Exchange prices what trades.
+
+    Measured 2026-07-29 in Runes of Aldur: poe.ninja priced all 637 items,
+    poe2scout priced 226 of them, and where both had a price they agreed to a
+    median 3.3% (0.8% on the most-traded). So this is a preference for the
+    number measured on the venue you'd sell into, not a correction of a wrong
+    one — and it must never cost the 411 items only poe.ninja can price.
+    """
+
+    def universe(self):
+        from datetime import datetime, timezone
+
+        from poe2arb.market import Item, Universe
+
+        return Universe(
+            league="T", fetched_at=datetime.now(timezone.utc),
+            items={
+                "divine": Item("divine", "Divine Orb", "Currency", 1.0, 100.0),
+                "chaos": Item("chaos", "Chaos Orb", "Currency", 0.114, 50.0),
+                "obscure": Item("obscure", "Obscure Thing", "Runes", 0.5, 0.0),
+            },
+        )
+
+    def test_a_ce_price_replaces_the_consensus_one(self):
+        u = self.universe().with_ce_prices({"chaos": 0.2})
+        assert u.get("chaos").value_divine == 0.2
+
+    def test_items_the_ce_does_not_price_keep_theirs(self):
+        u = self.universe().with_ce_prices({"chaos": 0.2})
+        assert u.get("obscure").value_divine == 0.5
+        assert len(u) == 3
+
+    def test_it_records_which_items_it_repriced(self):
+        u = self.universe().with_ce_prices({"chaos": 0.2})
+        assert u.ce_priced == frozenset({"chaos"})
+
+    def test_prices_for_items_we_do_not_carry_are_ignored(self):
+        u = self.universe().with_ce_prices({"chaos": 0.2, "nonesuch": 9.0})
+        assert u.ce_priced == frozenset({"chaos"})
+        assert "nonesuch" not in u.items
+
+    def test_no_ce_data_leaves_the_universe_untouched(self):
+        """A poe2scout outage costs the better prices and nothing else."""
+        original = self.universe()
+        assert original.with_ce_prices({}) is original
+
+    def test_the_original_is_not_mutated(self):
+        original = self.universe()
+        original.with_ce_prices({"chaos": 0.2})
+        assert original.get("chaos").value_divine == 0.114
+        assert original.ce_priced == frozenset()
+
+    def test_conversions_use_the_ce_price(self):
+        u = self.universe().with_ce_prices({"divine": 1.0, "chaos": 0.2})
+        assert u.convert("divine", "chaos") == pytest.approx(5.0)

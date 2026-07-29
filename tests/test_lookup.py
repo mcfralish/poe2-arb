@@ -11,13 +11,7 @@ pytest.importorskip("PySide6")
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from poe2arb.client import NinjaOverview  # noqa: E402
-from poe2arb.graph import Edge  # noqa: E402
-from poe2arb.gui.lookup import (  # noqa: E402
-    LIVE_RATE_MAX_AGE_MINUTES,
-    QuickLookup,
-    fmt_age,
-    ratio_parts,
-)
+from poe2arb.gui.lookup import QuickLookup, ratio_parts  # noqa: E402
 from poe2arb.market import merge_overviews  # noqa: E402
 
 NOW = datetime.now(timezone.utc)
@@ -67,79 +61,33 @@ class TestRatioParts:
         assert ratio_parts(1.0) == (1.0, 1.0)
 
 
-class TestAge:
-    def test_no_timestamp(self):
-        assert fmt_age(None) == ""
+class TestPriceSource:
+    """Currency Exchange where it prices the pair, poe.ninja consensus otherwise.
 
-    def test_just_now(self):
-        assert fmt_age(datetime.now(timezone.utc)) == "just now"
+    Both sides have to be CE-priced: one CE price against one consensus price
+    is a ratio between two different markets, which is not a rate at all.
+    """
 
-    def test_minutes(self):
-        assert fmt_age(datetime.now(timezone.utc) - timedelta(minutes=12)) == (
-            "12 minutes ago"
-        )
-
-    def test_hours(self):
-        assert fmt_age(datetime.now(timezone.utc) - timedelta(hours=3)) == "3 hours ago"
-
-    def test_naive_timestamp_treated_as_utc(self):
-        """History timestamps round-trip through isoformat; don't crash on one."""
-        naive = datetime.now(timezone.utc).replace(tzinfo=None)
-        assert fmt_age(naive) == "just now"
-
-
-class TestSourcePreference:
-    def test_falls_back_to_ninja_without_a_book(self, lookup):
+    def test_it_falls_back_to_consensus_and_says_so(self, lookup):
         ask(lookup, "divine", "chaos")
-        assert lookup.live_rate("divine", "chaos") is None
         assert "poe.ninja" in lookup.note.text()
         assert lookup.ratio.text() == "10.00 : 1.00"
 
-    def test_live_book_rate_wins(self, lookup):
-        """The whole point of the app is that the book differs from consensus."""
-        lookup.set_edges(
-            {("divine", "chaos"): Edge("divine", "chaos", 8.7, 8.8, 40.0)}, NOW
-        )
+    def test_a_ce_priced_pair_is_named_as_such(self, lookup, universe):
+        lookup.set_universe(universe.with_ce_prices({"divine": 1.0, "chaos": 0.2}))
         ask(lookup, "divine", "chaos")
-        assert lookup.live_rate("divine", "chaos") == 8.8
-        assert lookup.ratio.text() == "8.80 : 1.00"
-
-    def test_live_source_is_named(self, lookup):
-        lookup.set_edges(
-            {("divine", "chaos"): Edge("divine", "chaos", 8.7, 8.8, 40.0)}, NOW
-        )
-        ask(lookup, "divine", "chaos")
-        assert "order-book" in lookup.note.text()
+        assert "Currency Exchange" in lookup.note.text()
         assert "poe.ninja" not in lookup.note.text()
 
-    def test_book_rate_used_not_the_after_fee_rate(self, lookup):
-        """A lookup asks what a pair is offered at, not what a loop nets."""
-        lookup.set_edges(
-            {("divine", "chaos"): Edge("divine", "chaos", 8.7, 8.8, 40.0)}, NOW
-        )
-        assert lookup.live_rate("divine", "chaos") == 8.8
-
-    def test_stale_book_is_not_called_live(self, lookup):
-        old = NOW - timedelta(minutes=LIVE_RATE_MAX_AGE_MINUTES + 10)
-        lookup.set_edges(
-            {("divine", "chaos"): Edge("divine", "chaos", 8.7, 8.8, 40.0)}, old
-        )
+    def test_the_ce_price_is_the_one_used(self, lookup, universe):
+        lookup.set_universe(universe.with_ce_prices({"divine": 1.0, "chaos": 0.2}))
         ask(lookup, "divine", "chaos")
-        assert lookup.live_rate("divine", "chaos") is None
-        assert "poe.ninja" in lookup.note.text()
+        assert lookup.ratio.text() == "5.00 : 1.00"
 
-    def test_direction_matters(self, lookup):
-        """An edge is directed: a book for div->chaos says nothing about chaos->div."""
-        lookup.set_edges(
-            {("divine", "chaos"): Edge("divine", "chaos", 8.7, 8.8, 40.0)}, NOW
-        )
-        assert lookup.live_rate("chaos", "divine") is None
-
-    def test_uncovered_pair_falls_back(self, lookup):
-        lookup.set_edges(
-            {("divine", "chaos"): Edge("divine", "chaos", 8.7, 8.8, 40.0)}, NOW
-        )
-        ask(lookup, "divine", "mirror")
+    def test_half_a_ce_pair_is_not_a_ce_rate(self, lookup, universe):
+        """Mixing the two markets gives a number belonging to neither."""
+        lookup.set_universe(universe.with_ce_prices({"chaos": 0.2}))
+        ask(lookup, "divine", "chaos")
         assert "poe.ninja" in lookup.note.text()
 
 
@@ -167,7 +115,6 @@ class TestDisplay:
         assert lookup.ratio.text() == "1.00 : 10.00"
 
     def test_exclusions_are_irrelevant_here(self, lookup, universe):
-        """Excluding something from the scan must not stop you pricing it."""
-        lookup.set_edges({}, NOW)
+        """Excluding something from the sweep must not stop you pricing it."""
         ask(lookup, "divine", "mirror")
         assert "4,886" in lookup.ratio.text() or "4886" in lookup.ratio.text()

@@ -84,3 +84,29 @@ class TestAdaptiveBackoff:
         c = client(tmp_path)
         c._apply_rate_limit_headers(response("nonsense", "also:nonsense"))
         assert c._header_backoff_s == 0.0
+
+
+class TestBudgetCallback:
+    """The same headers, surfaced to the UI rather than only to the pacer."""
+
+    def test_the_callback_fires_with_the_tightest_window(self, tmp_path):
+        seen = []
+        c = GggExchangeClient(Config(cache_dir=tmp_path), None, seen.append)
+        c._apply_rate_limit_headers(response(LIMITS, "4:15:0,4:90:0,4:300:0"))
+        assert [(b.used, b.limit) for b in seen] == [(4, 5)]
+
+    def test_the_latest_state_is_kept_on_the_client(self, tmp_path):
+        c = client(tmp_path)
+        c._apply_rate_limit_headers(response(LIMITS, "1:15:0,1:90:0,1:300:0"))
+        c._apply_rate_limit_headers(response(LIMITS, "3:15:0,3:90:0,3:300:0"))
+        assert c.budget.used == 3
+
+    def test_headerless_replies_leave_the_readout_alone(self, tmp_path):
+        """poe.ninja and the cache don't send these; the last real one stands."""
+        c = client(tmp_path)
+        c._apply_rate_limit_headers(response(LIMITS, "2:15:0,2:90:0,2:300:0"))
+        c._apply_rate_limit_headers(response(None, None))
+        assert c.budget.used == 2
+
+    def test_no_callback_is_fine(self, tmp_path):
+        client(tmp_path)._apply_rate_limit_headers(response(LIMITS, "1:15:0"))

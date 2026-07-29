@@ -1,7 +1,10 @@
 # <img src="docs/icon.png" alt="" width="32" height="32" valign="middle"> poe2-arb
 
-Detects profitable currency arbitrage cycles in the Path of Exile 2 player economy.
-Desktop app + CLI.
+Finds Path of Exile 2 trade listings priced below what the in-game Currency Exchange
+pays for the same item, so you can buy one and resell the other side. Desktop app + CLI.
+
+**Analysis only.** It reads public market data and puts a whisper on your clipboard.
+It never types into the game, sends anything for you, or automates any in-game action.
 
 ## Download (Windows)
 
@@ -17,9 +20,10 @@ directory looks exactly like malware to antivirus heuristics.
 
 - Windows SmartScreen will warn because the exe is unsigned: click **More info → Run anyway**.
 - The app checks GitHub for new versions on startup and shows a download banner when one exists.
-- **Watch** re-scans every 10 minutes and pops a toast notification (with sound) when an
-  arbitrage loop crosses your profit threshold. Closing the window while watching sends it
-  to the system tray; right-click the tray icon to quit.
+- **Find trades** is a toggle: switch it on and the app checks listings, waits, and checks
+  again until you switch it off. When it finds something worth acting on, it pops a toast
+  (with sound) and offers you the trade. Closing the window while it's running sends it to
+  the system tray; right-click the tray icon to quit.
 
 ### If antivirus flags it
 
@@ -30,8 +34,8 @@ at startup and then make network requests match the shape of a dropper. Detectio
 inconsistent — the same build may be flagged on one machine and not another, or flagged one
 day and not the next, as Defender's models update.
 
-Nothing here justifies the verdict: this app only makes HTTPS requests to `poe.ninja` and
-`pathofexile.com`. The source is public, and each release exe is built from a tagged commit
+Nothing here justifies the verdict: this app only makes HTTPS requests to `poe.ninja`,
+`poe2scout.com` and `pathofexile.com`. The source is public, and each release exe is built from a tagged commit
 by GitHub Actions — the build log is linked on every release, so the binary's provenance is
 checkable rather than a matter of trust.
 
@@ -54,59 +58,71 @@ are exactly where genuinely hostile files land.
 
 ## How it works
 
-**Data (hybrid, two sources):**
+### The two markets
 
-- **poe.ninja** (`/poe2/api/economy/...`, documented at poe.ninja/docs/api) provides the
-  item universe, one consensus value per item (in divines), daily traded volume, and the
-  current league list. All 14 economy categories are loaded — Currency, Fragments, Abyss,
-  Essences, Runes, Soul Cores and the rest, 636 items at the time of writing — which
-  powers the Quick lookup tool and the exclusion menu. Every category quotes prices in
-  divines and item ids don't collide between them, so one flat map covers the economy.
-  The **arbitrage graph itself stays on Currency**: widening it multiplies the paced GGG
-  order-book requests each scan needs. PoE2 data refreshes hourly. Note: poe.ninja publishes a
-  *single consistent price* per currency — no pay/receive spread — so on its own it can
-  never show arbitrage (all cross-rates multiply to exactly 1 by construction; verified
-  live at ~0.03% median deviation).
-- **GGG's official trade2 exchange API** (`pathofexile.com/api/trade2/exchange/{league}`)
-  provides the real order book: actual listed offers, both directions per pair, with
-  stock. This is where spreads — and arbitrage — actually live.
+Path of Exile 2 has two of them, and the difference is the whole point of this app.
 
-**Pricing an edge A→B** ("pay 1 A, how many B do I really get?"):
+The **Currency Exchange** is the in-game vendor: pooled orders, matched automatically,
+works while you're offline. Essentially all trading happens there, and its spreads are
+about 1% — far too tight to arbitrage against itself.
 
-1. Take all book offers selling B for A.
-2. Drop bait/scam listings: anything priced implausibly *better* than poe.ninja
-   consensus by more than `bait_filter_ratio` (top-of-book is full of 1 exalt ⇄ 1 divine
-   traps with stock 2).
-3. Walk the book best-rate-first until `depth_divines` worth of stock is accumulated
-   **and** the fill spans at least `min_accounts` distinct lister accounts — a single
-   account posting a huge fake wall at a too-good rate (price-fixing, endemic on the
-   trade site) can't set the rate on its own. The **marginal** (worst included) rate is
-   the edge rate — the rate you could actually fill at that size. Books too thin to
-   fill the depth are dropped entirely (thin markets produce phantom arbs that never
-   fill).
-4. Apply a per-hop haircut of `safety_margin_pct`, which **defaults to 0**. This is
-   not a fee: the Currency Exchange charges gold, which isn't tradeable or priced in
-   divines, so taking it as a percentage of divine value would be a category error;
-   and slippage is already handled by step 3, so charging it here would double-count.
-   What the knob is actually for is fill risk — the offer may be gone when you get
-   there, and a partial fill strands you mid-loop. Set it if you want that caution;
-   at 0 the app reports what the books say.
+The **Bulk Item Exchange** is the older whisper-and-party system, and it's what GGG's
+official trade API serves. Hardly anyone uses it any more. Listings sit there for days at
+prices the live market moved away from months ago.
 
-**Finding cycles:** the currencies form a directed graph with those effective rates.
-A loop A→B→…→A whose rates multiply to more than 1 is free money (in expectation).
-Two independent detectors cross-check each other:
+So there is no profitable loop to find *inside* either market. The opportunity is the gap
+*between* them: buy an underpriced listing on the abandoned venue by whispering the seller,
+then sell the item into the Currency Exchange at the real price.
 
-- **Bellman-Ford** on `-log(rate)` weights — a negative-weight cycle is exactly a
-  profitable loop (log turns rate products into weight sums; profit > 1 ⇔ sum < 0).
-  Detects loops of *any* length; used as the completeness check.
-- **Brute force** over all 2-, 3- and 4-cycles (the graph is small, ≤ ~15 nodes) —
-  reports exact profit per loop. 2-cycles are included deliberately: a "crossed book"
-  on a single pair is the most common real arb. If Bellman-Ford fires and brute force
-  found nothing, the tool tells you the profit lives in a longer loop or below your
-  threshold.
+(Versions up to 0.3.0 searched for arbitrage cycles within a single market. That search was
+reading Bulk Item Exchange prices and treating them as the live market. It never found a
+real trade, and it was removed in 0.4.0.)
 
-Surviving loops are filtered by `profit_threshold_pct` (default 3%) and ranked. Depth shown per loop is the bottleneck edge — the most value the
-loop supports at the quoted rates.
+### Data
+
+- **poe2scout** (`api.poe2scout.com`) provides **Currency Exchange** prices — the live
+  market, and the number you'd actually resell at. Spot-checked against five items in
+  game: it ran 0.4%–4.7% low. That error is why a discount under ~5% is reported as
+  uncertain rather than as profit.
+- **poe.ninja** provides the item universe: names, categories, daily traded volume, and
+  a consensus value per item. It powers the Market tab and Quick Lookup.
+- **GGG's official trade2 API** provides the live **listings** — who is selling what, for
+  how much, in which currency, and whether they're online.
+
+### Pricing a trade
+
+1. Pick the items worth checking: most-traded on the Currency Exchange first, skipping
+   anything too cheap or too illiquid to resell.
+2. Fetch live listings for each, online sellers only, best price first.
+3. Cost each listing **in the currency the seller is asking for**. Sellers quote in divines
+   or in exalted, and you can only pay in what you hold.
+4. Work out how many you can buy, capped by their stock and by your bankroll in that
+   currency.
+5. Work out what the Currency Exchange would pay, **rounded down to a whole unit of the
+   settlement currency**. This matters more than it sounds: exalted is about 432× finer
+   than divine, and on the first trade that actually filled, settling in exalted was the
+   difference between 1.00 and 1.79 divines of profit.
+
+### Which discounts are worth a message
+
+A listing far below market looks like the best row in the table and is the one that never
+fills — it's a mistake, an abandoned listing, or already sold. So each candidate is banded:
+
+| | | |
+|---|---|---|
+| ● | plausible | A real seller under market. These are the ones that fill. |
+| ○ | thin | The discount is inside the price reference's own margin of error. |
+| × | ghost | Far below market. Measured fill rate: zero across ~10 whispers. |
+
+Ghosts are **ranked last, never hidden** — hiding them would make the ranking
+unfalsifiable. The **Long shots** slider on the Opportunities tab decides how hard the
+band suppresses profit when ranking: left ranks by what actually fills, right ranks on
+profit alone and puts the big discounts first.
+
+These bands come from a few dozen real whispers, which is not many. Every whisper you copy
+is logged with its discount, the listing's age and whether the seller was AFK, and the
+**Results** tab reports fill rates against all three — refusing to quote a rate from fewer
+than 10 attempts. The intent is to replace the guessed bands with fitted ones.
 
 ## Install from source
 
@@ -119,15 +135,15 @@ poe2-arb-gui   # desktop app
 
 ## Usage
 
+The desktop app is the primary surface. The CLI runs one sweep and prints it:
+
 ```sh
-poe2-arb scan                    # one-shot: fetch (or use cache), print ranked loops
-poe2-arb watch --interval 10m    # re-scan on an interval, print only changes
-poe2-arb rates chaos             # pay/receive book rates for one currency
-poe2-arb --league "Standard" --threshold 5 scan
+poe2-arb sweep                        # check listings, print ranked candidates
+poe2-arb sweep --items 30 --limit 10  # fewer items, shorter table
+poe2-arb --league "Standard" sweep
 ```
 
-Currency ids are poe.ninja's (`chaos`, `exalted`, `annul`, …); `poe2-arb rates x`
-prints the full known list on a bad id.
+A sweep is minutes of deliberately paced requests — see rate limits below.
 
 ## Configuration
 
@@ -139,11 +155,9 @@ pinned in config — league names rotate every few months, never hardcode one.
 The desktop app keeps its own settings file instead, written by the Settings dialog:
 `%APPDATA%\poe2-arb\poe2arb.toml` on Windows, `~/.config/poe2-arb/poe2arb.toml` elsewhere.
 
-**Excluding items.** `exclude_currencies` keeps named items out of the arbitrage search
-*and* hides them from the Market and Book edges tabs — the point of excluding something
-is to stop having to look at it. Nothing is excluded by default. `max_currency_value_divines`
-does the same by price rather than by name. In the desktop app this is a category menu in
-Settings: hover a category to see its items. Config files use short ids (`mirror`).
+**Excluding items.** Tick the **Excluded** column on the Market tab. Excluded items stay
+visible there — you judge an item while looking at its price — and the tick is how you add
+and remove them. Config files use short ids (`mirror`). Nothing is excluded by default.
 
 **Showing prices in another currency.** The **Show prices in** selector at the top right
 of the window (`base_currency` in config) switches every price in the app between Divine,
@@ -157,9 +171,6 @@ Lesser 0.0030 < Greater 0.0034 < Perfect 0.0122 divines, and Delirium runs
 Diluted < base < Concentrated < Potent. "Ancient" variants consistently price *below*
 their plain counterparts, so they sort low. Anything level-graded (Uncut Gems) sorts
 numerically, because "Level 11" must not come before "Level 6".
-`max_currency_value_divines` does the same by price rather than by name — anything worth
-more than the cap is skipped (`0` disables it). Excluded currencies still appear in the
-app's Market tab for reference, just without a tick in the **In graph** column.
 
 ## Politeness / API citizenship
 
@@ -167,8 +178,10 @@ app's Market tab for reference, just without a tick in the **In graph** column.
   `refresh_minutes` (default 10 — poe.ninja PoE2 data only changes hourly anyway).
 - `Retry-After` on 429 is honored, 5xx retries use exponential backoff, and a
   descriptive User-Agent is sent.
-- A default scan (10 currencies) makes 20 exchange requests. Keep `max_currencies`
-  modest; it's the main request-budget knob.
+- A default sweep makes one request per item — 69 of them, about 15 minutes at the
+  default spacing. `sweep_items` is the main request-budget knob.
+- The app shows how much of GGG's rate limit your IP has spent in the bottom-right corner
+  of the window, straight from their own headers.
 
 ### Rate limits are taken seriously
 
@@ -199,7 +212,7 @@ willing to occupy, leaving the rest for everything else.
 
 | What | Windows | Linux / macOS |
 |---|---|---|
-| Cache + scan history | `%LOCALAPPDATA%\poe2-arb\` | `$XDG_CACHE_HOME/poe2-arb` or `~/.cache/poe2-arb` |
+| Cache + trade log | `%LOCALAPPDATA%\poe2-arb\` | `$XDG_CACHE_HOME/poe2-arb` or `~/.cache/poe2-arb` |
 | Desktop app settings | `%APPDATA%\poe2-arb\poe2arb.toml` | `$XDG_CONFIG_HOME/poe2-arb/poe2arb.toml` or `~/.config/…` |
 
 Nothing is ever written next to the executable, so it can live in a read-only
@@ -207,17 +220,25 @@ location like `C:\Program Files\`. Caches from versions up to 0.2.1 (which used
 `~/.cache` on every platform, leaving a stray dotfolder in Windows profiles) are
 moved automatically on first run.
 
-## History
+## The trade log
 
-Every scan appends one JSONL record to `history.jsonl` (timestamp, full rates snapshot,
-book edges, detected opportunities) — raw data deliberately kept for a future
-trend-analysis phase.
+Every whisper you copy appends a line to `outcomes.jsonl` — the item, the discount, the
+listing's age, whether the seller was AFK, and what you expected to make. Every verdict
+you give ("traded", "no reply", "already sold") appends another, resolving it. Unanswered
+whispers mark themselves as no reply after ten minutes, because silence is the usual
+outcome and leaving them pending forever would bias the record toward whatever you
+happened to come back and click.
+
+This is the only file worth accumulating: it's the evidence that decides which discounts
+are worth messaging about. Kept forever by default. The **Results** tab reads it.
 
 ## Failure behavior
 
 - Unknown league → explicit error listing available leagues (poe.ninja returns
   HTTP 200 with empty data for bad leagues; this is detected, not silently reported
-  as "no arbs").
+  as "nothing found").
+- One item failing mid-sweep is logged and skipped, not fatal — losing item 40 of 69 is
+  no reason to discard the 39 already priced.
 - Schema drift on either API → loud failure, raw response saved to the cache dir as
   `bad_response_*.json` for inspection.
 
@@ -227,9 +248,11 @@ trend-analysis phase.
 python -m pytest
 ```
 
-Tests cover the cycle math on synthetic graphs with planted cycles (including one whose
-gross profit sits just below the safety margin and must not be reported) and the parsers
-against saved real API responses in `tests/fixtures/`.
+GUI tests need `QT_QPA_PLATFORM=offscreen`. Tests cover the profit maths (lot sizing and
+the settlement rounding that's worth ~44% of a real trade), the queue state machine, the
+parsers against saved real API responses in `tests/fixtures/`, and window construction —
+that last one exists because a startup crash once shipped with every panel individually
+tested and nothing assembling them.
 
 ## Legal
 

@@ -44,6 +44,19 @@ def muted_color(widget: QWidget | None = None) -> str:
     return _pick(_MUTED, widget)
 
 
+def budget_style(widget: QWidget | None, budget) -> str:
+    """Colour the rate-limit readout by how much of the window is left.
+
+    Muted until three quarters spent, amber past that, red once the penalty
+    is actually in force — which is the only state worth interrupting for.
+    """
+    if budget.restricted_for_s > 0:
+        return f"color: {error_color(widget)};"
+    if budget.fraction >= 0.75:
+        return f"color: {warning_color(widget)};"
+    return f"color: {muted_color(widget)};"
+
+
 def banner_style(widget: QWidget | None = None) -> str:
     """Stylesheet for the update banner, legible either way round."""
     return (

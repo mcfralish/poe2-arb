@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
 from ..listings import Band
 from ..outcomes import Outcome
 from ..trade_queue import QueueState
+from .bankroll_bar import BankrollBar
 from .table_items import NumericItem, TextItem
 from .theme import muted_color
 
@@ -97,6 +98,11 @@ class QueuePanel(QWidget):
         self.hint.setWordWrap(True)
         layout.addWidget(self.hint)
 
+        # Bankroll belongs with the trades it constrains, not on the browsing
+        # tab: it decides the Buy quantity on every row shown below it.
+        self.bankroll = BankrollBar()
+        layout.addWidget(self.bankroll)
+
         layout.addWidget(_section_label(self, "Ready to whisper"))
         self.ready = _make_table(READY_COLUMNS)
         layout.addWidget(self.ready, stretch=1)
@@ -133,7 +139,7 @@ class QueuePanel(QWidget):
             self._awaiting_ids = []
             self.headline.setText("No trades yet")
             self.hint.setText(
-                "Run a sweep from the Trades tab. Anything worth acting on will "
+                "Switch on Find trades in the toolbar. Anything worth acting on will "
                 "appear here one at a time."
             )
             return
@@ -169,7 +175,7 @@ class QueuePanel(QWidget):
         self.hint.setText(
             "Anything left unanswered marks itself as no reply."
             if waiting
-            else "Run a sweep from the Trades tab to look for more."
+            else "Find trades keeps looking while it's switched on."
         )
 
     # --- ready section -----------------------------------------------------

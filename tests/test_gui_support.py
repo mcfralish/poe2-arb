@@ -48,36 +48,48 @@ class TestVersions:
         assert result.stdout.strip() == "CLEAN"
 
 
-class TestLegacyKeyRename:
-    """`load_config` rejects unknown keys, so a rename must be translated."""
+class TestRetiredKeys:
+    """A config written by an older version must still open the app.
 
-    def test_old_fee_pct_still_loads(self, tmp_path: Path):
+    Removing a setting is our decision, not the user's mistake, so a leftover
+    key is dropped rather than treated like a typo. Everyone upgrading from
+    0.3.x has a file full of triangular-scan knobs.
+    """
+
+    def test_a_retired_key_does_not_stop_the_app_loading(self, tmp_path: Path):
         path = tmp_path / "poe2arb.toml"
-        path.write_text("fee_pct = 1.5\n", encoding="utf-8")
-        assert load_config(path).safety_margin_pct == 1.5
+        path.write_text("profit_threshold_pct = 4.5\nleague = \"Aldur\"\n",
+                        encoding="utf-8")
+        assert load_config(path).league == "Aldur"
 
-    def test_old_key_does_not_survive_a_resave(self, tmp_path: Path):
+    def test_every_removed_key_is_covered(self, tmp_path: Path):
+        """A whole 0.3.x config, verbatim."""
         path = tmp_path / "poe2arb.toml"
-        path.write_text("fee_pct = 2.5\n", encoding="utf-8")
-        cfg = load_config(path)
-        save_config(cfg, path)
-        text = path.read_text(encoding="utf-8")
-        assert "fee_pct" not in text
-        assert "safety_margin_pct = 2.5" in text
+        path.write_text(
+            "\n".join([
+                "profit_threshold_pct = 3.0", "safety_margin_pct = 0.0",
+                "liquidity_floor_divines = 20.0", "max_currencies = 10",
+                "max_cycle_len = 4", "max_currency_value_divines = 0.0",
+                "depth_divines = 5.0", "bait_filter_ratio = 1.1",
+                "min_accounts = 2", "have_chunk = 6",
+                "watch_interval_minutes = 10.0", "fee_pct = 1.5",
+                "sweep_items = 42",
+            ]) + "\n",
+            encoding="utf-8",
+        )
+        assert load_config(path).sweep_items == 42
 
-    def test_new_key_wins_when_both_are_present(self, tmp_path: Path):
+    def test_a_retired_key_does_not_come_back_on_resave(self, tmp_path: Path):
         path = tmp_path / "poe2arb.toml"
-        path.write_text("fee_pct = 1.5\nsafety_margin_pct = 0.25\n", encoding="utf-8")
-        assert load_config(path).safety_margin_pct == 0.25
-
-    def test_the_default_is_now_nothing(self):
-        """Neither justification for the old 1.5% survives — see config.py."""
-        assert Config().safety_margin_pct == 0.0
+        path.write_text("max_cycle_len = 3\n", encoding="utf-8")
+        save_config(load_config(path), path)
+        assert "max_cycle_len" not in path.read_text(encoding="utf-8")
 
     def test_a_genuine_typo_is_still_an_error(self, tmp_path: Path):
+        """The whole reason unknown keys are rejected."""
         path = tmp_path / "poe2arb.toml"
-        path.write_text("fee_pcnt = 1.5\n", encoding="utf-8")
-        with pytest.raises(ValueError, match="unknown config keys"):
+        path.write_text("sweep_itmes = 42\n", encoding="utf-8")
+        with pytest.raises(ValueError, match="sweep_itmes"):
             load_config(path)
 
 
@@ -85,22 +97,22 @@ class TestConfigRoundTrip:
     def test_save_then_load_preserves_values(self, tmp_path: Path):
         cfg = Config(
             league="Test League",
-            profit_threshold_pct=4.5,
-            safety_margin_pct=2.0,
-            watch_interval_minutes=15,
+            sweep_items=45,
+            min_gap_ratio=1.08,
+            sweep_interval_minutes=15,
             alert_sound=False,
-            max_currencies=8,
+            max_gap_ratio=2.5,
             cache_dir=tmp_path / "cache",
         )
         path = tmp_path / "cfg" / "poe2arb.toml"
         save_config(cfg, path)
         loaded = load_config(path)
         assert loaded.league == "Test League"
-        assert loaded.profit_threshold_pct == 4.5
-        assert loaded.safety_margin_pct == 2.0
-        assert loaded.watch_interval_minutes == 15
+        assert loaded.sweep_items == 45
+        assert loaded.min_gap_ratio == 1.08
+        assert loaded.sweep_interval_minutes == 15
         assert loaded.alert_sound is False
-        assert loaded.max_currencies == 8
+        assert loaded.max_gap_ratio == 2.5
         assert loaded.cache_dir == tmp_path / "cache"
 
     def test_none_league_omitted_and_defaults(self, tmp_path: Path):
@@ -111,7 +123,7 @@ class TestConfigRoundTrip:
         assert path.read_text() == ""
         loaded = load_config(path)
         assert loaded.league is None
-        assert loaded.watch_interval_minutes == 10
+        assert loaded.sweep_interval_minutes == 10
 
     def test_quotes_and_backslashes_escaped(self, tmp_path: Path):
         cfg = Config(user_agent='agent "quoted" C:\\path')

@@ -12,6 +12,7 @@ from poe2arb.listings import (
     Listing,
     build_candidates,
     classify,
+    fill_weight,
     plan_trade,
     rank_candidates,
     whisper_text,
@@ -82,7 +83,7 @@ def test_profit_is_not_monotonic_in_lots_so_we_search():
 def test_bankroll_caps_the_trade():
     """The field test hit this: a 10-for-30 listing is unreachable with 9 divines."""
     plan = plan_trade(
-        pay_amount=3.0, get_amount=1.0, stock=10.0, ce_divines=5.0, bankroll_divines=9.0
+        pay_amount=3.0, get_amount=1.0, stock=10.0, ce_divines=5.0, bankroll_units=9.0
     )
     assert plan is not None
     assert plan.lots == 3
@@ -91,13 +92,13 @@ def test_bankroll_caps_the_trade():
 
 def test_bankroll_below_one_lot_yields_nothing():
     assert plan_trade(
-        pay_amount=30.0, get_amount=10.0, stock=10.0, ce_divines=5.0, bankroll_divines=9.0
+        pay_amount=30.0, get_amount=10.0, stock=10.0, ce_divines=5.0, bankroll_units=9.0
     ) is None
 
 
 def test_zero_bankroll_means_unbounded():
     plan = plan_trade(
-        pay_amount=1.0, get_amount=1.0, stock=50.0, ce_divines=3.0, bankroll_divines=0.0
+        pay_amount=1.0, get_amount=1.0, stock=50.0, ce_divines=3.0, bankroll_units=0.0
     )
     assert plan is not None
     assert plan.lots == 50
@@ -375,3 +376,150 @@ def test_exalted_listing_is_priced_in_divines_for_comparison():
     )
     assert c.unit_price_divines == pytest.approx(2.316, abs=0.01)
     assert c.gap == pytest.approx(1.636, abs=0.01)
+
+
+# --- the bankroll is per-currency, not a pooled divine total ----------------
+
+def exalted_listing(pay_amount):
+    """A seller who wants exalted, not divines."""
+    return Listing(
+        item_id="omen", account="s#1", character="s",
+        pay_amount=pay_amount, get_amount=1.0, stock=10.0, indexed=None,
+        pay_currency="exalted",
+    )
+
+
+PRICES = {"omen": 12.0, "divine": 1.0, "exalted": 1 / 432}
+
+
+def test_a_divine_bankroll_does_not_fund_an_exalted_seller():
+    """The whole reason the pots are separate: you cannot pay in what you
+    don't hold, and converting costs the Currency Exchange spread."""
+    [candidate] = build_candidates(
+        [exalted_listing(1000.0)], PRICES, {}, min_gap=1.05, max_gap=1.5,
+        bankroll={"divine": 500.0},
+    )
+    # 500 divines is ~216,000 exalted, so a pooled figure would allow many
+    # lots. Holding no exalted, the cap is the seller's currency: unconstrained
+    # here, because "exalted" is absent from the bankroll entirely.
+    assert candidate.plan.lots == 10          # limited by stock, not by divines
+
+
+def test_an_exalted_bankroll_caps_an_exalted_seller():
+    [candidate] = build_candidates(
+        [exalted_listing(1000.0)], PRICES, {}, min_gap=1.05, max_gap=1.5,
+        bankroll={"exalted": 2500.0},
+    )
+    assert candidate.plan.lots == 2           # 2500 // 1000
+
+
+def test_each_currency_is_capped_by_its_own_pot():
+    divine_seller = Listing(
+        item_id="omen", account="d#1", character="d",
+        pay_amount=3.0, get_amount=1.0, stock=10.0, indexed=None,
+        pay_currency="divine",
+    )
+    candidates = build_candidates(
+        [divine_seller, exalted_listing(1000.0)], PRICES, {},
+        min_gap=1.05, max_gap=1.5,
+        bankroll={"divine": 9.0, "exalted": 2500.0},
+    )
+    by_account = {c.listing.account: c.plan.lots for c in candidates}
+    assert by_account == {"d#1": 3, "s#1": 2}
+
+
+def test_an_absent_currency_is_unconstrained():
+    """Capping a currency the user never entered would hide trades silently."""
+    [candidate] = build_candidates(
+        [exalted_listing(1.0)], PRICES, {}, min_gap=1.05, max_gap=1.5,
+        bankroll={},
+    )
+    assert candidate.plan.lots == 10
+
+
+# --- risk appetite: how far to chase long shots ----------------------------
+
+def graded_listing(account, pay_amount):
+    return Listing(
+        item_id="omen", account=account, character=account,
+        pay_amount=pay_amount, get_amount=1.0, stock=1.0, indexed=None,
+        pay_currency="divine",
+    )
+
+
+def graded_candidates():
+    """Three listings, one per band, the ghost by far the most profitable."""
+    listings = [
+        graded_listing("plausible", 10.0),   # 1.2x gap  -> +2 div
+        graded_listing("thin", 11.8),        # 1.017x    -> +0.2 div
+        graded_listing("ghost", 1.0),        # 12x       -> +11 div
+    ]
+    return build_candidates(
+        listings, {"omen": 12.0, "divine": 1.0}, {},
+        min_gap=1.05, max_gap=1.5,
+    )
+
+
+def order(candidates):
+    return [c.listing.account for c in candidates]
+
+
+def test_bands_are_labelled_as_expected():
+    """Guards the fixture: the rest of these tests mean nothing otherwise."""
+    by_account = {c.listing.account: c.band for c in graded_candidates()}
+    assert by_account == {
+        "plausible": Band.PLAUSIBLE, "thin": Band.THIN, "ghost": Band.GHOST,
+    }
+
+
+def test_zero_appetite_buries_the_long_shot():
+    """The default. The 12x listing is the most profitable and never fills."""
+    assert order(rank_candidates(graded_candidates(), risk_appetite=0.0)) == [
+        "plausible", "thin", "ghost",
+    ]
+
+
+def test_full_appetite_ranks_on_profit_alone():
+    assert order(rank_candidates(graded_candidates(), risk_appetite=1.0)) == [
+        "ghost", "plausible", "thin",
+    ]
+
+
+def test_the_default_matches_zero_appetite():
+    assert order(rank_candidates(graded_candidates())) == order(
+        rank_candidates(graded_candidates(), risk_appetite=0.0)
+    )
+
+
+def test_long_shots_climb_gradually_rather_than_all_at_once():
+    """A slider people can tune, not a switch with two positions."""
+    positions = [
+        order(rank_candidates(graded_candidates(), risk_appetite=a)).index("ghost")
+        for a in (0.0, 0.25, 0.5, 0.75, 1.0)
+    ]
+    assert positions == sorted(positions, reverse=True)
+    assert positions[0] == 2 and positions[-1] == 0
+
+
+def test_nothing_is_ever_dropped_at_any_appetite():
+    for appetite in (0.0, 0.5, 1.0):
+        assert len(rank_candidates(graded_candidates(), risk_appetite=appetite)) == 3
+
+
+def test_appetite_outside_the_range_is_clamped():
+    assert fill_weight(Band.GHOST, -5.0) == 0.0
+    assert fill_weight(Band.GHOST, 99.0) == 1.0
+
+
+def test_a_proven_band_is_believed_at_any_appetite():
+    assert fill_weight(Band.PLAUSIBLE, 0.0) == 1.0
+    assert fill_weight(Band.PLAUSIBLE, 1.0) == 1.0
+
+
+def test_ranking_is_stable_across_runs():
+    """Set and dict iteration reshuffle per process; the sort must not."""
+    once = order(rank_candidates(graded_candidates(), risk_appetite=0.5))
+    assert all(
+        order(rank_candidates(graded_candidates(), risk_appetite=0.5)) == once
+        for _ in range(5)
+    )

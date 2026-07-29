@@ -1,38 +1,80 @@
 # poe2-arb configuration — copy to poe2arb.toml and edit.
 # Every key is optional; these are the defaults.
+#
+# The desktop app keeps its own file and writes it from the Settings dialog and
+# the Opportunities tab, so you only need this for the CLI or to script a setup.
 
 # League name as poe.ninja spells it. Omit to auto-detect the current temp league
 # from /poe2/api/economy/leagues (league names rotate — prefer auto-detect).
 #league = "Runes of Aldur"
 
-# Currency prices are displayed in: divine, exalted, chaos or annul.
+# Currency prices are displayed in: adaptive, divine, exalted, chaos or annul.
 # Display only — internal maths always works in divines.
-base_currency = "divine"
+base_currency = "adaptive"
 
-# --- signal filtering ---
-profit_threshold_pct = 3.0        # min net profit per loop to report
-safety_margin_pct = 0.0           # haircut per hop for fill risk. NOT a fee: the
-                                  # exchange charges gold, which isn't priced in
-                                  # divines, and slippage is already handled by
-                                  # depth_divines. 0 = report what the books say.
-liquidity_floor_divines = 20.0    # ignore currencies under this daily volume (poe.ninja)
-max_currencies = 10               # graph size cap, top-N by volume (main request-budget knob)
-max_cycle_len = 4                 # 3 or 4 (2-cycles are always scanned)
+# --- finding trades ---
+# How many items each sweep checks, most-traded on the Currency Exchange first.
+# One paced request each, so this is the main request-budget knob: 69 items is
+# about 15 minutes at the default spacing.
+sweep_items = 69
+# Skip items worth less than this each. Stock on this venue is in single digits,
+# so a cheap item can't clear enough profit in one trade to be worth a message.
+sweep_min_value_divines = 1.0
+# Skip items the Currency Exchange barely trades — a discount is worthless if you
+# can't sell the item afterwards. Units are poe2scout's ValueTraded.
+sweep_min_ce_traded = 100000.0
+# Drop candidates clearing less than this. Settling in exalted makes tiny trades
+# arithmetically profitable; +0.02 divines is real and still not worth a whisper.
+min_profit_divines = 0.25
 
-# Keep items out of the search entirely, and hide them from the Market and
-# Book edges tabs. Empty by default. Use poe.ninja's short ids.
+# The discount band worth whispering about, as a ratio of Exchange value to the
+# listed price. Below min_gap_ratio the "discount" is inside our own price
+# reference's margin of error (measured 0.4%-4.7% low against the live game).
+# Above max_gap_ratio it's a ghost: across ~10 whispers at 3.8x-12.5x, none
+# filled. Both are provisional — the Results tab is meant to replace them.
+min_gap_ratio = 1.05
+max_gap_ratio = 1.50
+# How far to chase the long shots, 0 to 1. Bands are always labelled honestly;
+# this decides how much a band's measured fill rate suppresses its profit when
+# ranking. 0 ranks by what actually fills; 1 ranks on profit alone.
+risk_appetite = 0.0
+
+# What you take payment in when reselling on the Currency Exchange. Exalted is
+# ~432x finer than divine, so far less is lost rounding down to a whole unit —
+# on the first trade that filled, that was 1.00 profit versus 1.79.
+sale_currency = "exalted"
+
+# What you hold, per currency. 0 = don't cap that one. Kept separate rather than
+# pooled: a seller wanting exalted can only be paid in exalted, and converting on
+# the Currency Exchange costs the spread.
+bankroll_divines = 0.0
+bankroll_exalted = 0.0
+
+# Keep items out of the sweep, and mark them excluded on the Market tab.
+# Empty by default. Use poe.ninja's short ids.
 exclude_currencies = []
-# Also skip anything worth more than this per unit, in divines (0 = no limit).
-max_currency_value_divines = 0.0
 
-# --- order-book pricing ---
-depth_divines = 5.0               # edge rate = marginal rate to fill this much value
-bait_filter_ratio = 1.10          # drop offers better than consensus * this (scam bait)
-min_accounts = 2                  # fill must span >= this many lister accounts (anti fake-wall)
-have_chunk = 6                    # currencies per `have` list per exchange request
+# --- the trade queue (desktop app) ---
+# Gap between sweeps while "Find trades" is switched on.
+sweep_interval_minutes = 10.0
+# How long a new trade stays live: notification shown, hotkey armed.
+offer_window_s = 20.0
+# How long it then stays in "Ready to whisper" before expiring.
+available_ttl_s = 300.0
+# How long a copied whisper waits for your verdict before recording itself as
+# "no reply" — which is almost always what happened. 0 to answer every one by hand.
+awaiting_timeout_s = 600.0
+alert_sound = true
+# Global hotkey that copies the next trade's whisper. Clipboard only — it never
+# sends input to the game. Windows-only.
+trade_hotkey = "ctrl+alt+d"
+trade_hotkey_enabled = false
 
 # --- politeness / caching ---
 refresh_minutes = 10              # min age before any remote re-fetch
+ce_refresh_minutes = 60           # Currency Exchange snapshot: a ~2MB file from one
+                                  # volunteer-run host, for a market that moves in
+                                  # percent-per-hour
 # Spacing between trade-API requests. Must stay above 10s: at exactly 10s a
 # 300s window can catch 31 requests against GGG's limit of 30, and crossing it
 # bans your IP for 30 minutes. The GUI refuses to save an unsafe value.
@@ -40,11 +82,14 @@ request_interval_s = 13.0
 # Share of each rate-limit window this app will use (0.8 = 80%). The rest is
 # headroom for other trade tools running from the same IP.
 rate_limit_safety_fraction = 0.8
-#user_agent = "poe2-arb/0.1 (contact: you@example.com)"
+#user_agent = "poe2-arb/0.4 (contact: you@example.com)"
 
 # --- paths ---
 # Defaults follow each platform's convention and are best left unset:
 #   Windows: %LOCALAPPDATA%\poe2-arb
 #   Linux/macOS: $XDG_CACHE_HOME/poe2-arb, else ~/.cache/poe2-arb
 #cache_dir = "/custom/path"
-#history_path = "/custom/path/history.jsonl"
+#outcomes_path = "/custom/path/outcomes.jsonl"
+# How long the trade log is kept, in days. 0 = forever, which is the honest
+# default for a log whose value is accumulating enough of it to fit a model.
+history_retention_days = 0.0

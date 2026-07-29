@@ -8,39 +8,48 @@ here rather than ticked, so this file stays worth reading start to finish.
 
 ## State of play
 
-**Shipped:** v0.2.8. Unreleased on `main`: the whole cross-venue feature below.
+**Shipped:** v0.3.0. Unreleased on `main`: the 0.4.0 entry in the changelog —
+the triangular scan removed outright, a continuous Find trades toggle, the
+Results tab, per-currency bankroll, the long-shots slider, wrapping market tabs
+and the rate-limit readout.
 
-**What the app is now.** The original premise — same-venue arbitrage cycles —
-is dead, and the evidence is under "The two markets". The live feature is
-**cross-venue**: buy underpriced Bulk Item Exchange listings by whisper, sell
-into the in-game Currency Exchange. Built and tested (612 tests): sweep,
-candidate ranking, Trades tab, outcome logging, pre-whisper re-check, global
-hotkey, and the offer queue. Also on the CLI as `poe2-arb sweep`, but the GUI is
-the primary surface.
+**What the app is.** One job: find Bulk Item Exchange listings priced below
+Currency Exchange value, whisper the seller, resell into the Currency Exchange.
+The evidence for why is under "The two markets" and must not be re-derived.
 
-**The shape of the app.** *Trades* tab = everything a sweep found, browsable.
-*Opportunities* tab = the queue, which offers one trade at a time with a toast
-and an armed hotkey, and holds a second list of whispers awaiting a verdict.
-The queue is where the workflow lives; the Trades table is for looking around.
+**The triangular search is gone, not dormant.** `scan.py`, `graph.py`,
+`history.py`, `history_stats.py`, the Trends tab, `ScanWorker`, the ops table
+and the `scan`/`watch`/`rates` CLI commands were deleted in 0.4.0. Anything
+below mentioning node selection, skew, `depth_divines`, Bellman-Ford, cycles or
+loops describes something that no longer exists — treat it as history, not as a
+TODO. `report.py` survives with `print_candidates` only; `outcomes.py` absorbed
+the JSONL pruner that used to live in `history.py`.
 
-**The cycle detector is demoted, not deleted.** `graph.py` and `scan.py` still
-work and still pass their tests, and Scan/Watch still run them. It lost its tab
-— the queue took that space — so `MainWindow.ops_table` is now built but never
-parented; the history backload and `_refresh_tables` still populate it, which
-keeps that code path alive and testable without showing an empty table nobody
-needs. It is kept because it is correct code that becomes valuable if the
-Currency Exchange ever exposes an order book. Anything below mentioning node
-selection, skew, `depth_divines` or Bellman-Ford is about that dormant path.
+**Config keys removed in 0.4.0 are listed in `config.RETIRED_KEYS`** and are
+dropped on load rather than erroring. Anyone upgrading from 0.3.x has a file
+full of them. Add to that set whenever a setting is retired.
+
+**The shape of the app.** Toolbar: *Find trades* (a toggle — sweeps, waits,
+sweeps again) and *Settings*. Tabs: *Opportunities* (the queue, plus bankroll,
+settlement and long-shots), *Market* (the whole economy from poe.ninja),
+*Trades* (everything the last sweep found, browsable), *Results* (the whisper
+log — fill rates and takings), *Log*.
 
 **Venv:** `~/.venvs/poe2-arb/bin/python`. Tests: `python -m pytest -q`.
 GUI tests need `QT_QPA_PLATFORM=offscreen`.
 
 **How to verify GUI work without a display:** `QT_QPA_PLATFORM=offscreen`,
 construct the widget, `app.processEvents()`, `widget.grab().save(path)`. This
-has caught five real bugs the test suite did not — a startup `NameError`, a
+has caught seven real bugs the test suite did not — a startup `NameError`, a
 Trends note that lied on thin data, the icon cache being 10x the predicted size,
-`muted_color()` used as if it returned a `QColor`, and a whisper quoting the
-wrong currency. Use it.
+`muted_color()` used as if it returned a `QColor`, a whisper quoting the wrong
+currency, stale cell widgets painting over other rows, and a Results table
+giving one column half the window. Use it.
+
+`tests/test_main_window.py` builds the real window against a throwaway config
+dir with only the two network workers stubbed. Before it existed, *no test
+constructed MainWindow at all* — which is how a startup crash shipped in 0.3.0.
+Add to it whenever you touch window assembly order.
 
 **If the install error recurs:** `%LOCALAPPDATA%\poe2-arb\poe2-arb.log`, grep
 for `install to ... failed` or `Start Menu shortcut`. The `--windowed` exe has
@@ -50,32 +59,20 @@ no console, which is why the original occurrence left no trace.
 
 ## Queued
 
-- [ ] **Bankroll should hold separate exalted and divine amounts.** One pooled
-  figure in divines is wrong on both sides: listings are priced in either
-  currency (exalted is the *more* common), and converting between them on the
-  Currency Exchange costs a spread and a round trip. Someone holding 400 exalted
-  and 2 divines can afford different trades than someone holding 3 divines, and
-  the app currently cannot tell them apart. Needs the affordability cap in
-  `plan_trade` to work per-currency rather than against one total.
-- [ ] **User-settable deviation threshold**, so high-reward / low-probability
-  trades surface at whatever rate the user wants. Today `max_gap_ratio` is a
-  hard cutoff at 1.5x and everything past it is demoted to `GHOST` uniformly.
-  The user should be able to ask for the long shots and have them ranked in,
-  not merely visible at the bottom. Best expressed as a risk appetite
-  (0 = only what reliably fills, 1 = rank purely on expected profit) weighting
-  the band rather than replacing it. Once the outcome log has data the weighting
-  can be fitted instead of guessed.
+*(empty)*
 
 ## Next
 
-- [ ] **Fit the ranking to the outcome log.** Every threshold in the gap band is
-  provisional: `min_gap_ratio` comes from our own price error, `max_gap_ratio`
-  from 14 whispers with 2 fills. `outcomes.suggested_gap_band` already computes
-  the band earning most per whisper and is deliberately advisory — surface it
-  once buckets clear `MIN_SAMPLES`, then let the user apply it.
-- [ ] **A Trades history view.** The outcome log has no reader in the UI: no
-  "you've made 14 divines this week", no fill rate by band or by age.
-  `outcomes.summarise` returns all of it; nothing displays it.
+- [ ] **Fit the ranking to the outcome log.** Every threshold is provisional:
+  `min_gap_ratio` comes from our own price error, `max_gap_ratio` from 14
+  whispers with 2 fills, and `listings.FILL_PRIOR` is three round numbers.
+  The Results tab surfaces `suggested_gap_band` once buckets clear
+  `MIN_SAMPLES` — the next step is letting the user apply it, and fitting
+  `FILL_PRIOR` to measured fill rates instead of guessing it.
+- [ ] **Exclusions do not reach the sweep.** `cfg.exclude_currencies` is
+  honoured by the Market tab and nothing else; `select_sweep_items` ignores it.
+  Ticking Excluded therefore does nothing to what gets swept. Either wire it in
+  or stop implying it does.
 - [ ] **Optional auto-paste on the hotkey.** One `SendInput` for Ctrl+V, as a
   setting defaulting to **off**. Never auto-Enter, never read chat.
 
@@ -101,9 +98,6 @@ no console, which is why the original occurrence left no trace.
   exchange endpoint exposes only `id`, `name`, `image`, `category`, `detailsId`
   — no description text. Investigate a poe.ninja detail endpoint keyed on
   `detailsId`, or poedb. Decide before building.
-- [ ] Market tab bar scrolls at narrow widths (Expedition and Gems hide behind
-  arrows at ~1000px). Options offered: smaller tab font, or wrap to two rows.
-  Awaiting the user's preference.
 - [ ] Large values read oddly in fixed non-adaptive units (a Mirror in `ex`).
   Adaptive mode covers the default case; decide whether fixed modes need scaling.
 - [ ] Windows 11 hides new tray icons in the overflow, so closing the window
@@ -160,6 +154,26 @@ want=core-destabiliser have=divine
 98% of unfiltered listings are offline and 74% over a week old. Offline
 listings are also unwhisperable — they carry no `whisper` or
 `lastCharacterName` — so there is nothing to lose by excluding them.
+
+### Both price sources, and how they compare
+
+Measured 2026-07-29 in Runes of Aldur, matched leagues:
+
+- poe.ninja prices **all 637** catalogue items. poe2scout prices **226** of them.
+- Where both have a price they agree to a **median 3.3%** — 1.4% above 100k
+  traded, 0.8% above 1M. They are not in conflict.
+- poe2scout adds no item poe.ninja lacks, so it can never be a full replacement.
+
+The app therefore prefers the Currency Exchange price where it exists and falls
+back to poe.ninja, via `Universe.with_ce_prices`. `ce_priced` records which is
+which; the Market status line and Quick Lookup's note both say so, because
+silently swapping the meaning of a displayed number is worse than either source.
+
+**Beware comparing across leagues.** An earlier pass of this comparison read
+poe2scout for Standard against poe.ninja for the temp league and produced a
+median disagreement of 90% with individual items 30x apart — entirely an
+artefact. Standard has years of accumulated currency; its prices say nothing
+about the temp league. Always pass the same league to both.
 
 ### poe2scout is the Currency Exchange price source
 
@@ -318,6 +332,21 @@ Also worth not rediscovering:
   sends — the same thing the trade site's own copy-whisper button does. An
   optional Ctrl+V auto-paste may ship as an off-by-default setting; reacting to
   a reply may not.
+
+**Measurement over guessing**
+
+- **No fill rate is claimed below `outcomes.MIN_SAMPLES`.** The Results tab
+  shows an em-dash rather than a percentage, and says how many more answered
+  whispers it needs. The whole point of the log is to replace estimates with
+  measurements; a rate from three whispers is an estimate wearing a percent
+  sign. Do not soften this to "show it greyed out".
+- **`suggested_gap_band` is advisory and stays advisory.** A band fitted to one
+  league on one account is not a fact about the game. Show it; let the user
+  apply it.
+- **Ghosts are ranked last, never hidden.** Hiding them makes the ranking
+  unfalsifiable — the user could never see that the rule was wrong. The
+  long-shots slider changes their position, not their visibility, at every
+  setting including 1.0.
 
 **The offer queue**
 

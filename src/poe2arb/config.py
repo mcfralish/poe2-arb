@@ -69,35 +69,9 @@ class Config:
     # poe.ninja's /poe2/api/economy/leagues (the current temp league).
     league: str | None = None
 
-    # Signal filtering
-    profit_threshold_pct: float = 3.0   # min net profit per loop to report
-    # Conservatism margin taken off every hop. **Not** a fee, despite what the
-    # old `fee_pct` name claimed. The two things that name pointed at both fail:
-    # the exchange fee is gold-denominated, and gold isn't tradeable or priced in
-    # divines, so charging it as a percentage of divine value is a category
-    # error; and slippage is already captured by walking the book to
-    # depth_divines, so charging it again double-counts.
-    # What's left is genuine but different: fill risk. The offer you found may
-    # be gone by the time you get there, and a partial fill strands you holding
-    # the wrong currency mid-loop. That's worth a margin if you want one, so the
-    # knob stays — but it defaults to nothing rather than to a guess.
-    safety_margin_pct: float = 0.0
-    liquidity_floor_divines: float = 20.0  # min daily volume (poe.ninja volumePrimaryValue)
-    max_currencies: int = 10            # top-N by volume included in the graph
-    max_cycle_len: int = 4              # 3 or 4
-
-    # Items kept out of the graph, and hidden from the Market and Book edges
-    # views, regardless of how liquid they look. Empty by default — excluding
-    # anything is the user's call, not ours.
+    # Items kept out of the sweep and marked as excluded on the Market tab.
+    # Empty by default — excluding anything is the user's call, not ours.
     exclude_currencies: list[str] = field(default_factory=list)
-    # Also drop anything worth more than this many divines per unit (0 = off).
-    max_currency_value_divines: float = 0.0
-
-    # Order-book pricing (GGG trade2 exchange)
-    depth_divines: float = 5.0          # edge rate = marginal rate to fill this much value
-    bait_filter_ratio: float = 1.10     # drop offers better than fair * this (scam bait)
-    min_accounts: int = 2               # fill must span this many lister accounts
-    have_chunk: int = 6                 # currencies per `have` list in one exchange request
 
     # --- Cross-venue sweep (Bulk Item Exchange listings vs Currency Exchange) ---
     # How many items each sweep covers, most-CE-traded first. 69 items is
@@ -124,9 +98,21 @@ class Config:
     # if you cannot sell the item afterwards. Units are poe2scout's ValueTraded,
     # which is comparable between items but not convertible to divines.
     sweep_min_ce_traded: float = 100_000.0
-    # Divines available to spend. 0 = unbounded. Caps the lots a candidate can
-    # plan for; ranking listings you cannot afford is noise.
+    # What you actually hold, per currency. 0 = unbounded in that currency.
+    # Kept separate rather than pooled into one divine figure: a seller asking
+    # for exalted can only be paid in exalted, and converting divines across on
+    # the Currency Exchange costs the spread — so a pooled number would plan
+    # quantities you cannot buy. Caps the lots a candidate can plan for;
+    # ranking listings you cannot afford is noise.
     bankroll_divines: float = 0.0
+    bankroll_exalted: float = 0.0
+    # How far to chase long shots, 0 to 1. Bands are always labelled honestly;
+    # this decides how much a band's measured fill rate is allowed to suppress
+    # its profit when ranking. 0 ranks by what actually fills and buries the
+    # 12x listings; 1 ranks on profit alone and puts them at the top. Defaults
+    # to 0 because that is what the field tests support — the long shots
+    # returned nothing across ~10 whispers.
+    risk_appetite: float = 0.0
     # The gap band worth whispering.
     # Lower bound is our own measurement error: the poe2scout reference ran
     # 0.4%-4.7% below the live game across five checked items, so below ~1.05
@@ -160,8 +146,11 @@ class Config:
     # this only affects what the UI shows.
     base_currency: str = "adaptive"
 
-    # Watch / GUI
-    watch_interval_minutes: float = 10.0  # re-scan cadence for watch mode and the GUI
+    # GUI
+    # Gap between sweeps while "Find trades" is on. Listings churn slower than
+    # a sweep runs, and back-to-back sweeps would spend the whole rate-limit
+    # budget re-reading listings that have not changed.
+    sweep_interval_minutes: float = 10.0
     alert_sound: bool = True            # GUI: play a sound with the toast notification
     skip_install_prompt: bool = False   # set once the user declines the install offer
 
@@ -182,14 +171,11 @@ class Config:
 
     # Paths
     cache_dir: Path = field(default_factory=user_cache_path)
-    history_path: Path | None = None    # default: <cache_dir>/history.jsonl
-    # Whisper attempts and what came of them. Kept apart from scan history:
-    # different shape, different lifetime, and it's the one file worth keeping
-    # when the other is pruned.
+    # Whisper attempts and what came of them — the app's only permanent record.
     outcomes_path: Path | None = None   # default: <cache_dir>/outcomes.jsonl
-    # How long scan records are kept. A watch loop appends one every few
-    # minutes indefinitely, so something has to age them out. 0 = keep forever.
-    history_retention_days: float = 30.0
+    # How long attempts are kept. 0 = keep forever, which is the honest default
+    # for a log whose whole value is accumulating enough of it to fit a model.
+    history_retention_days: float = 0.0
 
     def __post_init__(self) -> None:
         self.cache_dir = Path(self.cache_dir).expanduser()
@@ -197,12 +183,15 @@ class Config:
             self.outcomes_path = self.cache_dir / "outcomes.jsonl"
         else:
             self.outcomes_path = Path(self.outcomes_path).expanduser()
-        if self.history_path is None:
-            self.history_path = self.cache_dir / "history.jsonl"
-        else:
-            self.history_path = Path(self.history_path).expanduser()
-        if self.max_cycle_len not in (3, 4):
-            raise ValueError("max_cycle_len must be 3 or 4")
+
+    def bankroll(self) -> dict[str, float]:
+        """Holdings by currency id, for build_candidates. Zeroes are omitted.
+
+        An absent currency means unconstrained, so dropping the zeroes here is
+        what makes "0 = no limit" work at the far end.
+        """
+        pots = {"divine": self.bankroll_divines, "exalted": self.bankroll_exalted}
+        return {currency: held for currency, held in pots.items() if held > 0}
 
 
 def load_config(path: Path | None = None) -> Config:
@@ -214,7 +203,7 @@ def load_config(path: Path | None = None) -> Config:
         path = candidate
     with open(path, "rb") as f:
         data = tomllib.load(f)
-    _rename_legacy_keys(data)
+    _drop_retired_keys(data)
     known = {f.name for f in fields(Config)}
     unknown = set(data) - known
     if unknown:
@@ -223,19 +212,27 @@ def load_config(path: Path | None = None) -> Config:
     return Config(**data)
 
 
-# Old key -> current key. Unknown keys are a hard error (they're usually typos),
-# so a rename has to be translated here or every existing config stops loading.
-LEGACY_KEYS = {"fee_pct": "safety_margin_pct"}
+# Settings that no longer exist. Unknown keys are a hard error, because they are
+# usually typos — but a key we removed ourselves is not the user's mistake, and
+# refusing to start over it would strand everyone upgrading from 0.3.x with a
+# config full of triangular-scan knobs. Dropped quietly, logged once.
+RETIRED_KEYS = frozenset({
+    # The triangular cycle search and everything that tuned it (removed 0.4.0).
+    "fee_pct", "safety_margin_pct", "profit_threshold_pct",
+    "liquidity_floor_divines", "max_currencies", "max_cycle_len",
+    "max_currency_value_divines", "depth_divines", "bait_filter_ratio",
+    "min_accounts", "have_chunk", "watch_interval_minutes", "history_path",
+})
 
 
-def _rename_legacy_keys(data: dict) -> None:
-    for old, new in LEGACY_KEYS.items():
-        if old not in data:
-            continue
-        value = data.pop(old)
-        # An explicitly-set new key wins; the old one is just dropped.
-        data.setdefault(new, value)
-        log.info("config key %r has been renamed to %r", old, new)
+def _drop_retired_keys(data: dict) -> None:
+    retired = sorted(RETIRED_KEYS & set(data))
+    for key in retired:
+        del data[key]
+    if retired:
+        log.info(
+            "ignoring settings that no longer exist: %s", ", ".join(retired)
+        )
 
 
 def _unpin_legacy_paths(data: dict) -> None:
