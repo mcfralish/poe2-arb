@@ -16,7 +16,7 @@ import time
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Sequence
 
 import httpx
 
@@ -144,6 +144,69 @@ def parse_overview(data: dict, league: str, fetched_at: datetime) -> NinjaOvervi
         league=league, fetched_at=fetched_at, values=values, volumes=volumes,
         names=names, images=images,
     )
+
+
+def parse_listings(data: dict, want: str) -> list["Listing"]:
+    """Parse an exchange response into whisperable listings.
+
+    Separate from `parse_exchange` on purpose. That one aggregates offers into
+    an order book and throws away everything identifying — account, character,
+    whisper template, index time — because a book doesn't need them. The
+    cross-venue flow needs exactly those, and needs one row per listing rather
+    than a merged depth curve.
+
+    Only offers *for* `want` are kept. A response can contain offers in both
+    directions, and paying in the item you're trying to buy is not the trade.
+    """
+    from .listings import Listing  # local: listings imports nothing from here
+
+    try:
+        result = data["result"]
+    except (KeyError, TypeError) as e:
+        raise SchemaError("unexpected GGG exchange response shape: missing 'result'") from e
+    entries = result if isinstance(result, list) else result.values()
+    out: list[Listing] = []
+    for entry in entries:
+        listing = entry.get("listing") or {}
+        account = (listing.get("account") or {}).get("name")
+        if not account:
+            continue
+        online = (listing.get("account") or {}).get("online") or {}
+        indexed = None
+        if isinstance(listing.get("indexed"), str):
+            try:
+                indexed = datetime.fromisoformat(listing["indexed"])
+            except ValueError:
+                indexed = None
+        for o in listing.get("offers") or []:
+            try:
+                exchange, item = o["exchange"], o["item"]
+                if item["currency"] != want:
+                    continue
+                pay_currency = exchange["currency"]
+                pay_amount = float(exchange["amount"])
+                get_amount = float(item["amount"])
+            except (KeyError, TypeError, ValueError):
+                continue  # one malformed listing shouldn't lose the rest
+            if pay_amount <= 0 or get_amount <= 0:
+                continue
+            out.append(
+                Listing(
+                    item_id=item["currency"],
+                    account=account,
+                    pay_currency=pay_currency,
+                    character=(listing.get("account") or {}).get("lastCharacterName"),
+                    pay_amount=pay_amount,
+                    get_amount=get_amount,
+                    stock=float(item.get("stock") or 0.0),
+                    indexed=indexed,
+                    afk=online.get("status") == "afk",
+                    whisper=listing.get("whisper"),
+                    item_whisper=item.get("whisper"),
+                    pay_whisper=exchange.get("whisper"),
+                )
+            )
+    return out
 
 
 def parse_exchange(data: dict) -> list[Offer]:
@@ -477,6 +540,78 @@ class GggExchangeClient:
         # when it was *fetched*, not when it was read back — otherwise a
         # ten-minute-old book would claim to be current.
         return [replace(offer, observed_at=observed_at) for offer in offers]
+
+    def fetch_listings(
+        self,
+        league: str,
+        want: str,
+        have: Sequence[str] = ("divine", "exalted"),
+        *,
+        use_cache: bool = True,
+    ) -> list["Listing"]:
+        """Live listings selling `want` for `have`, for the cross-venue sweep.
+
+        Differs from `fetch_offers` in two ways that matter:
+
+        - **`status: online` is sent.** Without it the response is 96% dead
+          listings, and because GGG returns results best-ratio-first, a wall of
+          stale 1:1 junk fills the first page and the real book is never
+          reached. Measured on Core Destabiliser: 252 results unfiltered,
+          every one of the first 100 at 1:1; 11 results with the filter, at
+          real prices. Offline listings are also unwhisperable, so there is
+          nothing to lose by excluding them.
+        - **Both denominations in one request.** GGG accepts a list of `have`
+          currencies, so asking for divine *and* exalted costs exactly one
+          request and covers most of the venue. Querying divine alone missed
+          the more common half: across cached responses, 3,502 listings priced
+          in exalted against 2,882 in divine, with 65% more distinct price
+          points. There is still no n^2 pairing to amortise — one request
+          covers an item completely.
+        """
+        self._check_cancelled()
+        have = list(have)
+        key = f"ggg_listings_{league}_{want}_" + "_".join(sorted(have))
+        # `use_cache=False` is for the pre-whisper re-check, whose whole purpose
+        # is to find out whether the book has changed since the sweep. A cached
+        # answer there would confirm the very data it exists to doubt.
+        cached = self.cache.load(key, self.cfg.refresh_minutes * 60) if use_cache else None
+        if cached:
+            data, _ = cached
+        else:
+            self._pace()
+            resp = _request_with_backoff(
+                self._http,
+                "POST",
+                GGG_EXCHANGE_URL.format(league=league),
+                json={
+                    "query": {
+                        "status": {"option": "online"},
+                        "want": [want],
+                        "have": have,
+                        "minimum": 1,
+                    },
+                    "sort": {"have": "asc"},
+                    "engine": "new",
+                },
+                should_cancel=self._should_cancel,
+            )
+            self._last_request_t = time.monotonic()
+            self._log_rate_state(resp)
+            self._apply_rate_limit_headers(resp)
+            if resp.status_code == 404:
+                raise LeagueNotFoundError(league, [])
+            if resp.status_code != 200:
+                raw = self.cache.dump_bad_response(key, resp.text)
+                raise ClientError(
+                    f"trade2 exchange returned HTTP {resp.status_code} (raw saved to {raw})"
+                )
+            data = resp.json()
+            self.cache.store(key, data)
+        try:
+            return parse_listings(data, want)
+        except SchemaError as e:
+            raw = self.cache.dump_bad_response(key, json.dumps(data))
+            raise SchemaError(str(e), raw) from e
 
     @staticmethod
     def _log_rate_state(resp: httpx.Response) -> None:

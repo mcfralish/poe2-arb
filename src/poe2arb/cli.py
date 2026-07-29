@@ -13,8 +13,15 @@ from pathlib import Path
 
 from .client import ClientError
 from .config import Config, load_config
-from .report import console, print_opportunities, print_rates, route_str
+from .report import (
+    console,
+    print_candidates,
+    print_opportunities,
+    print_rates,
+    route_str,
+)
 from .scan import run_scan
+from .sweep import run_sweep
 
 log = logging.getLogger(__name__)
 
@@ -58,6 +65,13 @@ def build_parser() -> argparse.ArgumentParser:
     watch.add_argument("--interval", type=parse_interval, default=600.0, help="e.g. 10m (default)")
     rates = sub.add_parser("rates", help="pay/receive book rates for one currency")
     rates.add_argument("currency", help="currency id, e.g. chaos, exalted, annul")
+    sweep = sub.add_parser(
+        "sweep",
+        help="cross-venue: Bulk Item Exchange listings priced against the Currency Exchange",
+    )
+    sweep.add_argument("--items", type=int, help="how many items to sweep (default 69)")
+    sweep.add_argument("--bankroll", type=float, help="divines available to spend (0 = unbounded)")
+    sweep.add_argument("--limit", type=int, default=25, help="rows to print (default 25)")
     return p
 
 
@@ -75,6 +89,11 @@ def apply_overrides(cfg: Config, args: argparse.Namespace) -> Config:
     if args.cache_dir is not None:
         cfg.cache_dir = args.cache_dir
         cfg.__post_init__()
+    # Sweep-only flags: getattr because they exist on that subparser alone.
+    if getattr(args, "items", None) is not None:
+        cfg.sweep_items = args.items
+    if getattr(args, "bankroll", None) is not None:
+        cfg.bankroll_divines = args.bankroll
     return cfg
 
 
@@ -134,6 +153,24 @@ def cmd_rates(cfg: Config, currency: str) -> int:
     return 0
 
 
+def cmd_sweep(cfg: Config, limit: int) -> int:
+    """One cross-venue sweep, printed ranked.
+
+    Progress is reported per item because the sweep is ~15 minutes of paced
+    requests — silent for that long looks like a hang.
+    """
+    total_hint = cfg.sweep_items
+
+    def progress(n: int, total: int) -> None:
+        console.print(f"[dim]  {n}/{total} items[/dim]", end="\r", highlight=False)
+
+    log.info("sweeping up to %d items", total_hint)
+    result = run_sweep(cfg, progress=progress)
+    console.print(" " * 40, end="\r")
+    print_candidates(result, limit=limit)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     logging.basicConfig(
@@ -148,6 +185,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_watch(cfg, args.interval)
         if args.command == "rates":
             return cmd_rates(cfg, args.currency)
+        if args.command == "sweep":
+            return cmd_sweep(cfg, args.limit)
         raise AssertionError(args.command)
     except KeyboardInterrupt:
         console.print("\n[dim]stopped[/dim]")

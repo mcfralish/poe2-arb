@@ -6,6 +6,76 @@ says what changed for you and, where it matters, why.
 Versions follow `MAJOR.MINOR.PATCH`. Until 1.0 the minor number moves for
 anything user-visible.
 
+## [0.3.0] — 2026-07-29
+
+The app was looking at the wrong market. This release moves it to the right one,
+and the way you use it changes completely.
+
+### The short version
+
+Path of Exile 2 has **two currency markets**. The in-game **Currency Exchange**
+is where essentially all trading happens: pooled, automatic, works while you're
+offline, spreads around 1%. The **Bulk Item Exchange** — the one the official
+trade API serves, and the one this app has been reading since v0.1 — is the old
+whisper-and-party system, and it is effectively abandoned.
+
+That is why the app never found anything. Arbitrage loops inside a dead market
+don't exist. But the *gap between* the two markets is large and real: people
+still list items on the abandoned exchange at prices the live one moved away
+from months ago.
+
+So poe2-arb no longer hunts for trading loops. It watches for listings priced
+below Currency Exchange value, and tells you about them one at a time.
+
+### Added
+- **A Trades tab.** Checks live listings for the items the Currency Exchange
+  actually trades, and shows what each one would cost and clear. Around 65 items
+  per sweep, roughly 15 minutes, paced to stay well inside the trade API's
+  limits.
+- **The Opportunities tab is now a queue.** One trade is offered at a time with
+  a notification and a countdown. Take it and it moves to "Waiting on a reply";
+  ignore it and it drops into a list below for a few minutes before expiring. A
+  second alert never fires over an unread one.
+- **A global hotkey** (off by default; Settings). Press it anywhere, including
+  in game, and the trade's whisper goes to your clipboard — paste with Ctrl+V
+  and press Enter. **The app never types into the game or sends anything for
+  you.** The whisper is GGG's own, already translated into the seller's
+  language.
+- **One-click outcomes.** Traded, No reply, or Already sold, straight on the
+  row. Anything left unanswered marks itself as "no reply" after ten minutes.
+  These are recorded so the app can learn which kinds of listing actually fill —
+  right now that judgement rests on 14 real attempts, and it shows.
+- **A "check first" step.** Before copying a whisper, the app re-checks that the
+  listing still exists. Listings disappear within minutes, and this was the
+  single most common wasted message.
+- **Currency Exchange prices, from poe2scout.** Around five times more accurate
+  than the previous source: measured against the live game, within 1% on average
+  instead of 5%.
+
+### Changed
+- **Take payment in Exalted Orbs when you sell, not Divine.** You cannot trade
+  partial currency, so a sale worth 3.79 divines pays you 3 if you ask for
+  divines — and 3.789 if you ask for exalted, which is over 400 times finer. On
+  a real trade that was 44% of the profit, given away to rounding. The app now
+  assumes exalted settlement; you can change it in Settings.
+- **The arbitrage loop detector is still there but no longer has a tab.** Scan
+  and Watch still run it. It is kept in case the Currency Exchange ever opens up
+  a proper order book, which is the only situation where it could work.
+
+### Fixed
+- **Only online listings are fetched now.** Previously 96% of results were dead
+  listings from players who logged off weeks ago, and because the trade site
+  sorts by best price first, they filled the whole first page — so the app was
+  usually looking at a wall of junk offers and nothing else.
+
+### Known limits
+- Deep discounts mostly don't fill. Across 14 real attempts, the only two that
+  worked were the *smallest* discounts; every attempt at a 4x–12x "bargain" was
+  ignored or already sold. Those listings are shown, and ranked last, on
+  purpose.
+- Profit per trade is around a divine. This is a tool for making a keypress
+  worth it, not for getting rich.
+
 ## [0.2.8] — 2026-07-28
 
 ### Fixed

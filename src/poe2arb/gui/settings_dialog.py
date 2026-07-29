@@ -141,6 +141,58 @@ class SettingsDialog(QDialog):
         self.sound.setChecked(cfg.alert_sound)
         form.addRow("", self.sound)
 
+        self.offer_window = self._dspin(
+            cfg.offer_window_s, 5.0, 300.0, 5.0, " s", decimals=0
+        )
+        self.offer_window.setToolTip(
+            "How long a new trade stays live: a notification appears and the\n"
+            "hotkey is armed. Short is fine — ignoring it costs nothing, it\n"
+            "just moves down to the list below."
+        )
+        form.addRow("Trade alert lasts", self.offer_window)
+
+        self.available_ttl = self._dspin(
+            cfg.available_ttl_s, 15.0, 3600.0, 15.0, " s", decimals=0
+        )
+        self.available_ttl.setToolTip(
+            "How long a trade stays in 'Ready to whisper' after its alert\n"
+            "lapses. Listings do get taken by other people, so holding one\n"
+            "much longer mostly wastes a whisper."
+        )
+        form.addRow("Trade stays listed for", self.available_ttl)
+
+        self.awaiting_timeout = self._dspin(
+            cfg.awaiting_timeout_s, 0.0, 3600.0, 30.0, " s", decimals=0
+        )
+        self.awaiting_timeout.setSpecialValueText("never")
+        self.awaiting_timeout.setToolTip(
+            "How long a whisper waits for you to say what happened before it\n"
+            "records itself as 'no reply'. Set to 0 to answer every one by hand."
+        )
+        form.addRow("Mark as no reply after", self.awaiting_timeout)
+
+        self.hotkey_enabled = QCheckBox("Global hotkey copies the next trade")
+        self.hotkey_enabled.setChecked(cfg.trade_hotkey_enabled)
+        self.hotkey_enabled.setToolTip(
+            "Press one key anywhere — including in game — to put the next trade's\n"
+            "whisper on your clipboard. Paste it with Ctrl+V and press Enter to\n"
+            "send. The app never types into the game or sends anything for you.\n"
+            "Windows only."
+        )
+        form.addRow("", self.hotkey_enabled)
+
+        self.hotkey = QLineEdit(cfg.trade_hotkey)
+        self.hotkey.setPlaceholderText("ctrl+alt+d")
+        self.hotkey.setToolTip(
+            "Modifiers plus one key, e.g. ctrl+alt+d or ctrl+shift+f9.\n"
+            "A modifier is required: a bare key would be swallowed everywhere,\n"
+            "including in chat."
+        )
+        self.hotkey.setEnabled(cfg.trade_hotkey_enabled)
+        self.hotkey_enabled.toggled.connect(self.hotkey.setEnabled)
+        self.hotkey.textChanged.connect(self._revalidate)
+        form.addRow("Hotkey", self.hotkey)
+
         self.budget_label = QLabel()
         self.budget_label.setWordWrap(True)
         layout.addWidget(self.budget_label)
@@ -189,6 +241,11 @@ class SettingsDialog(QDialog):
         self.safety.setValue(round(d.rate_limit_safety_fraction * 100))
         self.retention.setValue(d.history_retention_days)
         self.sound.setChecked(d.alert_sound)
+        self.offer_window.setValue(d.offer_window_s)
+        self.available_ttl.setValue(d.available_ttl_s)
+        self.awaiting_timeout.setValue(d.awaiting_timeout_s)
+        self.hotkey_enabled.setChecked(d.trade_hotkey_enabled)
+        self.hotkey.setText(d.trade_hotkey)
         # Exclusions are the user's own curation, not a setting with a sensible
         # default — wiping a long list on a button labelled "restore defaults"
         # would be a nasty surprise. Clear All inside the picker still exists.
@@ -244,14 +301,42 @@ class SettingsDialog(QDialog):
             )
             self.budget_label.setStyleSheet(f"color: {muted_color(self)};")
 
+        hotkey_problem = self._hotkey_problem()
+        if hotkey_problem:
+            self.budget_label.setText(
+                f"<b>Hotkey:</b> {hotkey_problem}<br><br>{self.budget_label.text()}"
+            )
+            self.budget_label.setStyleSheet(f"color: {warning_color(self)};")
+
         ok = self.buttons.button(QDialogButtonBox.StandardButton.Ok)
-        ok.setEnabled(severity is not Severity.ERROR)
-        ok.setToolTip(
-            "Fix the request spacing first — these settings would get your IP "
-            "temporarily banned from the trade API."
-            if severity is Severity.ERROR
-            else ""
-        )
+        blocked = severity is Severity.ERROR or bool(hotkey_problem)
+        ok.setEnabled(not blocked)
+        if severity is Severity.ERROR:
+            ok.setToolTip(
+                "Fix the request spacing first — these settings would get your IP "
+                "temporarily banned from the trade API."
+            )
+        elif hotkey_problem:
+            ok.setToolTip(f"Fix the hotkey first: {hotkey_problem}")
+        else:
+            ok.setToolTip("")
+
+    def _hotkey_problem(self) -> str:
+        """Why the typed hotkey can't be used, or "" if it's fine.
+
+        Checked here rather than on save because a rejected binding leaves the
+        user with a key that silently does nothing — the failure would otherwise
+        only show up in the log.
+        """
+        if not self.hotkey_enabled.isChecked():
+            return ""
+        from .hotkey import HotkeyError, parse_hotkey
+
+        try:
+            parse_hotkey(self.hotkey.text().strip())
+        except HotkeyError as e:
+            return str(e)
+        return ""
 
     @staticmethod
     def _dspin(
@@ -282,4 +367,9 @@ class SettingsDialog(QDialog):
             request_interval_s=self.request_interval.value(),
             history_retention_days=self.retention.value(),
             alert_sound=self.sound.isChecked(),
+            offer_window_s=self.offer_window.value(),
+            available_ttl_s=self.available_ttl.value(),
+            awaiting_timeout_s=self.awaiting_timeout.value(),
+            trade_hotkey=self.hotkey.text().strip(),
+            trade_hotkey_enabled=self.hotkey_enabled.isChecked(),
         )

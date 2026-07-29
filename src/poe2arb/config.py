@@ -99,6 +99,63 @@ class Config:
     min_accounts: int = 2               # fill must span this many lister accounts
     have_chunk: int = 6                 # currencies per `have` list in one exchange request
 
+    # --- Cross-venue sweep (Bulk Item Exchange listings vs Currency Exchange) ---
+    # How many items each sweep covers, most-CE-traded first. 69 items is
+    # ~15 minutes at the default request interval, which fits inside the
+    # observed listing churn window; a wider sweep would serve results older
+    # than the listings they describe.
+    sweep_items: int = 69
+    # Skip items worth less than this per unit. **Not** a rounding constraint —
+    # settling in exalted makes the floor negligible. It is about whether a
+    # trade is worth sending a message for: stock on this venue is single
+    # digits, so at a plausible ~1.2x gap an item has to be worth a couple of
+    # divines before one lot clears min_profit_divines. Probed live: chaos and
+    # greater-chaos-orb had zero listings below CE at all.
+    sweep_min_value_divines: float = 1.0
+    # Currency to settle CE sales in. Exalted is ~432x finer than divine, and
+    # on the one trade that filled that is the difference between 1.00 and 1.79
+    # divines of profit. Set to "divine" to price the pessimistic case.
+    sale_currency: str = "exalted"
+    # Drop candidates below this. Settling in exalted makes tiny trades
+    # arithmetically profitable; +0.02 divines is real and still not worth a
+    # whisper.
+    min_profit_divines: float = 0.25
+    # Skip items the Currency Exchange barely trades — a discount is worthless
+    # if you cannot sell the item afterwards. Units are poe2scout's ValueTraded,
+    # which is comparable between items but not convertible to divines.
+    sweep_min_ce_traded: float = 100_000.0
+    # Divines available to spend. 0 = unbounded. Caps the lots a candidate can
+    # plan for; ranking listings you cannot afford is noise.
+    bankroll_divines: float = 0.0
+    # The gap band worth whispering.
+    # Lower bound is our own measurement error: the poe2scout reference ran
+    # 0.4%-4.7% below the live game across five checked items, so below ~1.05
+    # a "discount" is indistinguishable from noise and so is its profit figure.
+    # Upper bound is the measured fill pattern: over 14 whispers both fills came
+    # from gaps of 1.13x and 1.9x, while roughly ten attempts at 3.8x-12.5x
+    # produced none. Beyond it a listing is a ghost — demoted, not hidden.
+    # Provisional; outcome logging is meant to replace both with a fitted curve.
+    min_gap_ratio: float = 1.05
+    max_gap_ratio: float = 1.50
+    # Global hotkey that advances the trade queue and copies the next whisper.
+    # Clipboard only — it never sends input to the game. Windows-only; ignored
+    # elsewhere. Empty disables it.
+    trade_hotkey: str = "ctrl+alt+d"
+    trade_hotkey_enabled: bool = False
+    # How long a new trade stays "live": a toast fires and the hotkey is armed.
+    # Short on purpose — it gates how fast the queue drains, not how long the
+    # user has to decide, because an unclaimed offer is not lost, it just drops
+    # into the list below. Only one trade is ever live at a time.
+    offer_window_s: float = 20.0
+    # How long a lapsed offer stays takeable from the Opportunities tab before
+    # it is dropped. Generous relative to the alert window: an offer you didn't
+    # catch mid-pack is still perfectly good five minutes later.
+    available_ttl_s: float = 300.0
+    # How long a whispered trade waits for a verdict before recording itself as
+    # "no reply" — which is almost always what happened. 0 disables it, at the
+    # cost of a list that grows until every row is answered by hand.
+    awaiting_timeout_s: float = 600.0
+
     # The currency prices are displayed in. Internal maths stays in divines;
     # this only affects what the UI shows.
     base_currency: str = "adaptive"
@@ -110,6 +167,10 @@ class Config:
 
     # Politeness / caching
     refresh_minutes: int = 10           # min age before re-fetching any remote data
+    # Currency Exchange reference prices (poe2scout). Longer than
+    # refresh_minutes because it's a ~2 MB snapshot of a market that moves in
+    # percent-per-hour, and it's one volunteer-run host we shouldn't hammer.
+    ce_refresh_minutes: int = 60
     # Spacing between GGG requests. Must stay above 10s: at exactly 10s a 300s
     # window can catch 31 requests against a limit of 30, and the penalty for
     # crossing it is a 30-minute IP ban. See rate_limit.py.
@@ -122,12 +183,20 @@ class Config:
     # Paths
     cache_dir: Path = field(default_factory=user_cache_path)
     history_path: Path | None = None    # default: <cache_dir>/history.jsonl
+    # Whisper attempts and what came of them. Kept apart from scan history:
+    # different shape, different lifetime, and it's the one file worth keeping
+    # when the other is pruned.
+    outcomes_path: Path | None = None   # default: <cache_dir>/outcomes.jsonl
     # How long scan records are kept. A watch loop appends one every few
     # minutes indefinitely, so something has to age them out. 0 = keep forever.
     history_retention_days: float = 30.0
 
     def __post_init__(self) -> None:
         self.cache_dir = Path(self.cache_dir).expanduser()
+        if self.outcomes_path is None:
+            self.outcomes_path = self.cache_dir / "outcomes.jsonl"
+        else:
+            self.outcomes_path = Path(self.outcomes_path).expanduser()
         if self.history_path is None:
             self.history_path = self.cache_dir / "history.jsonl"
         else:

@@ -1,0 +1,354 @@
+[
+ {
+  "CurrencyExchangeSnapshotPairId": 124677708,
+  "CurrencyExchangeSnapshotId": 425045,
+  "Volume": 258198.0,
+  "BaseCurrencyApiId": "exalted",
+  "BaseCurrencyBaseItemTypeId": "Metadata/Items/Currency/CurrencyAddModToRare",
+  "BaseCurrencyText": "Exalted Orb",
+  "CurrencyOne": {
+   "CurrencyItemId": 10,
+   "ItemId": 287,
+   "CurrencyCategoryId": 21,
+   "ApiId": "chaos",
+   "BaseItemTypeId": "Metadata/Items/Currency/CurrencyRerollRare",
+   "Text": "Chaos Orb",
+   "CategoryApiId": "currency",
+   "IconUrl": "https://web.poecdn.com//gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvQ3VycmVuY3kvQ3VycmVuY3lSZXJvbGxSYXJlIiwic2NhbGUiOjEsInJlYWxtIjoicG9lMiJ9XQ/c0ca392a78/CurrencyRerollRare.png",
+   "ItemMetadata": null
+  },
+  "CurrencyTwo": {
+   "CurrencyItemId": 13,
+   "ItemId": 290,
+   "CurrencyCategoryId": 21,
+   "ApiId": "exalted",
+   "BaseItemTypeId": "Metadata/Items/Currency/CurrencyAddModToRare",
+   "Text": "Exalted Orb",
+   "CategoryApiId": "currency",
+   "IconUrl": "https://web.poecdn.com//gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvQ3VycmVuY3kvQ3VycmVuY3lBZGRNb2RUb1JhcmUiLCJzY2FsZSI6MSwicmVhbG0iOiJwb2UyIn1d/ad7c366789/CurrencyAddModToRare.png",
+   "ItemMetadata": null
+  },
+  "CurrencyOneData": {
+   "ValueTraded": 258198.0,
+   "RelativePrice": 49.31207028,
+   "StockValue": 929285.9644767,
+   "VolumeTraded": 5236,
+   "HighestStock": 18845
+  },
+  "CurrencyTwoData": {
+   "ValueTraded": 258198.0,
+   "RelativePrice": 1.0,
+   "StockValue": 228366.0,
+   "VolumeTraded": 258198,
+   "HighestStock": 228366
+  }
+ },
+ {
+  "CurrencyExchangeSnapshotPairId": 124678132,
+  "CurrencyExchangeSnapshotId": 425045,
+  "Volume": 2593354.06760717,
+  "BaseCurrencyApiId": "exalted",
+  "BaseCurrencyBaseItemTypeId": "Metadata/Items/Currency/CurrencyAddModToRare",
+  "BaseCurrencyText": "Exalted Orb",
+  "CurrencyOne": {
+   "CurrencyItemId": 14,
+   "ItemId": 291,
+   "CurrencyCategoryId": 21,
+   "ApiId": "divine",
+   "BaseItemTypeId": "Metadata/Items/Currency/CurrencyModValues",
+   "Text": "Divine Orb",
+   "CategoryApiId": "currency",
+   "IconUrl": "https://web.poecdn.com//gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvQ3VycmVuY3kvQ3VycmVuY3lNb2RWYWx1ZXMiLCJzY2FsZSI6MSwicmVhbG0iOiJwb2UyIn1d/2986e220b3/CurrencyModValues.png",
+   "ItemMetadata": null
+  },
+  "CurrencyTwo": {
+   "CurrencyItemId": 15,
+   "ItemId": 292,
+   "CurrencyCategoryId": 21,
+   "ApiId": "annul",
+   "BaseItemTypeId": "Metadata/Items/Currency/CurrencyRemoveMod",
+   "Text": "Orb of Annulment",
+   "CategoryApiId": "currency",
+   "IconUrl": "https://web.poecdn.com//gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvQ3VycmVuY3kvQW5udWxsT3JiIiwic2NhbGUiOjEsInJlYWxtIjoicG9lMiJ9XQ/2daba8ccca/AnnullOrb.png",
+   "ItemMetadata": null
+  },
+  "CurrencyOneData": {
+   "ValueTraded": 2593354.06760717,
+   "RelativePrice": 421.15016413,
+   "StockValue": 15833448.8592414,
+   "VolumeTraded": 6025,
+   "HighestStock": 36785
+  },
+  "CurrencyTwoData": {
+   "ValueTraded": 2537429.73888629,
+   "RelativePrice": 201.05078437,
+   "StockValue": 45327713.2121401,
+   "VolumeTraded": 12899,
+   "HighestStock": 230423
+  }
+ },
+ {
+  "CurrencyExchangeSnapshotPairId": 124678135,
+  "CurrencyExchangeSnapshotId": 425045,
+  "Volume": 6270106.00876906,
+  "BaseCurrencyApiId": "exalted",
+  "BaseCurrencyBaseItemTypeId": "Metadata/Items/Currency/CurrencyAddModToRare",
+  "BaseCurrencyText": "Exalted Orb",
+  "CurrencyOne": {
+   "CurrencyItemId": 14,
+   "ItemId": 291,
+   "CurrencyCategoryId": 21,
+   "ApiId": "divine",
+   "BaseItemTypeId": "Metadata/Items/Currency/CurrencyModValues",
+   "Text": "Divine Orb",
+   "CategoryApiId": "currency",
+   "IconUrl": "https://web.poecdn.com//gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvQ3VycmVuY3kvQ3VycmVuY3lNb2RWYWx1ZXMiLCJzY2FsZSI6MSwicmVhbG0iOiJwb2UyIn1d/2986e220b3/CurrencyModValues.png",
+   "ItemMetadata": null
+  },
+  "CurrencyTwo": {
+   "CurrencyItemId": 17,
+   "ItemId": 294,
+   "CurrencyCategoryId": 21,
+   "ApiId": "fracturing-orb",
+   "BaseItemTypeId": "Metadata/Items/Currency/CurrencyFractureRare",
+   "Text": "Fracturing Orb",
+   "CategoryApiId": "currency",
+   "IconUrl": "https://web.poecdn.com//gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvQ3VycmVuY3kvRnJhY3R1cmluZ09yYiIsInNjYWxlIjoxLCJyZWFsbSI6InBvZTIifV0/8b85ed1dc2/FracturingOrb.png",
+   "ItemMetadata": null
+  },
+  "CurrencyOneData": {
+   "ValueTraded": 6270106.00876906,
+   "RelativePrice": 428.58430194,
+   "StockValue": 26349338.1913096,
+   "VolumeTraded": 14567,
+   "HighestStock": 61216
+  },
+  "CurrencyTwoData": {
+   "ValueTraded": 6243187.5263464,
+   "RelativePrice": 4381.62544289,
+   "StockValue": 30522250.1288046,
+   "VolumeTraded": 1431,
+   "HighestStock": 6996
+  }
+ },
+ {
+  "CurrencyExchangeSnapshotPairId": 124678148,
+  "CurrencyExchangeSnapshotId": 425045,
+  "Volume": 2679553.0,
+  "BaseCurrencyApiId": "exalted",
+  "BaseCurrencyBaseItemTypeId": "Metadata/Items/Currency/CurrencyAddModToRare",
+  "BaseCurrencyText": "Exalted Orb",
+  "CurrencyOne": {
+   "CurrencyItemId": 14,
+   "ItemId": 291,
+   "CurrencyCategoryId": 21,
+   "ApiId": "divine",
+   "BaseItemTypeId": "Metadata/Items/Currency/CurrencyModValues",
+   "Text": "Divine Orb",
+   "CategoryApiId": "currency",
+   "IconUrl": "https://web.poecdn.com//gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvQ3VycmVuY3kvQ3VycmVuY3lNb2RWYWx1ZXMiLCJzY2FsZSI6MSwicmVhbG0iOiJwb2UyIn1d/2986e220b3/CurrencyModValues.png",
+   "ItemMetadata": null
+  },
+  "CurrencyTwo": {
+   "CurrencyItemId": 13,
+   "ItemId": 290,
+   "CurrencyCategoryId": 21,
+   "ApiId": "exalted",
+   "BaseItemTypeId": "Metadata/Items/Currency/CurrencyAddModToRare",
+   "Text": "Exalted Orb",
+   "CategoryApiId": "currency",
+   "IconUrl": "https://web.poecdn.com//gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvQ3VycmVuY3kvQ3VycmVuY3lBZGRNb2RUb1JhcmUiLCJzY2FsZSI6MSwicmVhbG0iOiJwb2UyIn1d/ad7c366789/CurrencyAddModToRare.png",
+   "ItemMetadata": null
+  },
+  "CurrencyOneData": {
+   "ValueTraded": 2675566.61979189,
+   "RelativePrice": 431.07351995,
+   "StockValue": 3962558.92886167,
+   "VolumeTraded": 6216,
+   "HighestStock": 9206
+  },
+  "CurrencyTwoData": {
+   "ValueTraded": 2679553.0,
+   "RelativePrice": 0.9985123,
+   "StockValue": 3025688.0,
+   "VolumeTraded": 2679553,
+   "HighestStock": 3025688
+  }
+ },
+ {
+  "CurrencyExchangeSnapshotPairId": 124678252,
+  "CurrencyExchangeSnapshotId": 425045,
+  "Volume": 5145386.64301677,
+  "BaseCurrencyApiId": "exalted",
+  "BaseCurrencyBaseItemTypeId": "Metadata/Items/Currency/CurrencyAddModToRare",
+  "BaseCurrencyText": "Exalted Orb",
+  "CurrencyOne": {
+   "CurrencyItemId": 14,
+   "ItemId": 291,
+   "CurrencyCategoryId": 21,
+   "ApiId": "divine",
+   "BaseItemTypeId": "Metadata/Items/Currency/CurrencyModValues",
+   "Text": "Divine Orb",
+   "CategoryApiId": "currency",
+   "IconUrl": "https://web.poecdn.com//gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvQ3VycmVuY3kvQ3VycmVuY3lNb2RWYWx1ZXMiLCJzY2FsZSI6MSwicmVhbG0iOiJwb2UyIn1d/2986e220b3/CurrencyModValues.png",
+   "ItemMetadata": null
+  },
+  "CurrencyTwo": {
+   "CurrencyItemId": 266,
+   "ItemId": 4277,
+   "CurrencyCategoryId": 21,
+   "ApiId": "perfect-chaos-orb",
+   "BaseItemTypeId": "Metadata/Items/Currency/CurrencyRerollRare3",
+   "Text": "Perfect Chaos Orb",
+   "CategoryApiId": "currency",
+   "IconUrl": "https://web.poecdn.com//gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvQ3VycmVuY3kvQ3VycmVuY3lSZXJvbGxSYXJlIiwic2NhbGUiOjEsInJlYWxtIjoicG9lMiJ9XQ/c0ca392a78/CurrencyRerollRare.png",
+   "ItemMetadata": null
+  },
+  "CurrencyOneData": {
+   "ValueTraded": 5145386.64301677,
+   "RelativePrice": 425.77577927,
+   "StockValue": 26635145.1790094,
+   "VolumeTraded": 11954,
+   "HighestStock": 61880
+  },
+  "CurrencyTwoData": {
+   "ValueTraded": 5089723.66537426,
+   "RelativePrice": 2614.52573324,
+   "StockValue": 39070353.3601671,
+   "VolumeTraded": 1968,
+   "HighestStock": 15107
+  }
+ },
+ {
+  "CurrencyExchangeSnapshotPairId": 124677997,
+  "CurrencyExchangeSnapshotId": 425045,
+  "Volume": 12994317.9995009,
+  "BaseCurrencyApiId": "exalted",
+  "BaseCurrencyBaseItemTypeId": "Metadata/Items/Currency/CurrencyAddModToRare",
+  "BaseCurrencyText": "Exalted Orb",
+  "CurrencyOne": {
+   "CurrencyItemId": 14,
+   "ItemId": 291,
+   "CurrencyCategoryId": 21,
+   "ApiId": "divine",
+   "BaseItemTypeId": "Metadata/Items/Currency/CurrencyModValues",
+   "Text": "Divine Orb",
+   "CategoryApiId": "currency",
+   "IconUrl": "https://web.poecdn.com//gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvQ3VycmVuY3kvQ3VycmVuY3lNb2RWYWx1ZXMiLCJzY2FsZSI6MSwicmVhbG0iOiJwb2UyIn1d/2986e220b3/CurrencyModValues.png",
+   "ItemMetadata": null
+  },
+  "CurrencyTwo": {
+   "CurrencyItemId": 303,
+   "ItemId": 4351,
+   "CurrencyCategoryId": 29,
+   "ApiId": "omen-of-light",
+   "BaseItemTypeId": "Metadata/Items/Currency/OmenOnAnnulRemoveAbyssMod",
+   "Text": "Omen of Light",
+   "CategoryApiId": "ritual",
+   "IconUrl": "https://web.poecdn.com//gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvQ3VycmVuY3kvT21lbnMvT21lbk9uQW5udWxSZW1vdmVBYnlzc01vZCIsInNjYWxlIjoxLCJyZWFsbSI6InBvZTIifV0/eb39bcb3d7/OmenOnAnnulRemoveAbyssMod.png",
+   "ItemMetadata": null
+  },
+  "CurrencyOneData": {
+   "ValueTraded": 12994317.9995009,
+   "RelativePrice": 426.30219235,
+   "StockValue": 87175435.570536,
+   "VolumeTraded": 30189,
+   "HighestStock": 202530
+  },
+  "CurrencyTwoData": {
+   "ValueTraded": 12869636.8848878,
+   "RelativePrice": 5319.00040913,
+   "StockValue": 76459234.4442329,
+   "VolumeTraded": 2443,
+   "HighestStock": 14514
+  }
+ },
+ {
+  "CurrencyExchangeSnapshotPairId": 124678138,
+  "CurrencyExchangeSnapshotId": 425045,
+  "Volume": 363715.21778059,
+  "BaseCurrencyApiId": "exalted",
+  "BaseCurrencyBaseItemTypeId": "Metadata/Items/Currency/CurrencyAddModToRare",
+  "BaseCurrencyText": "Exalted Orb",
+  "CurrencyOne": {
+   "CurrencyItemId": 14,
+   "ItemId": 291,
+   "CurrencyCategoryId": 21,
+   "ApiId": "divine",
+   "BaseItemTypeId": "Metadata/Items/Currency/CurrencyModValues",
+   "Text": "Divine Orb",
+   "CategoryApiId": "currency",
+   "IconUrl": "https://web.poecdn.com//gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvQ3VycmVuY3kvQ3VycmVuY3lNb2RWYWx1ZXMiLCJzY2FsZSI6MSwicmVhbG0iOiJwb2UyIn1d/2986e220b3/CurrencyModValues.png",
+   "ItemMetadata": null
+  },
+  "CurrencyTwo": {
+   "CurrencyItemId": 467,
+   "ItemId": 5188,
+   "CurrencyCategoryId": 37,
+   "ApiId": "core-destabiliser",
+   "BaseItemTypeId": "Metadata/Items/Currency/CurrencyIncursionModifySoulCore",
+   "Text": "Core Destabiliser",
+   "CategoryApiId": "incursion",
+   "IconUrl": "https://web.poecdn.com//gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvQ3VycmVuY3kvSW5jdXJzaW9uQ3JhZnRpbmdPcmJzL0luY3Vyc2lvbkNvcmVEZXN0YWJsaXNlciIsInNjYWxlIjoxLCJyZWFsbSI6InBvZTIifV0/e613c14ed7/IncursionCoreDestabliser.png",
+   "ItemMetadata": null
+  },
+  "CurrencyOneData": {
+   "ValueTraded": 363715.21778059,
+   "RelativePrice": 427.76433305,
+   "StockValue": 11391388.4480039,
+   "VolumeTraded": 845,
+   "HighestStock": 26465
+  },
+  "CurrencyTwoData": {
+   "ValueTraded": 361460.86142847,
+   "RelativePrice": 1528.21520076,
+   "StockValue": 8535336.30768076,
+   "VolumeTraded": 238,
+   "HighestStock": 5620
+  }
+ },
+ {
+  "CurrencyExchangeSnapshotPairId": 124677307,
+  "CurrencyExchangeSnapshotId": 425045,
+  "Volume": 430.43221039,
+  "BaseCurrencyApiId": "exalted",
+  "BaseCurrencyBaseItemTypeId": "Metadata/Items/Currency/CurrencyAddModToRare",
+  "BaseCurrencyText": "Exalted Orb",
+  "CurrencyOne": {
+   "CurrencyItemId": 236,
+   "ItemId": 4073,
+   "CurrencyCategoryId": 23,
+   "ApiId": "the-greatwolfs-rune-of-claws",
+   "BaseItemTypeId": "Metadata/Items/SoulCores/RuneSpecial24",
+   "Text": "The Greatwolf's Rune of Claws",
+   "CategoryApiId": "runes",
+   "IconUrl": "https://web.poecdn.com//gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvQ3VycmVuY3kvUnVuZXMvTmV3UnVuZTIwIiwic2NhbGUiOjEsInJlYWxtIjoicG9lMiJ9XQ/ae83a7c954/NewRune20.png",
+   "ItemMetadata": null
+  },
+  "CurrencyTwo": {
+   "CurrencyItemId": 14,
+   "ItemId": 291,
+   "CurrencyCategoryId": 21,
+   "ApiId": "divine",
+   "BaseItemTypeId": "Metadata/Items/Currency/CurrencyModValues",
+   "Text": "Divine Orb",
+   "CategoryApiId": "currency",
+   "IconUrl": "https://web.poecdn.com//gen/image/WzI1LDE0LHsiZiI6IjJESXRlbXMvQ3VycmVuY3kvQ3VycmVuY3lNb2RWYWx1ZXMiLCJzY2FsZSI6MSwicmVhbG0iOiJwb2UyIn1d/2986e220b3/CurrencyModValues.png",
+   "ItemMetadata": null
+  },
+  "CurrencyOneData": {
+   "ValueTraded": 55.2704234,
+   "RelativePrice": 430.43221039,
+   "StockValue": 92964.85215393,
+   "VolumeTraded": 1,
+   "HighestStock": 1682
+  },
+  "CurrencyTwoData": {
+   "ValueTraded": 430.43221039,
+   "RelativePrice": 55.2704234,
+   "StockValue": 0.0,
+   "VolumeTraded": 1,
+   "HighestStock": 0
+  }
+ }
+]

@@ -1,0 +1,205 @@
+"""Whisper outcomes: recording, folding verdicts, and refusing to over-claim."""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+
+import pytest
+
+from poe2arb.listings import Band, Listing, build_candidates
+from poe2arb.outcomes import (
+    MIN_SAMPLES,
+    Attempt,
+    Outcome,
+    read_attempts,
+    record_attempt,
+    record_outcome,
+    suggested_gap_band,
+    summarise,
+)
+
+NOW = datetime.now(timezone.utc)
+
+
+@pytest.fixture
+def log_path(tmp_path):
+    return tmp_path / "outcomes.jsonl"
+
+
+def candidate(*, item="omen", pay=11.0, ce=12.0, stock=1.0, char="Seller", afk=False, age_h=3.0):
+    listing = Listing(
+        item_id=item,
+        account=f"{char}#1",
+        character=char,
+        pay_amount=pay,
+        get_amount=1.0,
+        stock=stock,
+        indexed=NOW - timedelta(hours=age_h),
+        afk=afk,
+        whisper="@x buy {0} for {1}",
+        item_whisper="{0} Thing",
+        pay_whisper="{0} Coin",
+    )
+    [c] = build_candidates(
+        [listing], {item: ce, "divine": 1.0}, {item: "Omen of Light"},
+        min_gap=1.05, max_gap=1.5, sale_unit_divines=0.0023,
+    )
+    return c
+
+
+def attempt(**kw) -> Attempt:
+    base = dict(
+        id="a", ts=NOW, item_id="omen", item_name="Omen", account="s#1", character="S",
+        pay_currency="divine", unit_price_divines=11.0, ce_divines=12.0, gap=1.09,
+        band="plausible", lots=1, units=1.0, cost_divines=11.0,
+        expected_profit_divines=0.9, listing_age_s=3600.0, afk=False,
+        outcome=Outcome.FILLED,
+    )
+    base.update(kw)
+    return Attempt(**base)
+
+
+# --- recording -------------------------------------------------------------
+
+def test_copying_a_whisper_records_a_pending_attempt(log_path):
+    """Logged on copy, not on success — otherwise the file says everything fills."""
+    attempt_id = record_attempt(log_path, candidate())
+    [got] = read_attempts(log_path)
+    assert got.id == attempt_id
+    assert got.outcome is Outcome.PENDING
+    assert got.item_name == "Omen of Light"
+    assert got.gap == pytest.approx(1.09, abs=0.01)
+    assert got.expected_profit_divines > 0
+
+
+def test_a_verdict_folds_onto_its_attempt(log_path):
+    attempt_id = record_attempt(log_path, candidate())
+    record_outcome(log_path, attempt_id, Outcome.FILLED, actual_profit_divines=1.75)
+    [got] = read_attempts(log_path)
+    assert got.outcome is Outcome.FILLED
+    assert got.actual_profit_divines == 1.75
+    assert got.resolved_at is not None
+
+
+def test_the_last_verdict_wins(log_path):
+    """Mis-clicks happen; correcting one shouldn't need the file edited."""
+    attempt_id = record_attempt(log_path, candidate())
+    record_outcome(log_path, attempt_id, Outcome.NO_REPLY)
+    record_outcome(log_path, attempt_id, Outcome.FILLED)
+    [got] = read_attempts(log_path)
+    assert got.outcome is Outcome.FILLED
+
+
+def test_features_that_might_predict_a_fill_are_all_captured(log_path):
+    record_attempt(log_path, candidate(afk=True, age_h=30.0))
+    [got] = read_attempts(log_path)
+    assert got.afk is True
+    assert got.listing_age_s == pytest.approx(30 * 3600, rel=0.01)
+    assert got.band in {b.value for b in Band}
+    assert got.pay_currency == "divine"
+
+
+def test_reading_survives_a_corrupt_line(log_path):
+    record_attempt(log_path, candidate())
+    with open(log_path, "a", encoding="utf-8") as f:
+        f.write("{not json\n\n")
+    record_attempt(log_path, candidate(char="Other"))
+    assert len(read_attempts(log_path)) == 2
+
+
+def test_a_verdict_for_an_unknown_attempt_is_ignored(log_path):
+    record_attempt(log_path, candidate())
+    record_outcome(log_path, "nosuchid", Outcome.FILLED)
+    [got] = read_attempts(log_path)
+    assert got.outcome is Outcome.PENDING
+
+
+def test_missing_file_reads_as_empty(tmp_path):
+    assert read_attempts(tmp_path / "nothing.jsonl") == []
+
+
+def test_a_failed_write_does_not_raise(tmp_path):
+    """Losing a log line must never interrupt a trade in progress."""
+    blocked = tmp_path / "file-not-dir"
+    blocked.write_text("x")
+    record_attempt(blocked / "outcomes.jsonl", candidate())  # no exception
+
+
+# --- summarising -----------------------------------------------------------
+
+def test_no_fill_rate_is_claimed_from_too_few_attempts():
+    """The 2-of-14 mistake, encoded: direction yes, rate no."""
+    s = summarise([attempt(id=str(i), outcome=Outcome.FILLED) for i in range(3)])
+    assert s.fills == 3
+    assert s.fill_rate is None
+    assert not s.has_enough_data
+
+
+def test_fill_rate_appears_once_there_is_enough_data():
+    rows = [attempt(id=str(i), outcome=Outcome.FILLED) for i in range(5)]
+    rows += [attempt(id=f"n{i}", outcome=Outcome.NO_REPLY) for i in range(5)]
+    s = summarise(rows)
+    assert s.resolved == MIN_SAMPLES
+    assert s.fill_rate == pytest.approx(0.5)
+
+
+def test_pending_attempts_are_excluded_from_rates():
+    rows = [attempt(id=str(i), outcome=Outcome.PENDING) for i in range(20)]
+    rows += [attempt(id=f"f{i}", outcome=Outcome.FILLED) for i in range(10)]
+    s = summarise(rows)
+    assert s.total == 30
+    assert s.resolved == 10
+    assert s.fill_rate == pytest.approx(1.0)
+
+
+def test_buckets_split_by_gap_age_and_presence():
+    rows = [attempt(id=f"a{i}", gap=1.05, listing_age_s=600.0) for i in range(3)]
+    rows += [attempt(id=f"b{i}", gap=8.0, listing_age_s=200_000.0, afk=True) for i in range(3)]
+    s = summarise(rows)
+    assert {b.label for b in s.by_gap} == {"1.0-1.1x", "over 3x"}
+    assert {b.label for b in s.by_age} == {"under 1h", "over a day"}
+    assert {b.label for b in s.by_presence} == {"seller active", "seller AFK"}
+
+
+def test_realised_profit_prefers_the_reported_figure():
+    """Expected profit is an estimate; what the user actually got is not."""
+    rows = [attempt(id="a", outcome=Outcome.FILLED, expected_profit_divines=1.79,
+                    actual_profit_divines=1.0)]
+    assert summarise(rows).realised_divines == 1.0
+
+
+def test_realised_profit_falls_back_to_expected_when_unreported():
+    rows = [attempt(id="a", outcome=Outcome.FILLED, expected_profit_divines=1.79)]
+    assert summarise(rows).realised_divines == pytest.approx(1.79)
+
+
+def test_sold_and_no_reply_stay_distinct():
+    """A seller who says 'gone' was reachable; silence may mean anything."""
+    rows = [attempt(id="a", outcome=Outcome.SOLD), attempt(id="b", outcome=Outcome.NO_REPLY)]
+    s = summarise(rows)
+    assert s.resolved == 2 and s.fills == 0
+
+
+def test_value_per_attempt_is_what_a_ranking_should_maximise():
+    """A 10% fill rate on 5-divine trades beats 50% on 0.3-divine ones."""
+    big = [attempt(id=f"b{i}", gap=1.4, outcome=Outcome.NO_REPLY) for i in range(9)]
+    big += [attempt(id="bf", gap=1.4, outcome=Outcome.FILLED, expected_profit_divines=5.0)]
+    small = [attempt(id=f"s{i}", gap=1.05, outcome=Outcome.FILLED,
+                     expected_profit_divines=0.3) for i in range(5)]
+    small += [attempt(id=f"sn{i}", gap=1.05, outcome=Outcome.NO_REPLY) for i in range(5)]
+    s = summarise(big + small)
+    by_label = {b.label: b for b in s.by_gap}
+    assert by_label["1.25-1.5x"].value_per_attempt > by_label["1.0-1.1x"].value_per_attempt
+    assert by_label["1.0-1.1x"].fill_rate > by_label["1.25-1.5x"].fill_rate
+
+
+def test_no_band_is_suggested_without_data():
+    assert suggested_gap_band(summarise([attempt(id="a")])) is None
+
+
+def test_a_band_is_suggested_once_buckets_are_populated():
+    rows = [attempt(id=f"a{i}", gap=1.05, outcome=Outcome.NO_REPLY) for i in range(10)]
+    rows += [attempt(id=f"b{i}", gap=1.3, outcome=Outcome.FILLED,
+                     expected_profit_divines=2.0) for i in range(10)]
+    band = suggested_gap_band(summarise(rows))
+    assert band == (1.25, 1.5)

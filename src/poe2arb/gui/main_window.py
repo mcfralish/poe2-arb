@@ -50,6 +50,7 @@ from ..market import BASE_CURRENCY_CHOICES, Universe
 from ..rate_limit import Severity, check_pacing, min_safe_interval, worst_severity
 from ..report import route_str
 from ..scan import ScanResult, result_from_history_record
+from ..trade_queue import TradeQueue
 from .icon import make_app_icon
 from .icon_provider import ICON_SIZE, IconProvider
 from .settings_dialog import SettingsDialog
@@ -66,7 +67,17 @@ from .updates import RELEASES_PAGE
 from .lookup import QuickLookup
 from .market_panel import MarketPanel
 from .trends import TrendsTab
-from .worker import ScanWorker, UniverseWorker, UpdateCheckWorker, stop_thread
+from .hotkey import GlobalHotkey, format_hotkey
+from .queue_panel import QueuePanel
+from .sweep_panel import SweepPanel
+from .worker import (
+    RecheckWorker,
+    ScanWorker,
+    SweepWorker,
+    UniverseWorker,
+    UpdateCheckWorker,
+    stop_thread,
+)
 
 
 log = logging.getLogger(__name__)
@@ -169,6 +180,7 @@ class MainWindow(QMainWindow):
         self._pending_log: list[str] = []
         self.cfg = self._load_cfg()
         self._worker: ScanWorker | None = None
+        self._sweep_worker: SweepWorker | None = None
         self._known: dict[tuple[str, ...], float] = {}
         self._known_longer: tuple[str, ...] | None = None
         self._first_seen: dict[tuple[str, ...], str] = {}
@@ -184,6 +196,12 @@ class MainWindow(QMainWindow):
         # (table, search field, columns worth matching) — see _filtered.
         self._filters: list[tuple[QTableWidget, QLineEdit, tuple[int, ...]]] = []
 
+        self.trade_queue = TradeQueue(
+            offer_window_s=self.cfg.offer_window_s,
+            available_ttl_s=self.cfg.available_ttl_s,
+            awaiting_timeout_s=self.cfg.awaiting_timeout_s,
+        )
+
         self.icons = IconProvider(self.cfg.cache_dir, self)
         # One repaint per batch of arrivals rather than per icon: a table of 600
         # rows would otherwise re-render 600 times as the fetches land.
@@ -193,6 +211,8 @@ class MainWindow(QMainWindow):
         self._icon_refresh.timeout.connect(self._reapply_view_settings)
         self.icons.ready.connect(lambda _: self._icon_refresh.start())
 
+        # Timers first: _build_central wires widgets that reference them.
+        self._build_timers()
         self._build_toolbar()
         self._build_central()
         self._restore_ui_state()
@@ -200,7 +220,6 @@ class MainWindow(QMainWindow):
             self._log(line)
         self._pending_log.clear()
         self._build_tray()
-        self._build_timers()
         self._backload_from_history()
         self._check_updates()
         self._preload_currencies()
@@ -304,15 +323,25 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs)
 
+        # The cycle detector's table used to live here. It found nothing for
+        # eight versions because it was fed the wrong market (see TODO.md), so
+        # this tab now holds the trade queue — the thing actually worth acting
+        # on. `ops_table` still exists, unparented, because the dormant cycle
+        # path and its history backload still write to it.
         self.ops_table = self._make_table(
-            OPS_COLUMNS, 1, Qt.SortOrder.DescendingOrder  # biggest profit first
+            OPS_COLUMNS, 1, Qt.SortOrder.DescendingOrder
         )
+        self.queue_panel = QueuePanel()
+        self.queue_panel.set_icons(self.icons)
+        self.queue_panel.take_requested.connect(self._queue_take)
+        self.queue_panel.outcome_reported.connect(self._queue_outcome)
+        self.queue_panel.dismiss_requested.connect(self._queue_dismiss)
         self.lookup = QuickLookup()
         self.ops_split = QSplitter(Qt.Orientation.Vertical)
-        self.ops_split.addWidget(self.ops_table)
+        self.ops_split.addWidget(self.queue_panel)
         self.ops_split.addWidget(self.lookup)
-        self.ops_split.setStretchFactor(0, 3)
-        self.ops_split.setStretchFactor(1, 2)
+        self.ops_split.setStretchFactor(0, 4)
+        self.ops_split.setStretchFactor(1, 1)
         self.tabs.addTab(self.ops_split, "Opportunities")
 
         self.market = MarketPanel()
@@ -321,6 +350,18 @@ class MainWindow(QMainWindow):
         self.market.set_icons(self.icons)
         self.market.exclusions_changed.connect(self._exclusions_changed)
         self.tabs.addTab(self.market, "Market")
+
+        self.sweep = SweepPanel()
+        self.sweep.set_icons(self.icons)
+        self.sweep.set_bankroll(self.cfg.bankroll_divines)
+        self.sweep.sweep_requested.connect(self.start_sweep)
+        self.sweep.stop_requested.connect(self.stop_sweep)
+        self.sweep.bankroll_changed.connect(self._bankroll_changed)
+        self.sweep.attempt_copied.connect(self._attempt_copied)
+        self.sweep.recheck_requested.connect(self._recheck)
+        self._setup_hotkey()
+        self.sweep.outcome_reported.connect(self._outcome_reported)
+        self.tabs.addTab(self.sweep, "Trades")
 
         self.edges_table = self._make_table(
             EDGE_COLUMNS, 4, Qt.SortOrder.DescendingOrder  # deepest books first
@@ -503,6 +544,18 @@ class MainWindow(QMainWindow):
         self.countdown_timer.setInterval(1000)
         self.countdown_timer.timeout.connect(self._tick_countdown)
         self.countdown_timer.start()
+
+        # Drives the offer countdown and promotes the next trade when one lapses.
+        self.queue_timer = QTimer(self)
+        self.queue_timer.setInterval(1000)
+        self.queue_timer.timeout.connect(self._queue_tick)
+        self.queue_timer.start()
+
+        # Coalesces a run of spin-box steps into one config write.
+        self._bankroll_save_timer = QTimer(self)
+        self._bankroll_save_timer.setSingleShot(True)
+        self._bankroll_save_timer.setInterval(1500)
+        self._bankroll_save_timer.timeout.connect(self._persist_bankroll)
 
     def _backload_from_history(self) -> None:
         """Repopulate the log and tables from recent scans on disk.
@@ -687,6 +740,251 @@ class MainWindow(QMainWindow):
             now = datetime.now().strftime("%H:%M:%S")
             self._log("scan stopped")
             self.statusBar().showMessage("Scan stopped")
+
+    # ------------------------------------------------------------------ sweeping
+
+    def start_sweep(self) -> None:
+        """Run a cross-venue sweep.
+
+        Refuses while a scan is running rather than queueing: both spend the
+        same paced GGG request budget, so overlapping them would halve each
+        one's rate and risk the shared rate limit.
+        """
+        if self._sweep_worker is not None and self._sweep_worker.isRunning():
+            return
+        if self._worker is not None and self._worker.isRunning():
+            self.sweep.set_status("A scan is running — stop it first, they share the request budget.")
+            return
+        self.sweep.set_running(True)
+        self.sweep.set_status("Checking Currency Exchange prices…")
+        self._log("cross-venue sweep started")
+        self._sweep_worker = SweepWorker(self.cfg, self)
+        self._sweep_worker.progress.connect(
+            lambda i, n: self.sweep.set_status(f"Checking listings — item {i} of {n}…")
+        )
+        self._sweep_worker.finished_ok.connect(self._sweep_done)
+        self._sweep_worker.failed.connect(self._sweep_failed)
+        self._sweep_worker.finished.connect(self._sweep_thread_finished)
+        self._sweep_worker.start()
+
+    def stop_sweep(self) -> None:
+        if self._sweep_worker is not None and self._sweep_worker.isRunning():
+            self._sweep_worker.cancel()
+            self.sweep.set_status("Stopping…")
+            self._log("stopping sweep…")
+
+    def _sweep_thread_finished(self) -> None:
+        self.sweep.set_running(False)
+        if self._sweep_worker is not None and self._sweep_worker.was_cancelled:
+            self.sweep.set_status("Sweep stopped.")
+            self._log("sweep stopped")
+
+    def _sweep_done(self, result) -> None:
+        self.sweep.set_result(result)
+        added = self.trade_queue.submit(result.candidates)
+        if added:
+            self._log(f"{added} new trade(s) queued")
+        self._queue_tick()
+        plausible = sum(1 for c in result.candidates if c.band.name == "PLAUSIBLE")
+        self._log(
+            f"sweep complete — {result.listings_seen} listings across "
+            f"{len(result.items)} items, {len(result.candidates)} candidates "
+            f"({plausible} plausible)"
+        )
+        for item_id, why in sorted(result.errors.items()):
+            self._log(f"  sweep: {item_id} failed: {why}")
+
+    def _sweep_failed(self, message: str) -> None:
+        self.sweep.set_status(f"Sweep failed: {message}")
+        self._log(f"sweep failed: {message}")
+
+    # ------------------------------------------------------------------ trade queue
+
+    def _queue_tick(self) -> None:
+        """Advance the queue's clocks, announce a new offer, redraw.
+
+        Runs once a second: the panel shows live countdowns, and an offer that
+        silently outlives its window would leave the hotkey pointing at nothing.
+        """
+        tick = self.trade_queue.tick()
+        if tick.newly_offered is not None:
+            self._announce_offer(tick.newly_offered)
+        for t in tick.expired:
+            log.debug("trade offer expired: %s", t.candidate.item_name)
+        for t in tick.auto_resolved:
+            self._record_auto_no_reply(t)
+        if tick.auto_resolved:
+            self.trade_queue.forget_resolved()
+        self.queue_panel.refresh(self.trade_queue)
+
+    def _record_auto_no_reply(self, trade) -> None:
+        """Write a timed-out whisper to the outcome log as NO_REPLY.
+
+        The queue has already changed the trade's state; this is only the
+        persistence half, kept here because the queue has no business knowing
+        where the log lives.
+        """
+        from ..outcomes import record_outcome
+
+        if trade.attempt_id:
+            assert self.cfg.outcomes_path is not None
+            record_outcome(self.cfg.outcomes_path, trade.attempt_id, trade.outcome)
+        self._log(f"{trade.candidate.item_name}: no reply (timed out)")
+
+    def _announce_offer(self, trade) -> None:
+        """One toast per offer, and only while no other offer is live.
+
+        The queue guarantees the second part — it never promotes a trade while
+        one is already offered — so this can simply fire whenever it's called.
+        """
+        c = trade.candidate
+        seller = c.listing.character or c.listing.account
+        key_hint = (
+            f"  ·  {format_hotkey(self.cfg.trade_hotkey)}"
+            if self.cfg.trade_hotkey_enabled and self._hotkey.active
+            else ""
+        )
+        self._notify(
+            f"Trade: +{c.profit_divines:.2f} div{key_hint}",
+            f"{c.plan.units:g} × {c.item_name} from {seller} "
+            f"for {c.plan.cost_divines:.1f} div",
+        )
+        self._log(
+            f"offered: {c.plan.units:g} × {c.item_name} from {seller} "
+            f"for {c.plan.cost_divines:.1f} div (+{c.profit_divines:.2f})"
+        )
+
+    def _hotkey_pressed(self) -> None:
+        """Take the live offer, if there is one. Otherwise do nothing loudly."""
+        trade = self.trade_queue.offered
+        if trade is None:
+            self.statusBar().showMessage("No trade is being offered right now", 4000)
+            return
+        self._queue_take(trade.id)
+
+    def _queue_take(self, trade_id: str) -> None:
+        """Copy the whisper and move the trade to 'waiting on a reply'."""
+        from PySide6.QtGui import QGuiApplication
+
+        from ..listings import whisper_text
+        from ..outcomes import record_attempt
+
+        trade = self.trade_queue.get(trade_id)
+        if trade is None:
+            return
+        text = whisper_text(trade.candidate)
+        if not text:
+            self._log("that listing has no whisper template; dropped")
+            self.trade_queue.drop(trade_id)
+            self.queue_panel.refresh(self.trade_queue)
+            return
+        taken = self.trade_queue.take(trade_id)
+        if taken is None:
+            return  # already gone — a lapse raced the click
+        QGuiApplication.clipboard().setText(text)
+        assert self.cfg.outcomes_path is not None
+        taken.attempt_id = record_attempt(
+            self.cfg.outcomes_path, taken.candidate,
+            retention_days=self.cfg.history_retention_days,
+        )
+        c = taken.candidate
+        self.statusBar().showMessage(
+            f"Copied — paste in game with Ctrl+V, then Enter.  "
+            f"{c.plan.units:g} × {c.item_name} for {c.plan.cost_divines:.1f} div",
+            15000,
+        )
+        self._log(f"whisper copied: {c.item_name} from "
+                  f"{c.listing.character or c.listing.account}")
+        self.queue_panel.refresh(self.trade_queue)
+
+    def _queue_outcome(self, trade_id: str, outcome) -> None:
+        from ..outcomes import record_outcome
+
+        trade = self.trade_queue.get(trade_id)
+        if trade is None:
+            return
+        resolved = self.trade_queue.resolve(trade_id, outcome)
+        if resolved is None:
+            return
+        if resolved.attempt_id:
+            assert self.cfg.outcomes_path is not None
+            record_outcome(self.cfg.outcomes_path, resolved.attempt_id, outcome)
+        self._log(f"{resolved.candidate.item_name}: {outcome.value}")
+        self.trade_queue.forget_resolved()
+        self.queue_panel.refresh(self.trade_queue)
+
+    def _queue_dismiss(self, trade_id: str) -> None:
+        trade = self.trade_queue.get(trade_id)
+        if trade is not None and self.trade_queue.drop(trade_id):
+            self._log(f"dismissed: {trade.candidate.item_name}")
+        self.queue_panel.refresh(self.trade_queue)
+
+    def _setup_hotkey(self) -> None:
+        """Bind the global hotkey, if the user turned it on and the OS allows it.
+
+        Failure is reported on the Trades tab and in the log rather than raised:
+        a hotkey that another program already owns is a normal thing to hit, and
+        the tab works fine without it.
+        """
+        self._hotkey = GlobalHotkey(self)
+        self._hotkey.pressed.connect(self._hotkey_pressed)
+        self._hotkey.error.connect(lambda msg: self._log(f"hotkey: {msg}"))
+        if not self.cfg.trade_hotkey_enabled or not self.cfg.trade_hotkey:
+            return
+        if not self._hotkey.supported:
+            self._log("hotkey: only available on Windows")
+            return
+        if self._hotkey.register(self.cfg.trade_hotkey):
+            self._log(
+                f"hotkey {format_hotkey(self.cfg.trade_hotkey)} copies the next trade"
+            )
+            self.sweep.set_hotkey_hint(self.cfg.trade_hotkey)
+            self.queue_panel.set_hotkey_hint(self.cfg.trade_hotkey)
+
+    def _recheck(self, candidate) -> None:
+        """Confirm a listing still exists, just before the whisper is copied."""
+        self._recheck_worker = RecheckWorker(self.cfg, candidate, self)
+        self._recheck_worker.done.connect(self.sweep.recheck_finished)
+        self._recheck_worker.start()
+
+    def _attempt_copied(self, candidate) -> None:
+        """Log the whisper as a pending attempt the moment it hits the clipboard."""
+        from ..outcomes import record_attempt
+
+        assert self.cfg.outcomes_path is not None
+        attempt_id = record_attempt(
+            self.cfg.outcomes_path, candidate,
+            retention_days=self.cfg.history_retention_days,
+        )
+        self.sweep.note_attempt(candidate, attempt_id)
+        self._log(
+            f"whisper copied — {candidate.plan.units:g} × {candidate.item_name} "
+            f"from {candidate.listing.character or candidate.listing.account} "
+            f"for {candidate.plan.cost_divines:.2f} div"
+        )
+
+    def _outcome_reported(self, attempt_id: str, outcome) -> None:
+        from ..outcomes import record_outcome
+
+        assert self.cfg.outcomes_path is not None
+        record_outcome(self.cfg.outcomes_path, attempt_id, outcome)
+        self._log(f"trade outcome recorded: {outcome.value}")
+
+    def _bankroll_changed(self, divines: float) -> None:
+        """Take the new bankroll immediately, persist it lazily.
+
+        The spin box fires on every step, so the config write is deferred to
+        when editing settles — the in-memory value is what the next sweep reads,
+        and that is already correct.
+        """
+        self.cfg.bankroll_divines = divines
+        self._bankroll_save_timer.start()
+
+    def _persist_bankroll(self) -> None:
+        try:
+            save_config(self.cfg, user_config_path())
+        except OSError:
+            log.warning("could not save bankroll", exc_info=True)
 
     def _scan_done(self, result: ScanResult) -> None:
         now = datetime.now().strftime("%H:%M:%S")
@@ -939,11 +1237,43 @@ class MainWindow(QMainWindow):
             universe=self._universe,
         )
         if dlg.exec():
+            previous = self.cfg
             self.cfg = dlg.result_config()
             save_config(self.cfg, user_config_path())
             self._log(f"settings saved to {user_config_path()}")
             self.market.set_exclusions(self.cfg.exclude_currencies)
+            self._apply_queue_settings(previous)
             self._reapply_view_settings()
+
+    def _apply_queue_settings(self, previous: Config) -> None:
+        """Push changed timings and hotkey onto the objects already running.
+
+        Without this, every one of these needs a restart to take effect, which
+        for a countdown the user just shortened is confusing enough to look
+        broken.
+        """
+        self.trade_queue.offer_window_s = self.cfg.offer_window_s
+        self.trade_queue.available_ttl_s = self.cfg.available_ttl_s
+        self.trade_queue.awaiting_timeout_s = self.cfg.awaiting_timeout_s
+
+        rebind = (
+            previous.trade_hotkey != self.cfg.trade_hotkey
+            or previous.trade_hotkey_enabled != self.cfg.trade_hotkey_enabled
+        )
+        if not rebind:
+            return
+        self._hotkey.unregister()
+        self.queue_panel.set_hotkey_hint("")
+        self.sweep.set_hotkey_hint("")
+        if self.cfg.trade_hotkey_enabled and self.cfg.trade_hotkey:
+            if self._hotkey.register(self.cfg.trade_hotkey):
+                self.queue_panel.set_hotkey_hint(self.cfg.trade_hotkey)
+                self._log(
+                    f"hotkey {format_hotkey(self.cfg.trade_hotkey)} copies the next trade"
+                )
+        else:
+            self._log("hotkey disabled")
+        self.queue_panel.refresh(self.trade_queue)
 
     def _exclusions_changed(self, excluded: list[str]) -> None:
         """Persist a tick from the Market tab straight away.
@@ -998,7 +1328,11 @@ class MainWindow(QMainWindow):
         self.icons.shutdown()
         self.watch_timer.stop()
         self.countdown_timer.stop()
+        if getattr(self, "_hotkey", None) is not None:
+            self._hotkey.unregister()
         stop_thread(self._worker)
+        stop_thread(self._sweep_worker)
+        stop_thread(getattr(self, "_recheck_worker", None), timeout_ms=2000)
         stop_thread(getattr(self, "_update_worker", None), timeout_ms=2000)
         stop_thread(getattr(self, "_currency_worker", None), timeout_ms=2000)
 
