@@ -6,7 +6,7 @@ says what changed for you and, where it matters, why.
 Versions follow `MAJOR.MINOR.PATCH`. Until 1.0 the minor number moves for
 anything user-visible.
 
-## [0.4.0] — unreleased
+## [0.4.0] — 2026-07-29
 
 0.3.0 established that the triangular loop search was reading the wrong market.
 This release removes it. Everything that existed to serve it — the Scan and
