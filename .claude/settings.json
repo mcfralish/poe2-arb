@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(QT_QPA_PLATFORM=offscreen ~/.venvs/poe2-arb/bin/python -m pytest *)",
+      "Bash(~/.venvs/poe2-arb/bin/python -m pytest *)",
+      "Bash(gh run watch *)"
+    ]
+  }
+}
