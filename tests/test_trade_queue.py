@@ -245,6 +245,39 @@ def test_a_whispered_trade_cannot_be_dropped():
     assert q.drop(taken.id) is False
 
 
+def test_cancel_pending_stops_new_offers_but_keeps_live_work():
+    """Stopping the sweep must stop the backlog, not retract work in progress.
+
+    Reported from the field 2026-07-30: offers kept arriving for minutes after
+    *Find trades* was switched off, because `tick` promotes the backlog whether
+    or not anything is still sweeping.
+    """
+    q = queue()
+    q.submit([cand(char=c) for c in ("A", "B", "C", "D")], T0)
+    q.tick(T0)                      # A is offered
+    taken = q.take_offered(T0)      # ...and whispered
+    q.tick(T0 + timedelta(seconds=1))   # B takes the free slot
+    assert len(q.pending) == 2      # C and D still waiting
+
+    assert q.cancel_pending() == 2
+    assert q.pending == []
+    # The whispered one still needs its verdict; the offered one is still takeable.
+    assert [t.id for t in q.awaiting] == [taken.id]
+    assert len(q.available) == 1
+
+    # And no amount of ticking conjures another offer.
+    for i in range(2, 12):
+        assert q.tick(T0 + timedelta(minutes=i)).newly_offered is None
+
+
+def test_cancel_pending_lets_a_later_sweep_refind_the_listing():
+    """Cancelled-but-never-offered isn't a verdict, so it must not blacklist."""
+    q = queue()
+    q.submit([cand(char="A")], T0)
+    assert q.cancel_pending() == 1
+    assert q.submit([cand(char="A")], T0 + timedelta(minutes=10)) == 1
+
+
 def test_forget_resolved_keeps_live_work():
     q = queue()
     q.submit([cand(char="A"), cand(char="B")], T0)

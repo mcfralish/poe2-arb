@@ -121,3 +121,39 @@ class TestRoundTrip:
             if getattr(dialog.result_config(), f.name) != getattr(Config(), f.name)
         }
         assert changed <= names
+
+
+class TestLeague:
+    """A dropdown, because a typo prices trades against the wrong economy."""
+
+    def test_automatic_is_the_default_and_saves_as_none(self, qapp):
+        d = SettingsDialog(Config(), leagues=["Runes of Aldur", "Standard"])
+        assert d.league.currentIndex() == 0
+        assert d.result_config().league is None
+
+    def test_the_detected_league_is_named_in_the_automatic_entry(self, qapp):
+        d = SettingsDialog(
+            Config(), leagues=["Runes of Aldur", "Standard"],
+            detected_league="Runes of Aldur",
+        )
+        assert "Runes of Aldur" in d.league.itemText(0)
+
+    def test_a_configured_league_is_preselected(self, qapp):
+        d = SettingsDialog(
+            Config(league="Standard"), leagues=["Runes of Aldur", "Standard"]
+        )
+        assert d.league.currentData() == "Standard"
+        assert d.result_config().league == "Standard"
+
+    def test_an_unconfirmed_league_is_kept_not_dropped(self, qapp):
+        """poe.ninja being unreachable must not silently move the user's league."""
+        d = SettingsDialog(Config(league="Some Old League"), leagues=[])
+        assert d.league.currentData() == "Some Old League"
+        assert d.result_config().league == "Some Old League"
+
+    def test_restore_defaults_returns_to_automatic(self, qapp):
+        d = SettingsDialog(
+            Config(league="Standard"), leagues=["Runes of Aldur", "Standard"]
+        )
+        d.restore_defaults()
+        assert d.result_config().league is None

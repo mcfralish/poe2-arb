@@ -22,6 +22,34 @@ from .scout import CeSnapshot, ScoutClient
 log = logging.getLogger(__name__)
 
 
+def resolve_league(cfg: Config) -> str:
+    """The league to sweep: the configured one, else poe.ninja's current league.
+
+    **Never falls back to a hardcoded name.** This used to read
+    `cfg.league or "Standard"`, which meant a default install swept the permanent
+    league while the user played the temp one. That is not a cosmetic mismatch:
+    measured 2026-07-30, Standard prices Omen of Whittling at 25,761 exalted
+    against Runes of Aldur's 4,518 — **5.7x** — so every listing looks like a
+    windfall and no whisper can ever be answered, because the sellers are in a
+    different league to the player.
+
+    `NinjaClient.leagues` is disk-cached, so this costs a request once per TTL
+    and nothing thereafter. If poe.ninja is unreachable we raise rather than
+    guess: sweeping the wrong league is worse than not sweeping.
+    """
+    if cfg.league:
+        return cfg.league
+    from .client import NinjaClient
+
+    client = NinjaClient(cfg)
+    try:
+        league = client.current_league()
+    finally:
+        client.close()
+    log.info("league auto-detected as %r", league)
+    return league
+
+
 @dataclass(frozen=True)
 class SweepResult:
     league: str
@@ -94,8 +122,7 @@ def run_sweep(
     try:
         if snapshot is None:
             scout = ScoutClient(cfg)
-            league = cfg.league or "Standard"
-            snapshot = scout.snapshot(league)
+            snapshot = scout.snapshot(resolve_league(cfg))
         league = snapshot.league
         items = select_sweep_items(snapshot, cfg)
         log.info(
@@ -205,7 +232,7 @@ def recheck(
     listing = candidate.listing
     try:
         fresh = ggg.fetch_listings(
-            cfg.league or "Standard", listing.item_id, use_cache=False
+            resolve_league(cfg), listing.item_id, use_cache=False
         )
     except ScanCancelled:
         raise

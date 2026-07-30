@@ -14,6 +14,7 @@ listings priced in that currency.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
@@ -30,6 +31,17 @@ POTS = (
     ("divine", "div", 10.0),
     ("exalted", "ex", 500.0),
 )
+
+# Every string the appetite readout can show. Its width is sized to the longest
+# of these rather than to a guessed pixel count, so the label cannot be clipped
+# by a wider font or a higher DPI.
+_APPETITE_LABELS = ("proven only", "profit only", "100%")
+
+
+def _fits(widget, *texts: str, padding: int = 0) -> int:
+    """Width in pixels that holds the longest of `texts` in `widget`'s font."""
+    metrics = QFontMetrics(widget.font())
+    return max(metrics.horizontalAdvance(t) for t in texts) + padding
 
 
 class BankrollBar(QWidget):
@@ -52,11 +64,22 @@ class BankrollBar(QWidget):
             spin.setDecimals(0)
             spin.setSingleStep(step)
             spin.setSuffix(f" {suffix}")
-            spin.setSpecialValueText("no limit")
+            # The special text replaces the *whole* display, suffix included, so
+            # a plain "no limit" left the two boxes identical and there was no
+            # way to tell which one was divine (reported from the field
+            # 2026-07-30). Naming the denomination keeps them distinguishable in
+            # exactly the state where the number can't do it.
+            spin.setSpecialValueText(f"no limit ({suffix})")
+            # Wide enough for that string outright. Left to its own sizeHint the
+            # box measures the numeric range and elides the longer special text.
+            spin.setMinimumWidth(
+                _fits(spin, f"no limit ({suffix})", f"100000000 {suffix}", padding=44)
+            )
             spin.setToolTip(
-                f"How many {currency} orbs you have to spend. Caps the quantity "
-                f"on listings priced in {currency} only — sellers wanting a "
-                f"different currency are unaffected. 0 means don't cap."
+                f"How many {currency} orbs you have to spend.\n\n"
+                f"This only limits listings that ask to be paid in {currency} — "
+                f"sellers wanting something else\nare unaffected, because you "
+                f"can't pay them out of this pot. Set it to 0 for no limit."
             )
             spin.valueChanged.connect(
                 lambda held, c=currency: self.changed.emit(c, held)
@@ -73,10 +96,14 @@ class BankrollBar(QWidget):
         for currency, suffix, _ in POTS:
             self.settlement.addItem(currency, currency)
         self.settlement.setToolTip(
-            "What you take payment in when you resell on the Currency Exchange.\n"
-            "Exalted is about 432x finer than divine, so much less profit is\n"
-            "lost rounding down to a whole unit. Divine prices the pessimistic\n"
-            "case. Changes every Profit figure below."
+            "What you ask to be paid in when you resell on the Currency Exchange.\n"
+            "This changes every Profit figure below.\n\n"
+            "Exalted: you keep more, because payment can be split into much\n"
+            "smaller amounts and less is lost rounding down.\n\n"
+            "Divine: the cautious figure — and far cheaper in gold. The Exchange\n"
+            "charges gold per orb traded, so taking thousands of exalted instead\n"
+            "of a few divine can cost tens of times more gold and leave you unable\n"
+            "to trade at all."
         )
         self.settlement.currentIndexChanged.connect(
             lambda _: self.settlement_changed.emit(self.settlement.currentData())
@@ -103,7 +130,13 @@ class BankrollBar(QWidget):
 
         self.appetite_label = QLabel()
         self.appetite_label.setStyleSheet(f"color: {muted_color(self)};")
-        self.appetite_label.setMinimumWidth(70)
+        # Sized to its own longest string and pinned there. A minimum width alone
+        # let the layout hand the slider the slack and clip the readout instead,
+        # which is what put "45%" half under the slider on a narrow window.
+        self.appetite_label.setFixedWidth(_fits(self.appetite_label, *_APPETITE_LABELS, padding=6))
+        self.appetite_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
         layout.addWidget(self.appetite_label)
         self._refresh_appetite_label()
 

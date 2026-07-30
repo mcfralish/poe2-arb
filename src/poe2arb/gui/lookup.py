@@ -1,28 +1,30 @@
-"""Quick pay/receive lookup, laid out like the in-game Currency Exchange.
+"""What one item is worth, in a currency you choose.
 
-Answers "how many of X for one Y" for every item in the economy — not just the
-handful the arbitrage scan trades. Deliberately unaffected by the exclusion
-list: excluding something from the scan shouldn't stop you looking up its price.
+Deliberately **not** an any-pair converter. It used to ask "how many X for one
+Y?" for any two items in the economy, which quietly implied those two things
+trade against each other. Almost none of them do: the Currency Exchange is
+organised as items against a handful of currencies, so a Rune-for-Omen ratio is
+arithmetic we performed, not a market anyone is making. Offering it invited
+exactly the trade that cannot be executed.
 
-Two sources, in order of preference:
-  1. the live order book, where the last scan happened to cover the pair — a
-     rate someone is actually offering right now;
-  2. poe.ninja's consensus values, which cover everything but describe what a
-     pair is *worth*, not what it will fill at.
-Which one produced the number is always stated, because the difference between
-them is the whole point of this app.
+So there is one item on one side, and on the other a denomination the Exchange
+really quotes in. The four offered are the ones with enough depth for the answer
+to mean anything.
+
+Unaffected by the exclusion list on purpose: leaving something out of the sweep
+shouldn't stop you looking its price up. Which source the number came from is
+always stated, because a Currency Exchange price and a poe.ninja consensus price
+are different claims and the gap between them is what this app trades on.
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QGridLayout,
+    QComboBox,
     QGroupBox,
+    QHBoxLayout,
     QLabel,
-    QPushButton,
     QSizePolicy,
     QVBoxLayout,
 )
@@ -32,160 +34,139 @@ from ..market import Universe
 from .item_picker import ItemPicker
 from .theme import muted_color
 
-def ratio_parts(want_per_have: float) -> tuple[float, float]:
-    """Normalise a rate to an `x : y` pair with the smaller side at exactly 1.
-
-    The in-game exchange states ratios this way, and it reads far better than
-    two decimals of a fraction: "94 : 1" rather than "1 : 0.0106".
-    """
-    if want_per_have >= 1.0:
-        return want_per_have, 1.0
-    return 1.0, 1.0 / want_per_have
+# The denominations the Exchange actually quotes against, with the short suffix
+# used everywhere else in the app. Ordered finest-value-first so the default
+# lands on the one most prices are quoted in.
+DENOMINATIONS = (
+    ("exalted", "ex"),
+    ("divine", "div"),
+    ("chaos", "chaos"),
+    ("annul", "annul"),
+)
 
 
 class QuickLookup(QGroupBox):
+    """One item, one denomination, one number."""
+
     def __init__(self, parent=None):
         super().__init__("Quick Lookup", parent)
         self._universe: Universe | None = None
         self._base_id = "adaptive"
 
         outer = QVBoxLayout(self)
-        grid = QGridLayout()
-        outer.addLayout(grid)
 
-        # Want on the left, have on the right, ratio between them — the same
-        # arrangement as the game's Currency Exchange, so the muscle memory
-        # carries over.
-        self.want_picker = ItemPicker("Choose what you want…")
-        self.have_picker = ItemPicker("Choose what you have…")
-        for picker in (self.want_picker, self.have_picker):
-            picker.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            picker.selected.connect(lambda _: self._recalculate())
+        row = QHBoxLayout()
+        outer.addLayout(row)
 
-        grid.addWidget(self._heading("I Want"), 0, 0)
-        grid.addWidget(self._heading("Market Ratio"), 0, 1)
-        grid.addWidget(self._heading("I Have"), 0, 2)
+        self.item_picker = ItemPicker("Choose an item…")
+        self.item_picker.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+        self.item_picker.selected.connect(lambda _: self._recalculate())
+        row.addWidget(self.item_picker, stretch=3)
 
-        grid.addWidget(self.want_picker, 1, 0)
-        self.ratio = QLabel()
-        self.ratio.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.ratio.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        font = self.ratio.font()
+        worth = QLabel("is worth")
+        worth.setStyleSheet(f"color: {muted_color(self)};")
+        row.addWidget(worth)
+
+        self.value = QLabel()
+        self.value.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        self.value.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        font = self.value.font()
         font.setPointSize(font.pointSize() + 4)
         font.setBold(True)
-        self.ratio.setFont(font)
-        grid.addWidget(self.ratio, 1, 1)
-        grid.addWidget(self.have_picker, 1, 2)
+        self.value.setFont(font)
+        row.addWidget(self.value, stretch=2)
 
-        self.swap = QPushButton("⇅  Swap")
-        self.swap.setToolTip("Swap the two sides")
-        self.swap.clicked.connect(self._swap)
-        grid.addWidget(self.swap, 2, 1, alignment=Qt.AlignmentFlag.AlignCenter)
-
-        grid.setColumnStretch(0, 3)
-        grid.setColumnStretch(1, 2)
-        grid.setColumnStretch(2, 3)
-
-        self.detail = QLabel()
-        self.detail.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.detail.setWordWrap(True)
-        self.detail.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        outer.addWidget(self.detail)
+        self.denomination = QComboBox()
+        for currency, suffix in DENOMINATIONS:
+            self.denomination.addItem(suffix, currency)
+        self.denomination.setToolTip(
+            "Which currency to price the item in.\n\n"
+            "These four are the ones the Exchange has real depth in. Pick whichever\n"
+            "makes the number easy to read — a cheap item in divine is all decimal\n"
+            "places."
+        )
+        self.denomination.currentIndexChanged.connect(lambda _: self._recalculate())
+        row.addWidget(self.denomination)
 
         self.note = QLabel()
-        self.note.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.note.setWordWrap(True)
         self.note.setStyleSheet(f"color: {muted_color(self)};")
         outer.addWidget(self.note)
 
         self._recalculate()
 
-    @staticmethod
-    def _heading(text: str) -> QLabel:
-        label = QLabel(text)
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        font = label.font()
-        font.setBold(True)
-        label.setFont(font)
-        return label
-
     # ------------------------------------------------------------------ inputs
 
     def set_icons(self, provider) -> None:
-        """Share the window's icon provider with both pickers."""
-        self.want_picker.set_icons(provider)
-        self.have_picker.set_icons(provider)
+        self.item_picker.set_icons(provider)
 
     def set_universe(self, universe: Universe) -> None:
         self._universe = universe
-        self.want_picker.rebuild(universe, self._base_id)
-        self.have_picker.rebuild(universe, self._base_id)
+        self.item_picker.rebuild(universe, self._base_id)
         self._recalculate()
 
     def set_base_currency(self, base_id: str) -> None:
         """Re-price the menu labels in the chosen unit."""
         self._base_id = base_id
         if self._universe is not None:
-            self.want_picker.rebuild(self._universe, base_id)
-            self.have_picker.rebuild(self._universe, base_id)
+            self.item_picker.rebuild(self._universe, base_id)
 
-    def _swap(self) -> None:
-        want, have = self.want_picker.current_id(), self.have_picker.current_id()
-        self.want_picker.set_current(have)
-        self.have_picker.set_current(want)
-        self._recalculate()
+    def denomination_id(self) -> str:
+        return self.denomination.currentData()
 
     # ------------------------------------------------------------------ pricing
 
     def _recalculate(self) -> None:
-        want_id = self.want_picker.current_id()
-        have_id = self.have_picker.current_id()
+        item_id = self.item_picker.current_id()
+        denom_id = self.denomination_id()
         if self._universe is None:
             self._show_message("Loading economy data…")
             return
-        if want_id is None or have_id is None:
-            self._show_message("Pick something on both sides.")
+        if item_id is None:
+            self._show_message("Pick an item.")
             return
-        if want_id == have_id:
-            self._show_message("Those are the same item.")
+        if item_id == denom_id:
+            suffix = dict(DENOMINATIONS)[denom_id]
+            self.value.setText(f"1 {suffix}")
+            self.note.setText("That's the currency it's being priced in.")
             return
 
-        rate = self._universe.convert(have_id, want_id)
+        rate = self._universe.convert(item_id, denom_id)
         if rate is None or rate <= 0:
-            self._show_message("No price available for that pair.")
+            suffix = dict(DENOMINATIONS)[denom_id]
+            self._show_message(f"No price for this item in {suffix}.")
             return
 
-        want = self._universe.get(want_id)
-        have = self._universe.get(have_id)
-        left, right = ratio_parts(rate)
-        self.ratio.setText(f"{fmt_num(left, 2)} : {fmt_num(right, 2)}")
-        self.detail.setText(
-            f"<b>1 {have.name}</b> gets you <b>{fmt_num(rate, 2)} {want.name}</b>"
-            f" &nbsp;·&nbsp; "
-            f"<b>1 {want.name}</b> costs <b>{fmt_num(1.0 / rate, 2)} {have.name}</b>"
-        )
-        self.note.setText(self._source_note(want_id, have_id))
+        suffix = dict(DENOMINATIONS)[denom_id]
+        self.value.setText(f"{fmt_num(rate, 2)} {suffix}")
+        self.note.setText(self._source_note(item_id, denom_id))
 
-    def _source_note(self, want_id: str, have_id: str) -> str:
-        """Which price source this ratio came from, and what it's worth.
+    def _source_note(self, item_id: str, denom_id: str) -> str:
+        """Which price source this came from, and what it's worth.
 
-        Both sides have to be Currency Exchange priced for the ratio to be a
-        Currency Exchange ratio — mixing one CE price with one consensus price
-        gives a number that is neither.
+        Both sides have to be Currency Exchange priced for the answer to be a
+        Currency Exchange price — one CE price over one consensus price is
+        neither.
         """
         priced = self._universe.ce_priced if self._universe is not None else frozenset()
-        if want_id in priced and have_id in priced:
+        if item_id in priced and denom_id in priced:
             return (
-                "In-game Currency Exchange rate — what this pair is actually "
-                "trading at on the venue you'd use. Fees aren't included."
+                "In-game Currency Exchange price. Rarely-traded items have run "
+                "well above what a sale actually fetches, so treat a thin item's "
+                "figure as a ceiling. Fees and gold aren't included."
             )
         return (
-            "poe.ninja consensus — a guide, not a live rate. The Currency "
-            "Exchange doesn't publish a price for both sides of this pair, "
-            "which usually means one of them barely trades."
+            "poe.ninja consensus — a guide, not a live price. The Currency "
+            "Exchange doesn't quote both sides of this, which usually means the "
+            "item barely trades."
         )
 
     def _show_message(self, text: str) -> None:
-        self.ratio.setText("—")
-        self.detail.setText(text)
-        self.note.setText("")
+        self.value.setText("—")
+        self.note.setText(text)

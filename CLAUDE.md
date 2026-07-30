@@ -55,9 +55,15 @@ commands. **Anything referencing cycles, Bellman-Ford, skew, node selection or
 | **poe.ninja** (`client.py`, `market.py`) | Item universe: names, categories, volume, consensus value | The resale price — it isn't the CE |
 | **GGG trade2** (`client.py`) | Live listings: who sells what, at what price, online or not | Display taxonomy (see below) |
 
-poe2scout runs 0.4%–4.7% low against in-game spot checks. That measured error is *why*
-discounts under ~5% are banded uncertain rather than reported as profit — the threshold is
-derived, not tuned.
+poe2scout runs 0.4%–4.7% low against in-game spot checks **on liquid currency**, which is
+where `min_gap_ratio = 1.05` came from. **That figure does not generalise.** Measured
+2026-07-30 on the first two trades ever completed through the app — both losses — the same
+derivation ran **26%–27% high** on thin items (Omen of Whittling, Astrid's Creativity). The
+error is not a parsing bug: `rel/base` reproduces poe2scout's own published price to 1.006×,
+so the source itself sits above what a thin sale realises. Liquidity is the discriminator.
+**Treat the 1.05 threshold as known-wrong for anything but currency** until the fix in
+TODO.md lands; see [docs/FINDINGS.md](docs/FINDINGS.md), "The reference price overstates thin
+items".
 
 ### The pipeline
 
@@ -76,6 +82,15 @@ Two results from field tests are load-bearing in `listings.py` and must not be r
    proceeds floor to a whole unit of the settlement currency. Exalted is ~432× finer than
    divine; on the one trade that filled, settling in exalted turned 1.00 divine of profit
    into 1.79. Profit floors to `sale_unit_divines` — never to a whole divine, never unfloored.
+   **But exalted is not free:** the Exchange charges ~120 gold per exalted against ~800 per
+   divine (measured 2026-07-30), so settling a high-value item in exalted can cost tens of
+   times more gold and strand the user unable to trade at all. Gold is a budget constraint,
+   not a cost in divines, and the app does not model it yet.
+
+The league is resolved by `sweep.resolve_league`, which auto-detects and **never falls back
+to a literal name**. It used to read `cfg.league or "Standard"`; Standard priced one measured
+item 5.7× above the temp league, so a default install valued every listing against the wrong
+economy and whispered sellers who could not answer.
 
 ### Layering
 

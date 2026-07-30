@@ -11,7 +11,13 @@ pytest.importorskip("PySide6")
 from PySide6.QtGui import QGuiApplication  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from poe2arb.gui.sweep_panel import BAND_COLUMN, PROFIT_COLUMN, SweepPanel  # noqa: E402
+from poe2arb.gui.sweep_panel import (  # noqa: E402
+    AGE_COLUMN,
+    BAND_COLUMN,
+    PROFIT_COLUMN,
+    SELLER_COLUMN,
+    SweepPanel,
+)
 from poe2arb.listings import (  # noqa: E402
     Band,
     Listing,
@@ -95,8 +101,8 @@ def test_ghosts_render_last_despite_being_the_most_profitable(qapp):
         listing("omen", 1.0, char="Ghost", stock=2.0),   # 12x gap, biggest profit
         listing("omen", 11.0, char="Real"),              # 1.09x gap, small profit
     ]))
-    assert p.table.item(0, 10).text() == "Real"
-    assert p.table.item(1, 10).text() == "Ghost"
+    assert p.table.item(0, SELLER_COLUMN).text() == "Real"
+    assert p.table.item(1, SELLER_COLUMN).text() == "Ghost"
     # ...and the ghost really is worth more on paper.
     top = p.table.item(0, PROFIT_COLUMN)
     bottom = p.table.item(1, PROFIT_COLUMN)
@@ -181,7 +187,7 @@ def test_copy_survives_re_sorting(qapp):
     qapp.processEvents()
     p.table.selectRow(0)
     qapp.processEvents()
-    seller = p.table.item(0, 10).text()
+    seller = p.table.item(0, SELLER_COLUMN).text()
     p.copy_selected()
     assert seller in QGuiApplication.clipboard().text()
 
@@ -212,13 +218,15 @@ def test_status_summarises_the_sweep(qapp):
     text = p.status.text()
     assert "2 items checked" in text
     assert "2 live listings" in text
-    assert "ghost" in text
+    # Same words as the legend under the table, not the internal band names.
+    assert "too good to be true" in text
+    assert "worth trying" in text
 
 
 def test_status_says_so_when_nothing_plausible_turned_up(qapp):
     """Two live sweeps in a row found only ghosts — the user should be told."""
     p = panel(qapp, result_from([listing("omen", 1.0, char="Ghost", stock=2.0)]))
-    assert "nothing in the plausible band" in p.status.text()
+    assert "nothing worth trying" in p.status.text()
 
 
 def test_failed_items_are_surfaced(qapp):
@@ -243,7 +251,7 @@ def test_exalted_rows_show_a_divine_price_and_their_own_currency(qapp):
 
 def test_afk_is_marked_on_the_age(qapp):
     p = panel(qapp, result_from([listing("omen", 11.0, age_h=30.0, afk=True)]))
-    assert p.table.item(0, 9).text().endswith("*")
+    assert p.table.item(0, AGE_COLUMN).text().endswith("*")
 
 
 # --- outcome reporting -----------------------------------------------------
@@ -387,3 +395,140 @@ def test_reduced_stock_copies_but_warns(qapp):
     p.recheck_finished(c, RecheckResult(RecheckStatus.REDUCED, "stock down from 4 to 1", None))
     assert QGuiApplication.clipboard().text().startswith("@Real")
     assert "stock down" in p.status.text()
+
+
+# --- what happened, not just what was on offer ------------------------------
+
+def _select_mode(p, mode):
+    index = p.show_mode.findData(mode)
+    assert index >= 0
+    p.show_mode.setCurrentIndex(index)
+
+
+def test_the_table_can_be_narrowed_to_what_was_messaged(qapp):
+    """After a session it was hard to find what you'd actually acted on."""
+    from poe2arb.gui.sweep_panel import SHOW_ALL, SHOW_WHISPERED
+
+    p = panel(qapp, result_from([
+        listing("omen", 11.0, char="Messaged"),
+        listing("omen", 11.2, char="Ignored"),
+    ]))
+    assert visible_rows(p) == 2
+
+    target = next(
+        c for c in p._candidates if c.listing.character == "Messaged"
+    )
+    p.note_attempt(target, "attempt-1")
+    _select_mode(p, SHOW_WHISPERED)
+    qapp.processEvents()
+    assert visible_rows(p) == 1
+    shown = [
+        p.table.item(r, SELLER_COLUMN).text()
+        for r in range(p.table.rowCount())
+        if not p.table.isRowHidden(r)
+    ]
+    assert shown == ["Messaged"]
+
+    _select_mode(p, SHOW_ALL)
+    assert visible_rows(p) == 2
+
+
+def test_bought_lists_only_trades_reported_as_filled(qapp):
+    from poe2arb.outcomes import Outcome
+    from poe2arb.gui.sweep_panel import SHOW_BOUGHT
+
+    p = panel(qapp, result_from([
+        listing("omen", 11.0, char="Bought"),
+        listing("omen", 11.2, char="Silent"),
+    ]))
+    bought = next(c for c in p._candidates if c.listing.character == "Bought")
+    silent = next(c for c in p._candidates if c.listing.character == "Silent")
+    p.note_attempt(bought, "a1")
+    p.note_attempt(silent, "a2")
+    p._outcomes[bought.key] = Outcome.FILLED
+    p._outcomes[silent.key] = Outcome.NO_REPLY
+
+    _select_mode(p, SHOW_BOUGHT)
+    qapp.processEvents()
+    shown = [
+        p.table.item(r, SELLER_COLUMN).text()
+        for r in range(p.table.rowCount())
+        if not p.table.isRowHidden(r)
+    ]
+    assert shown == ["Bought"]
+
+
+def test_an_empty_filter_explains_itself(qapp):
+    """An empty table with no explanation reads as a broken tab."""
+    from poe2arb.gui.sweep_panel import SHOW_BOUGHT
+
+    p = panel(qapp, result_from([listing("omen", 11.0)]))
+    _select_mode(p, SHOW_BOUGHT)
+    qapp.processEvents()
+    assert visible_rows(p) == 0
+    assert "marked as Traded" in p.status.text()
+
+
+def test_a_new_sweep_forgets_the_previous_verdicts(qapp):
+    """Outcomes belong to the listings they were reported against."""
+    from poe2arb.outcomes import Outcome
+
+    p = panel(qapp, result_from([listing("omen", 11.0, char="A")]))
+    c = p._candidates[0]
+    p.note_attempt(c, "a1")
+    p._outcomes[c.key] = Outcome.FILLED
+    p.set_result(result_from([listing("omen", 11.0, char="B")]))
+    assert p._outcomes == {}
+    assert p._attempt_ids == {}
+
+
+# --- settlement currency ----------------------------------------------------
+
+def test_the_settlement_currency_is_shown_per_row(qapp):
+    """You need to know which currency a trade's profit was costed against."""
+    from poe2arb.gui.sweep_panel import SETTLE_COLUMN
+
+    p = SweepPanel()
+    p.set_settlement_currency("exalted")
+    p.set_result(result_from([listing("omen", 11.0)]))
+    qapp.processEvents()
+    assert p.table.item(0, SETTLE_COLUMN).text() == "ex"
+
+
+def test_changing_settlement_relabels_existing_rows(qapp):
+    from poe2arb.gui.sweep_panel import SETTLE_COLUMN
+
+    p = panel(qapp, result_from([listing("omen", 11.0)]))
+    p.set_settlement_currency("exalted")
+    assert p.table.item(0, SETTLE_COLUMN).text() == "ex"
+    p.set_settlement_currency("divine")
+    assert p.table.item(0, SETTLE_COLUMN).text() == "div"
+
+
+# --- the odds legend --------------------------------------------------------
+
+def test_the_odds_symbols_are_explained_on_screen(qapp):
+    """They were only in a header tooltip, which reads as decoration."""
+    p = panel(qapp, result_from([listing("omen", 11.0)]))
+    text = p.legend.text()
+    for glyph in ("●", "○", "×"):
+        assert glyph in text
+    assert "worth trying" in text
+
+
+def test_trades_and_results_use_one_set_of_symbols(qapp):
+    """The two tabs showed the same fact in two vocabularies."""
+    from poe2arb.gui import bands
+    from poe2arb.gui.sweep_panel import BAND_LABEL
+
+    assert BAND_LABEL is bands.BAND_LABEL
+    assert bands.symbol_for_name("plausible") == bands.BAND_LABEL[Band.PLAUSIBLE]
+    assert bands.symbol_for_name("ghost") == bands.BAND_LABEL[Band.GHOST]
+
+
+def test_an_unknown_band_still_prints_something(qapp):
+    """Old log records must not blank the column or raise mid-redraw."""
+    from poe2arb.gui import bands
+
+    assert bands.symbol_for_name("something-retired") == "something-retired"
+    assert bands.tip_for_name("something-retired") == ""

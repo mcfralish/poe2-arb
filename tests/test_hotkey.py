@@ -164,11 +164,13 @@ def test_settings_rejects_an_unusable_hotkey(qapp):
     ok = d.buttons.button(QDialogButtonBox.StandardButton.Ok)
     assert ok.isEnabled()
 
-    d.hotkey.setText("d")  # no modifier
+    # A config carrying a bare key can't be recorded any more, but it can still
+    # be loaded from a hand-edited file, so it must still be refused.
+    d.hotkey.set_binding("d")
     qapp.processEvents()
     assert not ok.isEnabled()
 
-    d.hotkey.setText("ctrl+shift+f9")
+    d.hotkey.set_binding("ctrl+shift+f9")
     qapp.processEvents()
     assert ok.isEnabled()
 
@@ -182,7 +184,19 @@ def test_a_disabled_hotkey_is_not_validated(qapp):
     d = SettingsDialog(Config(trade_hotkey_enabled=False, trade_hotkey="nonsense"))
     qapp.processEvents()
     assert d.buttons.button(QDialogButtonBox.StandardButton.Ok).isEnabled()
-    assert not d.hotkey.isEnabled()
+
+
+def test_the_hotkey_can_be_set_before_it_is_enabled(qapp):
+    """It shipped greyed out until the checkbox was ticked, so it read as broken.
+
+    The checkbox defaults to off, so on a fresh install the field was disabled
+    and the hotkey looked unassignable (reported from the field 2026-07-30).
+    """
+    from poe2arb.config import Config
+    from poe2arb.gui.settings_dialog import SettingsDialog
+
+    d = SettingsDialog(Config(trade_hotkey_enabled=False))
+    assert d.hotkey.isEnabled()
 
 
 def test_hotkey_round_trips_through_the_dialog(qapp):
@@ -191,7 +205,7 @@ def test_hotkey_round_trips_through_the_dialog(qapp):
 
     d = SettingsDialog(Config())
     d.hotkey_enabled.setChecked(True)
-    d.hotkey.setText("ctrl+shift+t")
+    d.hotkey.set_binding("ctrl+shift+t")
     cfg = d.result_config()
     assert cfg.trade_hotkey == "ctrl+shift+t"
     assert cfg.trade_hotkey_enabled is True
@@ -234,3 +248,89 @@ def test_settings_changes_reach_the_running_queue(qapp, monkeypatch):
     assert window.trade_queue.offer_window_s == 30.0
     assert window.trade_queue.available_ttl_s == 120.0
     assert window.trade_queue.awaiting_timeout_s == 600.0
+
+
+# --- recording a binding by pressing it ------------------------------------
+
+def _press(key, mods=None):
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtGui import QKeyEvent
+
+    return QKeyEvent(
+        QEvent.Type.KeyPress, key,
+        mods if mods is not None else Qt.KeyboardModifier.NoModifier,
+    )
+
+
+def test_a_keypress_becomes_a_canonical_binding():
+    """What the widget records must be what parse_hotkey accepts."""
+    from PySide6.QtCore import Qt
+
+    from poe2arb.gui.hotkey_edit import binding_from_event
+    from poe2arb.gui.hotkey import parse_hotkey
+
+    mods = Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier
+    binding = binding_from_event(_press(Qt.Key.Key_D, mods))
+    assert binding == "ctrl+alt+d"
+    parse_hotkey(binding)  # must not raise
+
+
+def test_modifier_order_is_fixed_regardless_of_press_order():
+    """A binding that round-trips differently looks like the app forgot it."""
+    from PySide6.QtCore import Qt
+
+    from poe2arb.gui.hotkey_edit import binding_from_event
+
+    mods = (
+        Qt.KeyboardModifier.ShiftModifier
+        | Qt.KeyboardModifier.ControlModifier
+        | Qt.KeyboardModifier.AltModifier
+    )
+    assert binding_from_event(_press(Qt.Key.Key_F9, mods)) == "ctrl+alt+shift+f9"
+
+
+def test_holding_a_modifier_alone_is_not_yet_a_binding():
+    """Pressing Ctrl first is the normal gesture, not an error."""
+    from PySide6.QtCore import Qt
+
+    from poe2arb.gui.hotkey_edit import binding_from_event
+
+    for key in (Qt.Key.Key_Control, Qt.Key.Key_Alt, Qt.Key.Key_Shift, Qt.Key.Key_Meta):
+        assert binding_from_event(_press(key)) is None
+
+
+def test_recording_a_bare_key_is_refused():
+    """It registers system-wide, so plain 'd' would be swallowed in chat."""
+    from PySide6.QtCore import Qt
+
+    from poe2arb.gui.hotkey_edit import binding_from_event
+
+    assert binding_from_event(_press(Qt.Key.Key_D)) is None
+
+
+def test_recording_updates_the_widget_and_reports_no_problem(qapp):
+    from PySide6.QtCore import Qt
+
+    from poe2arb.gui.hotkey_edit import HotkeyEdit
+
+    w = HotkeyEdit("ctrl+alt+d")
+    w._toggle_recording(True)
+    w.keyPressEvent(_press(Qt.Key.Key_K, Qt.KeyboardModifier.ControlModifier
+                           | Qt.KeyboardModifier.ShiftModifier))
+    qapp.processEvents()
+    assert w.binding() == "ctrl+shift+k"
+    assert w.problem() == ""
+    assert not w._recording      # a successful capture stops listening
+
+
+def test_escape_cancels_recording_and_keeps_the_old_binding(qapp):
+    from PySide6.QtCore import Qt
+
+    from poe2arb.gui.hotkey_edit import HotkeyEdit
+
+    w = HotkeyEdit("ctrl+alt+d")
+    w._toggle_recording(True)
+    w.keyPressEvent(_press(Qt.Key.Key_Escape))
+    qapp.processEvents()
+    assert w.binding() == "ctrl+alt+d"
+    assert not w._recording

@@ -274,6 +274,26 @@ class TradeQueue:
         t.expires_at = None
         return True
 
+    def cancel_pending(self) -> int:
+        """Discard the un-offered backlog. Returns how many were dropped.
+
+        What *Find trades* switching off has to mean. Cancelling the sweep only
+        stops finding new listings; the backlog it already found keeps being
+        promoted by `tick`, one every `offer_window_s`, so stopping produced
+        toasts for minutes afterwards (reported from the field 2026-07-30).
+
+        Deliberately only touches QUEUED. A trade that has been offered,
+        lapsed to available, or been whispered is the user's to finish — a stop
+        button that retracted an offer mid-decision, or dropped a whisper still
+        awaiting its answer, would lose both the trade and its outcome record.
+        Those are exactly the rows they asked to keep.
+        """
+        pending = self.pending
+        for t in pending:
+            t.state = QueueState.EXPIRED
+            t.expires_at = None
+        return len(pending)
+
     def forget_resolved(self) -> int:
         """Drop finished rows so the queue doesn't grow across a long session."""
         before = len(self._trades)

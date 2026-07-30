@@ -121,6 +121,10 @@ class UniverseWorker(QThread):
 
     loaded = Signal(object)          # market.Universe
     ce_loaded = Signal(object)       # {item_id: divines} from the CE, may be {}
+    # (every league poe.ninja knows, the one we resolved to). Feeds the Settings
+    # league dropdown, which must not offer a free-text field: a mistyped league
+    # prices trades against the wrong economy.
+    leagues_loaded = Signal(object, str)
 
     def __init__(self, cfg: Config, parent=None):
         super().__init__(parent)
@@ -131,7 +135,10 @@ class UniverseWorker(QThread):
 
         client = NinjaClient(self._cfg)
         try:
-            league = self._cfg.league or client.current_league()
+            known = client.leagues()
+            league = self._cfg.league or (known[0] if known else "")
+            if known:
+                self.leagues_loaded.emit(known, league)
             self.loaded.emit(client.universe(league))
         except Exception:
             log.info("could not load economy data", exc_info=True)

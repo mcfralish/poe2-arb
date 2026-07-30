@@ -122,6 +122,10 @@ class MainWindow(QMainWindow):
         self._known_currencies: dict[str, str] = {}
         self._currency_values: dict[str, float] = {}
         self._universe: Universe | None = None
+        # poe.ninja's league list and what auto-detect resolved to, for the
+        # Settings dropdown. Empty until the preload lands.
+        self._leagues: list[str] = []
+        self._detected_league: str | None = None
         # Kept so the long-shots slider can re-rank without another sweep.
         self._last_sweep = None
         self._quitting = False
@@ -269,8 +273,16 @@ class MainWindow(QMainWindow):
         self.ops_split = QSplitter(Qt.Orientation.Vertical)
         self.ops_split.addWidget(self.queue_panel)
         self.ops_split.addWidget(self.lookup)
-        self.ops_split.setStretchFactor(0, 4)
-        self.ops_split.setStretchFactor(1, 1)
+        # The queues take every spare pixel; Quick Lookup is a fixed-height
+        # lookup and gains nothing from being taller.
+        self.ops_split.setStretchFactor(0, 1)
+        self.ops_split.setStretchFactor(1, 0)
+        # Stretch factors alone don't decide the *initial* split — a QSplitter
+        # starts from each child's sizeHint, and Quick Lookup's was big enough to
+        # claim about half the tab. The queues are the point of this tab, so give
+        # them the lion's share outright; the splitter is still draggable.
+        self.ops_split.setSizes([680, 140])
+        self.ops_split.setCollapsible(1, True)
         self.tabs.addTab(self.ops_split, "Opportunities")
 
         self.market = MarketPanel()
@@ -469,7 +481,15 @@ class MainWindow(QMainWindow):
         self._currency_worker = UniverseWorker(self.cfg, self)
         self._currency_worker.loaded.connect(self._universe_loaded)
         self._currency_worker.ce_loaded.connect(self._ce_prices_loaded)
+        self._currency_worker.leagues_loaded.connect(self._leagues_loaded)
         self._currency_worker.start()
+
+    def _leagues_loaded(self, leagues: list, detected: str) -> None:
+        """Remember the league list so Settings can offer it as a dropdown."""
+        self._leagues = list(leagues)
+        self._detected_league = detected
+        if not self.cfg.league:
+            self._log(f"league auto-detected as {detected}")
 
     def _ce_prices_loaded(self, ce: dict) -> None:
         """Re-price the catalogue from the Currency Exchange where it can.
@@ -566,6 +586,14 @@ class MainWindow(QMainWindow):
             return
         self.sweep_timer.stop()
         self._next_sweep_at = None
+        # Stop means stop. The backlog would otherwise keep surfacing offers for
+        # minutes, since `tick` promotes one every offer window regardless of
+        # whether anything is still sweeping. Already-offered and awaiting rows
+        # survive — see TradeQueue.cancel_pending.
+        dropped = self.trade_queue.cancel_pending()
+        if dropped:
+            self._log(f"dropped {dropped} queued trade(s) not yet offered")
+        self.queue_panel.refresh(self.trade_queue)
         if self._sweep_worker is not None and self._sweep_worker.isRunning():
             self._sweep_worker.cancel()
             self.sweep.set_status("Stopping…")
@@ -621,7 +649,21 @@ class MainWindow(QMainWindow):
 
     def _sweep_done(self, result) -> None:
         self._last_sweep = result
+        # Set before the table is filled, and from the value this sweep actually
+        # used. Updating it when the dropdown changes would label the rows with a
+        # currency their Profit figures were never computed against.
+        self.sweep.set_settlement_currency(self.cfg.sale_currency)
         self.sweep.set_result(result, risk_appetite=self.cfg.risk_appetite)
+        # A sweep that lands in the same instant the toggle went off must not
+        # refill the queue we just cancelled. The Trades tab still shows what it
+        # found — stopping suppresses interruptions, not information.
+        if not self.sweep_action.isChecked():
+            self._log(
+                f"sweep finished after stop — {len(result.candidates)} candidate(s) "
+                "shown in Trades, none queued"
+            )
+            self._queue_tick()
+            return
         added = self.trade_queue.submit(result.candidates)
         if added:
             self._log(f"{added} new trade(s) queued")
@@ -906,6 +948,8 @@ class MainWindow(QMainWindow):
             known_currencies=self._known_currencies,
             currency_values=self._currency_values,
             universe=self._universe,
+            leagues=self._leagues,
+            detected_league=self._detected_league,
         )
         if dlg.exec():
             previous = self.cfg

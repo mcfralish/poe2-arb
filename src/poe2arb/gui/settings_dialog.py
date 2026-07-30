@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFormLayout,
     QLabel,
-    QLineEdit,
     QScrollArea,
     QSpinBox,
     QVBoxLayout,
@@ -28,6 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..config import Config
+from .hotkey_edit import HotkeyEdit
 from .theme import error_color, muted_color, warning_color
 from ..rate_limit import Severity, check_pacing, min_safe_interval, worst_severity
 
@@ -40,6 +40,8 @@ class SettingsDialog(QDialog):
         known_currencies: dict[str, str] | None = None,
         currency_values: dict[str, float] | None = None,
         universe=None,
+        leagues: list[str] | None = None,
+        detected_league: str | None = None,
     ):
         super().__init__(parent)
         self.setWindowTitle("Settings")
@@ -49,6 +51,11 @@ class SettingsDialog(QDialog):
         self._known = known_currencies or {}
         self._values = currency_values or {}
         self._universe = universe
+        # poe.ninja's league list, current first. Empty when the Market tab
+        # hasn't loaded yet, which the dropdown handles by falling back to a
+        # free-text entry rather than offering nothing.
+        self._leagues = list(leagues or [])
+        self._detected_league = detected_league
 
         layout = QVBoxLayout(self)
         # The form is taller than a 1080p screen once every section is open,
@@ -63,16 +70,29 @@ class SettingsDialog(QDialog):
 
         self._section(form, "General")
 
-        self.league = QLineEdit(cfg.league or "")
-        self.league.setPlaceholderText("blank = auto-detect current league")
+        # A dropdown, not free text: a typo here silently prices your trades
+        # against the wrong economy, and Standard runs several times higher than
+        # a temp league. The list comes from poe.ninja, current league first.
+        self.league = QComboBox()
+        self.league.setEditable(False)
+        self._fill_leagues()
+        self.league.setToolTip(
+            "Which league to look for trades in. Leave on automatic and the app\n"
+            "follows whichever league is current.\n\n"
+            "Getting this wrong is expensive: Standard has years of accumulated\n"
+            "currency, so its prices run several times higher than a fresh\n"
+            "league's, and sellers in another league can't trade with you at all."
+        )
         form.addRow("League", self.league)
 
         self.request_interval = self._dspin(
             cfg.request_interval_s, 1.0, 120.0, 0.1, " s", decimals=1
         )
         self.request_interval.setToolTip(
-            "How long to wait between requests to the official trade API.\n"
-            "Lower is faster but risks a rate-limit ban on your whole IP."
+            "How long to wait between checks against the official trade site.\n\n"
+            "Lower is faster, but going too fast gets your connection blocked for\n"
+            "half an hour — and that blocks the trade website and any other trade\n"
+            "tool you're running, not just this app."
         )
         form.addRow("Seconds between requests", self.request_interval)
 
@@ -82,9 +102,10 @@ class SettingsDialog(QDialog):
         self.safety.setSuffix(" %")
         self.safety.setValue(round(cfg.rate_limit_safety_fraction * 100))
         self.safety.setToolTip(
-            "How much of GGG's rate limit this app is allowed to use.\n"
-            "Lower it if you run other trade tools on the same connection —\n"
-            "the limit is per IP address, so everything shares one budget."
+            "How much of the trade site's allowance this app may use.\n\n"
+            "The allowance is per connection, so the trade website and every other\n"
+            "trade tool you run share it. Turn this down if you use them alongside\n"
+            "this app."
         )
         form.addRow("Share of rate limit to use", self.safety)
 
@@ -93,9 +114,9 @@ class SettingsDialog(QDialog):
         )
         self.retention.setSpecialValueText("keep everything")
         self.retention.setToolTip(
-            "How long saved scans are kept on disk. Watching writes a record\n"
-            "every scan, so without a limit the history file grows forever.\n"
-            "Set to 0 to keep everything."
+            "How long to keep the record of past passes on disk.\n\n"
+            "Leaving Find trades running writes an entry every pass, so without a\n"
+            "limit the file grows indefinitely."
         )
         form.addRow("Keep scan history for", self.retention)
 
@@ -109,9 +130,11 @@ class SettingsDialog(QDialog):
         self.sweep_items.setRange(5, 300)
         self.sweep_items.setValue(cfg.sweep_items)
         self.sweep_items.setToolTip(
-            "How many items each sweep checks, busiest on the Currency Exchange\n"
-            "first. More is more thorough and takes proportionally longer — the\n"
-            "requests are paced, so this is the main thing that sets sweep length."
+            "How many different items to check each time round, most heavily\n"
+            "traded first.\n\n"
+            "This is the main thing that decides how long a pass takes: checks\n"
+            "have to be spaced out to stay inside the trade site's limits, so\n"
+            "doubling the items roughly doubles the time."
         )
         form.addRow("Items per sweep", self.sweep_items)
 
@@ -119,9 +142,11 @@ class SettingsDialog(QDialog):
             cfg.sweep_interval_minutes, 1.0, 240.0, 1.0, " min", decimals=0
         )
         self.sweep_interval.setToolTip(
-            "How long to wait after one sweep before starting the next, while\n"
-            "Find trades is on. Listings churn slower than a sweep runs, so\n"
-            "back-to-back sweeps mostly re-read the same listings."
+            "How long to pause before starting the next pass, while Find trades\n"
+            "is switched on.\n\n"
+            "Listings don't change much faster than a pass takes to run, so going\n"
+            "straight into another one mostly re-reads the same offers and spends\n"
+            "the request budget for nothing."
         )
         form.addRow("Wait between sweeps", self.sweep_interval)
 
@@ -129,9 +154,10 @@ class SettingsDialog(QDialog):
             cfg.sweep_min_value_divines, 0.0, 1000.0, 0.5, " div", decimals=1
         )
         self.sweep_min_value.setToolTip(
-            "Skip items worth less than this each. Stock on this venue is in\n"
-            "single digits, so a cheap item cannot clear enough profit in one\n"
-            "trade to be worth the message."
+            "Ignore items cheaper than this.\n\n"
+            "Sellers here list a handful of anything at a time, so however good\n"
+            "the discount on a cheap item, the profit stays too small to be worth\n"
+            "the message."
         )
         form.addRow("Skip items worth under", self.sweep_min_value)
 
@@ -139,28 +165,32 @@ class SettingsDialog(QDialog):
             cfg.min_profit_divines, 0.0, 100.0, 0.25, " div", decimals=2
         )
         self.min_profit.setToolTip(
-            "Drop trades that clear less than this. Settling in exalted makes\n"
-            "tiny trades arithmetically profitable; +0.02 divines is real and\n"
-            "still not worth whispering a stranger about."
+            "Hide trades that make less than this.\n\n"
+            "Taking payment in exalted means even trivial trades come out very\n"
+            "slightly ahead. Two hundredths of a divine is still a profit, and\n"
+            "still not worth messaging a stranger over."
         )
         form.addRow("Minimum profit per trade", self.min_profit)
 
         self.min_gap = self._dspin(cfg.min_gap_ratio, 1.0, 3.0, 0.01, "x", decimals=2)
         self.min_gap.setToolTip(
-            "Below this, a discount is inside the Exchange price's own margin\n"
-            "of error — the reference ran 0.4%-4.7% under the live game — so\n"
-            "neither the gap nor the profit means much. Marked thin, not hidden."
+            "How far under market a price has to be before it counts as a real\n"
+            "discount. 1.20x means the item sells for 20% more than it's listed at.\n\n"
+            "Anything smaller is guesswork: our price estimate is itself only good\n"
+            "to a few percent, and on rarely-traded items it has been measured\n"
+            "more than 25% too high. Those trades still show up, labelled thin."
         )
-        form.addRow("Discount is credible from", self.min_gap)
+        form.addRow("Count as a discount from", self.min_gap)
 
         self.max_gap = self._dspin(cfg.max_gap_ratio, 1.0, 20.0, 0.05, "x", decimals=2)
         self.max_gap.setToolTip(
-            "Above this, a listing is treated as a ghost. Across ~10 whispers at\n"
-            "3.8x-12.5x, none filled: they are mistakes, stale listings, or\n"
-            "already sold. Use the Long shots slider to decide how far to chase\n"
-            "them anyway."
+            "Above this, a bargain is too good to be true and gets labelled a\n"
+            "ghost — almost always already sold, abandoned, or a typo.\n\n"
+            "Every deep discount we've tried to buy was ignored; the only two\n"
+            "that ever worked were the two smallest. Ghosts stay visible and sort\n"
+            "last, and the Long shots slider decides how hard to chase them."
         )
-        form.addRow("Ghost above", self.max_gap)
+        form.addRow("Too good to be true above", self.max_gap)
 
         self._section(form, "The trade queue")
 
@@ -168,9 +198,10 @@ class SettingsDialog(QDialog):
             cfg.offer_window_s, 5.0, 300.0, 5.0, " s", decimals=0
         )
         self.offer_window.setToolTip(
-            "How long a new trade stays live: a notification appears and the\n"
-            "hotkey is armed. Short is fine — ignoring it costs nothing, it\n"
-            "just moves down to the list below."
+            "How long a new trade stays the active one — a notification shows and\n"
+            "the hotkey will copy it.\n\n"
+            "Short is fine. Ignoring it costs you nothing; it just drops into\n"
+            "Ready to whisper and waits there."
         )
         form.addRow("Trade alert lasts", self.offer_window)
 
@@ -178,9 +209,9 @@ class SettingsDialog(QDialog):
             cfg.available_ttl_s, 15.0, 3600.0, 15.0, " s", decimals=0
         )
         self.available_ttl.setToolTip(
-            "How long a trade stays in 'Ready to whisper' after its alert\n"
-            "lapses. Listings do get taken by other people, so holding one\n"
-            "much longer mostly wastes a whisper."
+            "How long a trade stays in Ready to whisper before it's dropped.\n\n"
+            "Other people are buying these too, so an old offer has usually gone\n"
+            "already and messaging about it just wastes the whisper."
         )
         form.addRow("Trade stays listed for", self.available_ttl)
 
@@ -189,8 +220,10 @@ class SettingsDialog(QDialog):
         )
         self.awaiting_timeout.setSpecialValueText("never")
         self.awaiting_timeout.setToolTip(
-            "How long a whisper waits for you to say what happened before it\n"
-            "records itself as 'no reply'. Set to 0 to answer every one by hand."
+            "After you send a whisper, how long the app waits for you to say what\n"
+            "happened before writing it down as no reply.\n\n"
+            "Silence is the usual answer, so this saves you clicking. Set it to\n"
+            "never if you'd rather record every one yourself."
         )
         form.addRow("Mark as no reply after", self.awaiting_timeout)
 
@@ -204,16 +237,13 @@ class SettingsDialog(QDialog):
         )
         form.addRow("", self.hotkey_enabled)
 
-        self.hotkey = QLineEdit(cfg.trade_hotkey)
-        self.hotkey.setPlaceholderText("ctrl+alt+d")
-        self.hotkey.setToolTip(
-            "Modifiers plus one key, e.g. ctrl+alt+d or ctrl+shift+f9.\n"
-            "A modifier is required: a bare key would be swallowed everywhere,\n"
-            "including in chat."
-        )
-        self.hotkey.setEnabled(cfg.trade_hotkey_enabled)
-        self.hotkey_enabled.toggled.connect(self.hotkey.setEnabled)
-        self.hotkey.textChanged.connect(self._revalidate)
+        # Always editable, deliberately. This used to be disabled until the
+        # checkbox above was ticked, and since the checkbox ships off, the field
+        # was greyed out on a fresh install and the hotkey looked unassignable
+        # (reported from the field 2026-07-30). Setting a key before enabling it
+        # is a perfectly reasonable order to work in.
+        self.hotkey = HotkeyEdit(cfg.trade_hotkey)
+        self.hotkey.changed.connect(lambda _: self._revalidate())
         form.addRow("Hotkey", self.hotkey)
 
         self.budget_label = QLabel()
@@ -252,7 +282,7 @@ class SettingsDialog(QDialog):
         and the right answer for almost everyone.
         """
         d = Config()
-        self.league.setText("")
+        self.league.setCurrentIndex(0)   # automatic — the shipped default
         self.sweep_interval.setValue(d.sweep_interval_minutes)
         self.request_interval.setValue(d.request_interval_s)
         self.safety.setValue(round(d.rate_limit_safety_fraction * 100))
@@ -262,7 +292,7 @@ class SettingsDialog(QDialog):
         self.available_ttl.setValue(d.available_ttl_s)
         self.awaiting_timeout.setValue(d.awaiting_timeout_s)
         self.hotkey_enabled.setChecked(d.trade_hotkey_enabled)
-        self.hotkey.setText(d.trade_hotkey)
+        self.hotkey.set_binding(d.trade_hotkey)
         self.sweep_items.setValue(d.sweep_items)
         self.sweep_min_value.setValue(d.sweep_min_value_divines)
         self.min_profit.setValue(d.min_profit_divines)
@@ -352,13 +382,27 @@ class SettingsDialog(QDialog):
         """
         if not self.hotkey_enabled.isChecked():
             return ""
-        from .hotkey import HotkeyError, parse_hotkey
+        return self.hotkey.problem()
 
-        try:
-            parse_hotkey(self.hotkey.text().strip())
-        except HotkeyError as e:
-            return str(e)
-        return ""
+    def _fill_leagues(self) -> None:
+        """Automatic first, then every league poe.ninja knows.
+
+        A league saved in the config but missing from the list is kept as its own
+        entry. That happens whenever poe.ninja is unreachable, and dropping the
+        user's setting because we couldn't confirm it would silently move them
+        to a different economy.
+        """
+        auto_label = "Automatic — follow the current league"
+        if self._detected_league:
+            auto_label = f"Automatic — currently {self._detected_league}"
+        self.league.addItem(auto_label, None)
+        for name in self._leagues:
+            self.league.addItem(name, name)
+        current = self._cfg.league
+        if current and current not in self._leagues:
+            self.league.addItem(f"{current} (not confirmed)", current)
+        index = self.league.findData(current)
+        self.league.setCurrentIndex(index if index >= 0 else 0)
 
     def _section(self, form, title: str, note: str = "") -> None:
         """A bold heading spanning the form, optionally with an explanation."""
@@ -392,7 +436,7 @@ class SettingsDialog(QDialog):
         return replace(
             self._cfg,
             rate_limit_safety_fraction=self.safety.value() / 100.0,
-            league=self.league.text().strip() or None,
+            league=self.league.currentData(),
             sweep_interval_minutes=self.sweep_interval.value(),
             request_interval_s=self.request_interval.value(),
             history_retention_days=self.retention.value(),
@@ -400,7 +444,7 @@ class SettingsDialog(QDialog):
             offer_window_s=self.offer_window.value(),
             available_ttl_s=self.available_ttl.value(),
             awaiting_timeout_s=self.awaiting_timeout.value(),
-            trade_hotkey=self.hotkey.text().strip(),
+            trade_hotkey=self.hotkey.binding(),
             trade_hotkey_enabled=self.hotkey_enabled.isChecked(),
             sweep_items=self.sweep_items.value(),
             sweep_min_value_divines=self.sweep_min_value.value(),

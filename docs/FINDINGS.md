@@ -99,6 +99,66 @@ Everything else about this API was tested and is untrustworthy:
 `value_traded` is used for **ranking only** — the same unit for every item, so "which
 items trade" is answerable even though "how many divines" is not.
 
+### The reference price overstates thin items by ~26% — measured on two real losses
+
+**Measured 2026-07-30, Runes of Aldur, on the first two trades ever completed through the
+app. Both lost money.** This is the most consequential finding in this file: the derivation
+above is sound, and it is still not the number a sale realises.
+
+| item | app showed | poe2scout published | live CE at trade time | app over live |
+|---|---|---|---|---|
+| Omen of Whittling | 4,605 ex | 4,436–4,573 ex (07-29) | **3,361 ex** | **+37%** |
+| Astrid's Creativity | 1,156 ex | 926–994 ex (07-29) | **700 ex** | **+65%** |
+
+Re-measured against the live API on 2026-07-30 with the app's own parser: Whittling 4,547
+ex, Astrid's 993 ex.
+
+Three things follow, and the second is the one that matters:
+
+1. **The app is not misparsing poe2scout.** `rel/base` reproduces poe2scout's own published
+   `CurrentPrice` to **1.006×** (Whittling) and **1.110×** (Astrid's). Do not go looking for
+   a conversion bug — there isn't one. The pipeline faithfully reports its source.
+2. **The source itself sits ~26–27% above what the CE actually pays for a thin item.**
+   poe2scout's price never went near 3,361 or 700 at any point in 07-28 → 07-30
+   (Whittling 4,304→4,518; Astrid's 953→895), so this is a *level* difference, not
+   staleness. Most likely we quote a traded/mid price while a seller crossing the spread
+   receives the bid — consistent with this file's own "no bid, no ask, no depth anywhere in
+   this API". On a thin item that spread is wide enough to eat the entire edge.
+3. **Liquidity is the discriminator, not the method.** The five items that validated at
+   −0.4% to −4.7% were liquid currency. These two are not: Astrid's trades ~130–240 units
+   a day and its divine pair carries 67k `ValueTraded` — barely above `MIN_PAIR_VALUE`'s
+   1,000. The reference price is trustworthy for liquid currency and optimistic for
+   everything else, which is exactly the half of the universe the sweep selects for.
+
+**`min_gap_ratio = 1.05` is therefore calibrated an order of magnitude too tight.** It
+encodes a 5% price error derived from liquid currency, against a measured 26% error on the
+items actually being traded. A 1.2× gap on a thin item is not a 20% edge; it is inside the
+noise, and the app presented two such trades as profitable. `MIN_PAIR_VALUE = 1000` is also
+far too low — Astrid's cleared it by 67× and was still 65% wrong.
+
+**Open, and it decides the fix:** the maintainer re-checked poe2scout against live on
+07-30 and found Whittling off by only ~10 ex, which cannot be reconciled with the 3,361
+observed at trade time unless the two checks read different sides of the book or the price
+genuinely moved 34% in a day. Until that is resolved, do not tune a haircut constant — the
+distinction between *spread* (haircut proceeds, scaled by liquidity), *which side was read
+in-game* (guidance, no code change) and *movement* (freshness) is unsettled.
+
+### Gold is a real constraint and the app does not model it
+
+**Measured 2026-07-30 in game:** the Currency Exchange charges roughly **120 gold per
+exalted** and **800 gold per divine** traded. The maintainer ran out of gold mid-session
+settling a high-value item in exalted.
+
+This **directly opposes** the denomination finding below. Exalted minimises the rounding
+floor, and it also multiplies the gold cost: settling ~3,000 exalted costs ~360,000 gold,
+where the same value as ~7 divine costs ~5,600 gold — **64× more gold for the finer floor.**
+"Settle in exalted" is therefore correct only while gold lasts, and the app currently
+recommends it unconditionally with no notion that gold exists.
+
+Gold cannot be bought for currency, so it is a **budget constraint, not a cost in divines**:
+the right rule is the finest denomination whose gold cost fits the gold you hold, not a
+term subtracted from profit.
+
 ## Which items to sweep
 
 Selection is **CE exit liquidity**: an underpriced listing is worthless if the Exchange

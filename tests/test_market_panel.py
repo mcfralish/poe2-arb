@@ -289,3 +289,41 @@ class TestFullEconomy:
         finally:
             w._quitting = True
             w.close()
+
+
+class TestExcludedColumn:
+    def test_setting_exclusions_updates_the_ticks(self, panel):
+        """Settings can change the list after the table exists.
+
+        The button count and the ticks came from different places, so changing
+        exclusions in Settings left the column showing the old set.
+        """
+        from poe2arb.gui.market_panel import EXCLUDED_COLUMN
+
+        panel.set_exclusions(["chaos"])
+        ticked = {
+            panel.table.item(r, 0).text()
+            for r in range(panel.table.rowCount())
+            if panel.table.item(r, EXCLUDED_COLUMN).checkState() == Qt.CheckState.Checked
+        }
+        assert ticked == {"Chaos Orb"}
+        assert "(1)" in panel.exclusions_button.text()
+
+    def test_clearing_exclusions_clears_the_ticks(self, panel):
+        from poe2arb.gui.market_panel import EXCLUDED_COLUMN
+
+        panel.set_exclusions(["chaos"])
+        panel.set_exclusions([])
+        assert all(
+            panel.table.item(r, EXCLUDED_COLUMN).checkState() == Qt.CheckState.Unchecked
+            for r in range(panel.table.rowCount())
+        )
+
+    def test_the_tick_is_centred_not_merely_the_text(self, panel):
+        """Qt lays the indicator on the leading edge whatever the item alignment."""
+        from poe2arb.gui.market_panel import EXCLUDED_COLUMN
+        from poe2arb.gui.table_items import CentredCheckDelegate
+
+        assert isinstance(
+            panel.table.itemDelegateForColumn(EXCLUDED_COLUMN), CentredCheckDelegate
+        )

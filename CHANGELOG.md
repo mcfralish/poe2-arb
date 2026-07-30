@@ -6,6 +6,67 @@ says what changed for you and, where it matters, why.
 Versions follow `MAJOR.MINOR.PATCH`. Until 1.0 the minor number moves for
 anything user-visible.
 
+## [0.5.0] — 2026-07-30
+
+The first real field test. Two trades went through and both lost money, which found
+one serious bug, several smaller ones, and one thing the app gets wrong that is
+**not fixed yet** — read the warning below before trading on this build.
+
+> **Prices are optimistic on rarely-traded items.** Our Currency Exchange figure ran
+> about 26% above what a sale actually fetched on both items traded, which was enough
+> to turn two apparent profits into losses. Liquid currency is fine; Omens, Runes and
+> anything thin is not. Until that is fixed, treat the profit on a thin item as a
+> best case, not an estimate. The *uncertain* rating and Quick Lookup now say so.
+
+### Fixed
+
+- **The app could price your trades against the wrong league.** With no league set —
+  the default — the search fell back to Standard while the rest of the app followed
+  the current league. Standard has years of accumulated currency, so one measured item
+  priced 5.7× higher there: every listing looked like a windfall, and no seller could
+  ever reply, because they were in a different league. The league is now detected
+  properly and never guessed.
+- **Switching off Find trades now actually stops.** Offers kept arriving for minutes
+  afterwards, because the queue kept working through the backlog it had already found.
+  Stopping now clears what hasn't been offered yet, and leaves anything you're
+  mid-way through — offers on screen and whispers waiting on a reply — alone.
+- **The hotkey couldn't be set.** The field was greyed out until you ticked the
+  checkbox above it, and that checkbox ships off, so on a fresh install it looked
+  broken. It's always editable now.
+- **Exclusion ticks went stale.** Changing the excluded items in Settings updated the
+  count on the button but not the ticks in the Market table.
+
+### Changed
+
+- **Set the hotkey by pressing it.** Click the field and press the combination
+  instead of typing `ctrl+shift+f9` and hoping the spelling matches.
+- **League is a dropdown**, listing the real leagues with the current one named, rather
+  than a text box where a typo silently priced everything against another economy.
+- **Quick Lookup asks one question.** It used to convert any item into any other, which
+  implied those two things trade against each other — almost none of them do. Now it
+  shows what one item is worth in a currency you pick: exalted, divine, chaos or annul.
+  The sentence restating the number is gone, and the panel takes about a quarter of the
+  tab instead of half, so the trade queues are bigger.
+- **The Trades tab can show what you did**, not just what was found: filter to the ones
+  you messaged or the ones you bought. It was hard to go back afterwards and see what a
+  trade you actually made had been valued at.
+- **Trades shows which currency you pay in and which you'd settle in**, per row.
+- **The Odds symbols have a key**, on both Trades and Results, and both tabs use the
+  same symbols — Results used to spell the rating out in different words.
+- **Plainer wording throughout Settings.** The tooltips explained the measurements
+  behind each setting rather than what it does, and quoted figures that have since
+  changed.
+- Settling in exalted is no longer recommended without comment: it saves rounding and
+  costs far more gold, which can leave you unable to trade at all.
+
+### Fixed (display)
+
+- "No limit" is no longer cut off in the bankroll boxes, and the two boxes now say
+  which currency they are when both read no limit.
+- The long-shots percentage is no longer clipped by the slider on a narrow window.
+- The Excluded tick is centred under its heading.
+- The Trades search box is wider and says what it searches.
+
 ## [0.4.0] — 2026-07-29
 
 0.3.0 established that the triangular loop search was reading the wrong market.

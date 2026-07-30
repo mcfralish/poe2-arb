@@ -32,7 +32,7 @@ from ..market import ALL_TAB, ADAPTIVE_BASE, Universe, base_abbreviation, ingame
 from ..format import fmt_volume
 from .flow_tabs import TabStrip
 from .multi_select import MultiSelect
-from .table_items import NumericItem, TextItem
+from .table_items import CentredCheckDelegate, NumericItem, TextItem
 from .theme import muted_color
 
 ANY_GROUP = "All groups"
@@ -195,6 +195,9 @@ class MarketPanel(QWidget):
         table.setAlternatingRowColors(True)
         table.verticalHeader().hide()
         table.sortByColumn(1, Qt.SortOrder.DescendingOrder)
+        # The tick sits under a centred header, so it has to be centred too;
+        # item alignment alone leaves it on the leading edge.
+        table.setItemDelegateForColumn(EXCLUDED_COLUMN, CentredCheckDelegate(table))
         return table
 
     # ------------------------------------------------------------------ inputs
@@ -209,6 +212,10 @@ class MarketPanel(QWidget):
     def set_exclusions(self, excluded: list[str]) -> None:
         self._excluded = list(dict.fromkeys(excluded))
         self._refresh_button_text()
+        # Also push them onto the table. Settings can change the list long after
+        # the table was built, and without this the ticks kept showing the old
+        # set while the count in the button showed the new one.
+        self._sync_checkboxes()
 
     def set_base_currency(self, base_id: str) -> None:
         self._base_id = base_id

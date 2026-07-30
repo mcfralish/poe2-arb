@@ -39,6 +39,7 @@ from ..outcomes import (
     suggested_gap_band,
     summarise,
 )
+from .bands import legend_text, legend_tooltip, symbol_for_name, tip_for_name
 from .table_items import NumericItem, TextItem
 from .theme import muted_color
 
@@ -69,7 +70,11 @@ ATTEMPT_COLUMNS = [
     ("Item", "What you asked for."),
     ("Buy", "How many."),
     ("Gap", "How far under Exchange value the listing was."),
-    ("Odds", "The band it was ranked in at the time."),
+    (
+        "Odds",
+        "How it was rated at the time — the same symbols as the Trades tab.\n"
+        "●  worth trying      ○  uncertain      ×  too good to be true",
+    ),
     ("Seller", "Who you whispered."),
     ("Result", "What you reported back."),
     ("Profit", "Expected, or actual once you reported a figure."),
@@ -121,6 +126,14 @@ class ResultsTab(QWidget):
         self.attempts = _make_table(ATTEMPT_COLUMNS, sort_column=0)
         self.tabs.addTab(self.attempts, "Every whisper")
         layout.addWidget(self.tabs)
+
+        # The same key as the Trades tab, from the same source, so the glyphs
+        # cannot drift apart again.
+        self.legend = QLabel(legend_text())
+        self.legend.setStyleSheet(f"color: {muted_color(self)};")
+        self.legend.setWordWrap(True)
+        self.legend.setToolTip(legend_tooltip())
+        layout.addWidget(self.legend)
 
         self.note = QLabel()
         self.note.setWordWrap(True)
@@ -244,7 +257,7 @@ class ResultsTab(QWidget):
                 TextItem(a.item_name),
                 NumericItem(f"{a.units:g}", a.units),
                 NumericItem(f"{a.gap:.2f}x", a.gap),
-                TextItem(a.band),
+                _band_cell(a.band),
                 TextItem(a.character or a.account),
                 TextItem(_RESULT_LABEL.get(a.outcome, a.outcome.value)),
                 NumericItem(f"{profit:+.2f}", profit),
@@ -256,6 +269,17 @@ class ResultsTab(QWidget):
         table.setSortingEnabled(True)
         # Newest first: the last thing you did is the thing you're looking for.
         table.sortByColumn(0, Qt.SortOrder.DescendingOrder)
+
+
+def _band_cell(name: str) -> TextItem:
+    """The band as the glyph the Trades tab uses, with its explanation attached.
+
+    This column used to print the raw stored word ("plausible"), so the same fact
+    looked like two unrelated columns across the two tabs.
+    """
+    cell = TextItem(symbol_for_name(name))
+    cell.setToolTip(tip_for_name(name))
+    return cell
 
 
 def _buckets_named(first: str) -> list[tuple[str, str]]:

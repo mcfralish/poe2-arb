@@ -25,6 +25,7 @@ from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
+    QComboBox,
     QDoubleSpinBox,
     QHBoxLayout,
     QHeaderView,
@@ -38,6 +39,7 @@ from PySide6.QtWidgets import (
 
 from ..listings import Band, rank_candidates, whisper_text
 from ..outcomes import Outcome
+from .bands import BAND_LABEL, BAND_TIP, legend_text, legend_tooltip
 from .table_items import NumericItem, TextItem
 from .theme import muted_color
 
@@ -46,10 +48,10 @@ log = logging.getLogger(__name__)
 COLUMNS = [
     (
         "Odds",
-        "Whether this is the kind of discount that has been seen to fill.\n"
-        "●  plausible — a real seller under market. These are the ones that fill.\n"
-        "○  thin — the discount is inside the Exchange price's own margin of error.\n"
-        "×  ghost — far below market; measured fill rate on these is zero.",
+        "Whether this is the kind of discount that has been seen to work out.\n"
+        "●  worth trying — a real seller pricing under market.\n"
+        "○  uncertain — the discount is no bigger than our price estimate's error.\n"
+        "×  too good to be true — never once worked.",
     ),
     ("Item", "What you'd be buying."),
     (
@@ -57,16 +59,21 @@ COLUMNS = [
         "Price per item in divines, whatever currency the seller wants. "
         "Converted so rows stay comparable.",
     ),
-    ("Pay", "The currency the seller actually wants."),
+    ("Pay with", "The currency the seller wants — you can only pay in this."),
     ("Exchange", "What one is worth on the in-game Currency Exchange."),
     ("Gap", "How far under Exchange value the listing is. 1.20x means 20% under."),
     ("Buy", "How many to ask for — the most that stock and your bankroll allow."),
     ("Cost", "Divines you'd spend."),
     (
         "Profit",
-        "Divines you'd clear, after rounding. Assumes you take payment in the "
-        "settlement currency from Settings — exalted by default, which is much "
-        "finer than divine and loses far less to rounding.",
+        "Divines you'd clear, after rounding down to a whole unit of whatever "
+        "you take payment in.",
+    ),
+    (
+        "Settle in",
+        "The currency you'd take when reselling on the Currency Exchange, set "
+        "above the trade queue. It changes the Profit figure, because proceeds "
+        "round down to a whole unit of it.",
     ),
     ("Age", "How long ago the listing was indexed. * means the seller is AFK."),
     ("Seller", "Character to whisper."),
@@ -74,24 +81,25 @@ COLUMNS = [
 
 BAND_COLUMN = 0
 PROFIT_COLUMN = 8
+SETTLE_COLUMN = 9
+AGE_COLUMN = 10
+SELLER_COLUMN = 11
 
-BAND_LABEL = {
-    Band.PLAUSIBLE: "●",
-    Band.THIN: "○",
-    Band.GHOST: "×",
-}
-BAND_TIP = {
-    Band.PLAUSIBLE: "Plausible — a real seller under market. These are the ones that fill.",
-    Band.THIN: (
-        "Thin — the discount is inside the Exchange price's own margin of error, "
-        "so both the gap and the profit are uncertain."
-    ),
-    Band.GHOST: (
-        "Ghost — far below market. Measured fill rate on these is zero: they're "
-        "mistakes, abandoned listings, or already sold. Shown so you can judge "
-        "for yourself, ranked last so they don't waste whispers."
-    ),
-}
+# What the Trades table is showing. "Whispered" and "Bought" are the two the
+# field test asked for: after a session it was hard to find what the items you
+# actually bought had been valued at, because the table listed everything the
+# sweep saw with no record of what you did about it.
+SHOW_ALL = "all"
+SHOW_WHISPERED = "whispered"
+SHOW_BOUGHT = "bought"
+
+SHOW_MODES = (
+    (SHOW_ALL, "Everything found", "Every listing the last pass turned up."),
+    (SHOW_WHISPERED, "Ones I messaged", "Listings whose whisper you copied."),
+    (SHOW_BOUGHT, "Ones I bought", "Listings you recorded as an actual trade."),
+)
+
+
 
 
 class SweepPanel(QWidget):
@@ -112,6 +120,13 @@ class SweepPanel(QWidget):
         self._attempt_ids: dict[tuple, str] = {}
         self._rechecked: set[tuple] = set()
         self._last_copied = None
+        # Candidate key -> the verdict the user reported, so the table can filter
+        # down to what actually happened rather than only what was on offer.
+        self._outcomes: dict[tuple, Outcome] = {}
+        # What sales are priced in. Shown per row because it decides the Profit
+        # figure, and because after a session you need to know which currency a
+        # given trade was costed against.
+        self._settlement = "divine"
 
         layout = QVBoxLayout(self)
 
@@ -119,18 +134,36 @@ class SweepPanel(QWidget):
         # the same thing, one of them a one-shot and one a loop, is a way to
         # end up with two sweeps arguing over the request budget.
         controls = QHBoxLayout()
-        self.hide_ghosts = QCheckBox("Hide ghosts")
+        self.show_mode = QComboBox()
+        for mode, label, tip in SHOW_MODES:
+            self.show_mode.addItem(label, mode)
+            self.show_mode.setItemData(
+                self.show_mode.count() - 1, tip, Qt.ItemDataRole.ToolTipRole
+            )
+        self.show_mode.setToolTip(
+            "Which of these to list.\n\n"
+            "Everything found is what the last pass saw. The other two narrow it "
+            "to what you did about it, which is how you check afterwards what a "
+            "trade you actually made was valued at."
+        )
+        self.show_mode.currentIndexChanged.connect(lambda _: self._apply_filter())
+        controls.addWidget(self.show_mode)
+
+        self.hide_ghosts = QCheckBox("Hide the too-good-to-be-true ones")
         self.hide_ghosts.setToolTip(BAND_TIP[Band.GHOST])
         self.hide_ghosts.toggled.connect(self._apply_filter)
         controls.addWidget(self.hide_ghosts)
 
-        controls.addStretch(1)
+        controls.addSpacing(12)
         self.search = QLineEdit()
-        self.search.setPlaceholderText("Search")
+        self.search.setPlaceholderText("Search item or seller")
         self.search.setClearButtonEnabled(True)
-        self.search.setMaximumWidth(200)
+        # Given the rest of the row's slack rather than capped at 200px: item
+        # names here run to "Zarokh's Reliquary Key: Against the Darkness" and a
+        # search box you can't read your own query in is worse than no box.
+        self.search.setMinimumWidth(240)
         self.search.textChanged.connect(self._apply_filter)
-        controls.addWidget(self.search)
+        controls.addWidget(self.search, stretch=1)
         layout.addLayout(controls)
 
         self.table = QTableWidget(0, len(COLUMNS))
@@ -193,6 +226,15 @@ class SweepPanel(QWidget):
         bottom.addWidget(self.status, stretch=1)
         layout.addLayout(bottom)
 
+        # A visible key for the Odds glyphs. They were explained only in the
+        # column header's tooltip, which nobody found — the symbols read as
+        # decoration until you happen to hover the right pixel.
+        self.legend = QLabel(legend_text())
+        self.legend.setStyleSheet(f"color: {muted_color(self)};")
+        self.legend.setWordWrap(True)
+        self.legend.setToolTip(legend_tooltip())
+        layout.addWidget(self.legend)
+
         self.set_status(
             "No sweep yet. Switch on Find trades to check live listings against "
             "Currency Exchange prices."
@@ -233,6 +275,7 @@ class SweepPanel(QWidget):
         )
         self._attempt_ids.clear()
         self._rechecked.clear()
+        self._outcomes.clear()
         self._last_copied = None
         self._update_outcome_buttons()
         self._populate()
@@ -240,15 +283,18 @@ class SweepPanel(QWidget):
         thin = sum(1 for c in self._candidates if c.band is Band.THIN)
         ghosts = sum(1 for c in self._candidates if c.band is Band.GHOST)
         best = max((c.profit_divines for c in self._candidates), default=0.0)
+        # Same words as the legend below the table. These read as three unrelated
+        # jargon terms otherwise, with nothing on screen tying them to the glyphs.
         parts = [
             f"{len(result.items)} items checked in {result.duration_s / 60:.0f} min",
             f"{result.listings_seen} live listings",
-            f"{plausible} plausible · {thin} thin · {ghosts} ghost",
+            f"{plausible} worth trying · {thin} uncertain · "
+            f"{ghosts} too good to be true",
         ]
         if plausible:
-            parts.append(f"best plausible trade +{self._best_plausible():.2f} div")
+            parts.append(f"best is +{self._best_plausible():.2f} div")
         elif best:
-            parts.append("nothing in the plausible band this sweep")
+            parts.append("nothing worth trying this time")
         if result.errors:
             parts.append(f"{len(result.errors)} item(s) failed — see the Log tab")
         self.set_status("  ·  ".join(parts))
@@ -296,15 +342,25 @@ class SweepPanel(QWidget):
                 row, PROFIT_COLUMN,
                 NumericItem(f"+{_div(c.profit_divines)}", c.profit_divines),
             )
+            settle = TextItem(_pay_label(self._settlement))
+            settle.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.table.setItem(row, SETTLE_COLUMN, settle)
             age = listing.age_s()
-            self.table.setItem(row, 9, NumericItem(_age(age, listing.afk), age or 0.0))
-            self.table.setItem(row, 10, TextItem(listing.character or listing.account))
+            self.table.setItem(
+                row, AGE_COLUMN, NumericItem(_age(age, listing.afk), age or 0.0)
+            )
+            self.table.setItem(
+                row, SELLER_COLUMN, TextItem(listing.character or listing.account)
+            )
         self.table.setSortingEnabled(True)
         self._apply_filter()
 
     def _apply_filter(self) -> None:
+        """Hide rows the current filters exclude, and say so if that's everything."""
         needle = self.search.text().strip().lower()
         hide_ghosts = self.hide_ghosts.isChecked()
+        mode = self.show_mode.currentData()
+        shown = 0
         for row in range(self.table.rowCount()):
             c = self._candidate_at(row)
             if c is None:
@@ -312,10 +368,39 @@ class SweepPanel(QWidget):
             hidden = False
             if hide_ghosts and c.band is Band.GHOST:
                 hidden = True
+            elif not self._matches_mode(c, mode):
+                hidden = True
             elif needle:
                 haystack = f"{c.item_name} {c.listing.character or ''} {c.listing.account}"
                 hidden = needle not in haystack.lower()
             self.table.setRowHidden(row, hidden)
+            shown += not hidden
+        self._note_empty_filter(mode, shown)
+
+    def _matches_mode(self, candidate, mode: str) -> bool:
+        if mode == SHOW_WHISPERED:
+            return candidate.key in self._attempt_ids
+        if mode == SHOW_BOUGHT:
+            return self._outcomes.get(candidate.key) is Outcome.FILLED
+        return True
+
+    def _note_empty_filter(self, mode: str, shown: int) -> None:
+        """Explain an empty table rather than leaving it looking broken.
+
+        Only when a filter is what emptied it — an empty sweep has its own
+        message from `set_result`, and overwriting that would lose the counts.
+        """
+        if shown or not self.table.rowCount():
+            return
+        if mode == SHOW_BOUGHT:
+            self.set_status(
+                "Nothing here yet — this lists trades you marked as Traded. "
+                "Report a verdict after a whisper and it'll show up."
+            )
+        elif mode == SHOW_WHISPERED:
+            self.set_status(
+                "Nothing here yet — this lists listings whose whisper you copied."
+            )
 
     def _candidate_at(self, row: int):
         """Map a view row back to its candidate.
@@ -355,6 +440,10 @@ class SweepPanel(QWidget):
         attempt_id = self._attempt_ids.get(c.key)
         if attempt_id is None:
             return
+        # Kept here as well as in the outcome log, so the "Ones I bought" filter
+        # can work without re-reading the file.
+        self._outcomes[c.key] = outcome
+        self._apply_filter()
         self.outcome_reported.emit(attempt_id, outcome)
         verdict = {
             Outcome.FILLED: "Recorded as traded",
@@ -368,6 +457,23 @@ class SweepPanel(QWidget):
         """Remember which log row a copied whisper produced."""
         self._attempt_ids[candidate.key] = attempt_id
         self._update_outcome_buttons()
+        self._apply_filter()
+
+    def set_settlement_currency(self, currency: str) -> None:
+        """What sales are priced in, for the Settle in column.
+
+        Only redraws the column, not the table: the profit figures come from the
+        sweep and are recomputed there, so re-populating here would be both
+        wasteful and a chance for the two to disagree.
+        """
+        if currency == self._settlement:
+            return
+        self._settlement = currency
+        label = _pay_label(currency)
+        for row in range(self.table.rowCount()):
+            cell = self.table.item(row, SETTLE_COLUMN)
+            if cell is not None:
+                cell.setText(label)
 
     def selected_candidate(self):
         rows = self.table.selectionModel().selectedRows() if self.table.selectionModel() else []

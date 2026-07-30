@@ -336,3 +336,43 @@ def test_a_failed_recheck_does_not_block_the_user(snapshot):
     got = recheck(cfg(), _candidate(snapshot), ggg=Broken([]))
     assert got.status is RecheckStatus.UNKNOWN
     assert got.worth_whispering
+
+
+# --- league resolution -----------------------------------------------------
+
+def test_league_is_never_silently_standard(monkeypatch):
+    """A default install must sweep the league being played, not the permanent one.
+
+    `cfg.league or "Standard"` shipped through 0.4.0. Measured 2026-07-30,
+    Standard priced Omen of Whittling 5.7x above the temp league, so the mismatch
+    made every listing look like a windfall against sellers who could never
+    answer.
+    """
+    from poe2arb import sweep as sweep_mod
+
+    calls = []
+
+    class FakeNinja:
+        def __init__(self, cfg):
+            calls.append(cfg)
+
+        def current_league(self):
+            return "Runes of Aldur"
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("poe2arb.client.NinjaClient", FakeNinja)
+    assert sweep_mod.resolve_league(Config()) == "Runes of Aldur"
+    assert len(calls) == 1
+
+
+def test_a_configured_league_is_used_verbatim(monkeypatch):
+    """An explicit league must not trigger a lookup that could disagree with it."""
+    from poe2arb import sweep as sweep_mod
+
+    def explode(cfg):  # pragma: no cover - must never run
+        raise AssertionError("should not consult poe.ninja when league is set")
+
+    monkeypatch.setattr("poe2arb.client.NinjaClient", explode)
+    assert sweep_mod.resolve_league(Config(league="Hardcore")) == "Hardcore"
