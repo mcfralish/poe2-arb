@@ -1,28 +1,30 @@
 Fragments
 │
-├─ Ancient Crisis Fragment
-├─ Azmeri Reliquary Key
-├─ Breachlord Sac
-├─ Call of the Shadows
-├─ Cowardly Fate
-├─ Deadly Fate
-├─ Faded Crisis Fragment
-├─ Kulemak's Invitation
-├─ Olroth's Reliquary Key
-├─ Origin Core
-├─ Origin Cradle
-├─ Origin Spark
-├─ Raven's Reflection
-├─ Ritualistic Reliquary Key
-├─ Shattered Triskelion
-├─ Simulacrum
-├─ Simulacrum Splinter
-├─ Tangmazu's Reliquary Key
-├─ The Arbiter's Reliquary Key
-├─ The Trialmaster's Reliquary Key
-├─ The Triskelion Reforged
-├─ Twilight Reliquary Key
-├─ Victorious Fate
-├─ Weathered Crisis Fragment
-├─ Xesht's Reliquary Key
-└─ Zarokh's Reliquary Key: Against the Darkness
+├─ Ultimatum Fragments
+│ ├─ Cowardly Fate
+│ ├─ Deadly Fate
+│ └─ Victorious Fate
+│
+├─ Pinnacle Fragments
+│ ├─ Ancient Crisis Fragment
+│ ├─ Faded Crisis Fragment
+│ ├─ Weathered Crisis Fragment
+│ ├─ Origin Cradle
+│ ├─ Origin Spark
+│ ├─ Origin Core
+│ └─ Call of the Shadows
+│
+└─ Reliquary Keys
+  ├─ Twilight Reliquary Key
+  ├─ Xesht's Reliquary Key
+  ├─ The Trialmaster's Reliquary Key
+  ├─ Ritualistic Reliquary Key
+  ├─ Tangmazu's Reliquary Key
+  ├─ Olroth's Reliquary Key
+  ├─ The Arbiter's Reliquary Key
+  ├─ Zarokh's Reliquary Key: Against the Darkness
+  ├─ Zarokh's Reliquary Key: Sandstorm Visage
+  ├─ Zarokh's Reliquary Key: Blessed Bonds
+  ├─ Zarokh's Reliquary Key: Sekhema's Resolve
+  ├─ Zarokh's Reliquary Key: Temporalis
+  └─ Azmeri Reliquary Key

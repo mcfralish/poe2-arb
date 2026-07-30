@@ -1,86 +1,92 @@
 Essences
 │
-├─ Lesser
-│ ├─ Lesser Essence of Abrasion
-│ ├─ Lesser Essence of Alacrity
-│ ├─ Lesser Essence of Electricity
+├─ Lesser Essences
+│ ├─ Lesser Essence of the Body
+│ ├─ Lesser Essence of the Mind
 │ ├─ Lesser Essence of Enhancement
+│ ├─ Lesser Essence of Abrasion
 │ ├─ Lesser Essence of Flames
-│ ├─ Lesser Essence of Grounding
-│ ├─ Lesser Essence of Haste
 │ ├─ Lesser Essence of Insulation
-│ ├─ Lesser Essence of Opulence
-│ ├─ Lesser Essence of Ruin
-│ ├─ Lesser Essence of Seeking
-│ ├─ Lesser Essence of Sorcery
+│ ├─ Lesser Essence of Ice
 │ ├─ Lesser Essence of Thawing
-│ └─ Lesser Essence of the Infinite
+│ ├─ Lesser Essence of Electricity
+│ ├─ Lesser Essence of Grounding
+│ ├─ Lesser Essence of Ruin
+│ ├─ Lesser Essence of Command
+│ ├─ Lesser Essence of Battle
+│ ├─ Lesser Essence of Sorcery
+│ ├─ Lesser Essence of Haste
+│ ├─ Lesser Essence of Alacrity
+│ ├─ Lesser Essence of the Infinite
+│ ├─ Lesser Essence of Seeking
+│ └─ Lesser Essence of Opulence
 │
-├─ Standard
-│ ├─ Essence of Abrasion
-│ ├─ Essence of Alacrity
-│ ├─ Essence of Battle
-│ ├─ Essence of Command
-│ ├─ Essence of Delirium
-│ ├─ Essence of Electricity
-│ ├─ Essence of Enhancement
-│ ├─ Essence of Flames
-│ ├─ Essence of Grounding
-│ ├─ Essence of Haste
-│ ├─ Essence of Horror
-│ ├─ Essence of Hysteria
-│ ├─ Essence of Ice
-│ ├─ Essence of Insanity
-│ ├─ Essence of Insulation
-│ ├─ Essence of Opulence
-│ ├─ Essence of Ruin
-│ ├─ Essence of Seeking
-│ ├─ Essence of Sorcery
-│ ├─ Essence of Thawing
-│ ├─ Essence of the Abyss
+├─ Essences
 │ ├─ Essence of the Body
-│ ├─ Essence of the Breach
+│ ├─ Essence of the Mind
+│ ├─ Essence of Enhancement
+│ ├─ Essence of Abrasion
+│ ├─ Essence of Flames
+│ ├─ Essence of Insulation
+│ ├─ Essence of Ice
+│ ├─ Essence of Thawing
+│ ├─ Essence of Electricity
+│ ├─ Essence of Grounding
+│ ├─ Essence of Ruin
+│ ├─ Essence of Command
+│ ├─ Essence of Battle
+│ ├─ Essence of Sorcery
+│ ├─ Essence of Haste
+│ ├─ Essence of Alacrity
 │ ├─ Essence of the Infinite
-│ └─ Essence of the Mind
+│ ├─ Essence of Seeking
+│ └─ Essence of Opulence
 │
-├─ Greater
-│ ├─ Greater Essence of Abrasion
-│ ├─ Greater Essence of Alacrity
-│ ├─ Greater Essence of Battle
-│ ├─ Greater Essence of Command
-│ ├─ Greater Essence of Electricity
-│ ├─ Greater Essence of Enhancement
-│ ├─ Greater Essence of Flames
-│ ├─ Greater Essence of Grounding
-│ ├─ Greater Essence of Haste
-│ ├─ Greater Essence of Ice
-│ ├─ Greater Essence of Insulation
-│ ├─ Greater Essence of Opulence
-│ ├─ Greater Essence of Ruin
-│ ├─ Greater Essence of Seeking
-│ ├─ Greater Essence of Sorcery
-│ ├─ Greater Essence of Thawing
+├─ Greater Essences
 │ ├─ Greater Essence of the Body
+│ ├─ Greater Essence of the Mind
+│ ├─ Greater Essence of Enhancement
+│ ├─ Greater Essence of Abrasion
+│ ├─ Greater Essence of Flames
+│ ├─ Greater Essence of Insulation
+│ ├─ Greater Essence of Ice
+│ ├─ Greater Essence of Thawing
+│ ├─ Greater Essence of Electricity
+│ ├─ Greater Essence of Grounding
+│ ├─ Greater Essence of Ruin
+│ ├─ Greater Essence of Command
+│ ├─ Greater Essence of Battle
+│ ├─ Greater Essence of Sorcery
+│ ├─ Greater Essence of Haste
+│ ├─ Greater Essence of Alacrity
 │ ├─ Greater Essence of the Infinite
-│ └─ Greater Essence of the Mind
+│ ├─ Greater Essence of Seeking
+│ └─ Greater Essence of Opulence
 │
-└─ Perfect
-  ├─ Perfect Essence of Abrasion
-  ├─ Perfect Essence of Alacrity
-  ├─ Perfect Essence of Battle
-  ├─ Perfect Essence of Command
-  ├─ Perfect Essence of Electricity
-  ├─ Perfect Essence of Enhancement
-  ├─ Perfect Essence of Flames
-  ├─ Perfect Essence of Grounding
-  ├─ Perfect Essence of Haste
-  ├─ Perfect Essence of Ice
-  ├─ Perfect Essence of Insulation
-  ├─ Perfect Essence of Opulence
-  ├─ Perfect Essence of Ruin
-  ├─ Perfect Essence of Seeking
-  ├─ Perfect Essence of Sorcery
-  ├─ Perfect Essence of Thawing
-  ├─ Perfect Essence of the Body
-  ├─ Perfect Essence of the Infinite
-  └─ Perfect Essence of the Mind
+├─ Perfect Essences
+│ ├─ Perfect Essence of the Body
+│ ├─ Perfect Essence of the Mind
+│ ├─ Perfect Essence of Enhancement
+│ ├─ Perfect Essence of Abrasion
+│ ├─ Perfect Essence of Flames
+│ ├─ Perfect Essence of Insulation
+│ ├─ Perfect Essence of Ice
+│ ├─ Perfect Essence of Thawing
+│ ├─ Perfect Essence of Electricity
+│ ├─ Perfect Essence of Grounding
+│ ├─ Perfect Essence of Ruin
+│ ├─ Perfect Essence of Command
+│ ├─ Perfect Essence of Battle
+│ ├─ Perfect Essence of Sorcery
+│ ├─ Perfect Essence of Haste
+│ ├─ Perfect Essence of Alacrity
+│ ├─ Perfect Essence of the Infinite
+│ ├─ Perfect Essence of Seeking
+│ └─ Perfect Essence of Opulence
+│
+└─ Corrupted Essences
+  ├─ Essence of Hysteria
+  ├─ Essence of Delirium
+  ├─ Essence of Horror
+  ├─ Essence of Insanity
+  └─ Essence of the Breach

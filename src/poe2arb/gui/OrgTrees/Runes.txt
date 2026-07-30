@@ -1,5 +1,76 @@
 Runes
 │
+├─ Normal
+│ ├─ Lesser
+│ │ ├─ Lesser Desert Rune
+│ │ ├─ Lesser Glacial Rune
+│ │ ├─ Lesser Storm Rune
+│ │ ├─ Lesser Iron Rune
+│ │ ├─ Lesser Body Rune
+│ │ ├─ Lesser Mind Rune
+│ │ ├─ Lesser Vision Rune
+│ │ ├─ Lesser Rebirth Rune
+│ │ ├─ Lesser Inspiration Rune
+│ │ ├─ Lesser Stone Rune
+│ │ ├─ Lesser Robust Rune
+│ │ ├─ Lesser Adept Rune
+│ │ ├─ Lesser Resolve Rune
+│ │ ├─ Lesser Ward Rune
+│ │ └─ Lesser Charging Rune
+│ │ 
+│ ├─ Standard
+│ │ ├─ Desert Rune
+│ │ ├─ Glacial Rune
+│ │ ├─ Storm Rune
+│ │ ├─ Iron Rune
+│ │ ├─ Body Rune
+│ │ ├─ Mind Rune
+│ │ ├─ Vision Rune
+│ │ ├─ Rebirth Rune
+│ │ ├─ Inspiration Rune
+│ │ ├─ Stone Rune
+│ │ ├─ Robust Rune
+│ │ ├─ Adept Rune
+│ │ ├─ Resolve Rune
+│ │ ├─ Masterwork Rune
+│ │ ├─ Ward Rune
+│ │ └─ Charging Rune
+│ │ 
+│ ├─ Greater
+│ │ ├─ Greater Desert Rune
+│ │ ├─ Greater Glacial Rune
+│ │ ├─ Greater Storm Rune
+│ │ ├─ Greater Iron Rune
+│ │ ├─ Greater Body Rune
+│ │ ├─ Greater Mind Rune
+│ │ ├─ Greater Vision Rune
+│ │ ├─ Greater Rebirth Rune
+│ │ ├─ Greater Inspiration Rune
+│ │ ├─ Greater Stone Rune
+│ │ ├─ Greater Robust Rune
+│ │ ├─ Greater Adept Rune
+│ │ ├─ Greater Resolve Rune
+│ │ ├─ Greater Ward Rune
+│ │ └─ Charging Rune
+│ │ 
+│ └─ Perfect
+│   ├─ Perfect Desert Rune
+│   ├─ Perfect Glacial Rune
+│   ├─ Perfect Storm Rune
+│   ├─ Perfect Iron Rune
+│   ├─ Perfect Body Rune
+│   ├─ Perfect Mind Rune
+│   ├─ Perfect Vision Rune
+│   ├─ Perfect Rebirth Rune
+│   ├─ Perfect Inspiration Rune
+│   ├─ Perfect Stone Rune
+│   ├─ Perfect Robust Rune
+│   ├─ Perfect Adept Rune
+│   ├─ Perfect Resolve Rune
+│   ├─ Perfect Ward Rune
+│   └─ Perfect Charging Rune
+│
+└─ Greater
 ├─ Ancient
 │ ├─ Ancient Rune of Animosity
 │ ├─ Ancient Rune of Control
@@ -15,18 +86,18 @@ Runes
 │ ├─ Ancient Rune of the Titan
 │ └─ Ancient Rune of Witchcraft
 │
-├─ Lesser
+
 │ ├─ Lesser Adept Rune
-│ ├─ Lesser Body Rune
+│ ├─ Lesser 
 │ ├─ Lesser Desert Rune
-│ ├─ Lesser Glacial Rune
+│ ├─ Lesser 
 │ ├─ Lesser Inspiration Rune
-│ ├─ Lesser Iron Rune
-│ ├─ Lesser Mind Rune
+│ ├─ Lesser 
+│ ├─ Lesser 
 │ ├─ Lesser Rebirth Rune
 │ ├─ Lesser Resolve Rune
 │ ├─ Lesser Robust Rune
-│ ├─ Lesser Storm Rune
+│ ├─ Lesser 
 │ └─ Lesser Ward Rune
 │
 ├─ Standard: Adept Rune
@@ -42,7 +113,7 @@ Runes
 │ ├─ Courtesan Mannan's Rune of Cruelty
 │ ├─ Craiceann's Rune of Recovery
 │ ├─ Craiceann's Rune of Warding
-│ ├─ Desert Rune
+│ ├─ 
 │ ├─ Emergent Instinct
 │ ├─ Emergent Possibility
 │ ├─ Emergent Protection

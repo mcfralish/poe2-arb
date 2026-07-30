@@ -3,7 +3,7 @@ Ritual
 ├─ An Audience with…
 │ ├─ An Audience with the King
 │ ├─ Head of the King
-│ ├─ Omen of Abyssal Echoes
+│ ├─ 
 │ ├─ Omen of Amelioration
 │ ├─ Omen of Answered Prayers
 │ ├─ Omen of Bartering
@@ -17,13 +17,13 @@ Ritual
 │ ├─ Omen of Dextral Crystallisation
 │ ├─ Omen of Dextral Erasure
 │ ├─ Omen of Dextral Exaltation
-│ ├─ Omen of Dextral Necromancy
+│ ├─ 
 │ ├─ Omen of Gambling
 │ └─ Omen of Greater Exaltation
 │
 └─ Omen of Light
-  ├─ Omen of Light
-  ├─ Omen of Putrefaction
+  ├─ 
+  ├─ 
   ├─ Omen of Refreshment
   ├─ Omen of Reinforcements
   ├─ Omen of Resurgence
@@ -33,11 +33,11 @@ Ritual
   ├─ Omen of Sinistral Crystallisation
   ├─ Omen of Sinistral Erasure
   ├─ Omen of Sinistral Exaltation
-  ├─ Omen of Sinistral Necromancy
+  ├─ 
   ├─ Omen of the Ancients
-  ├─ Omen of the Blackblooded
+  ├─ 
   ├─ Omen of the Blessed
   ├─ Omen of the Hunt
-  ├─ Omen of the Liege
-  ├─ Omen of the Sovereign
+  ├─ 
+  ├─ 
   └─ Omen of Whittling

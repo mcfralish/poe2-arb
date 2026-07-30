@@ -1,33 +1,39 @@
 Breach
 │
-├─ Standard
-│ ├─ Adaptive Catalyst
+├─ Breach
 │ ├─ Breach Splinter
-│ ├─ Breachstone
-│ ├─ Carapace Catalyst
-│ ├─ Chayula's Catalyst
-│ ├─ Esh's Catalyst
-│ ├─ Flesh Catalyst
-│ ├─ Necrotic Catalyst
-│ ├─ Neural Catalyst
-│ ├─ Reaver Catalyst
-│ ├─ Sibilant Catalyst
-│ ├─ Skittering Catalyst
-│ ├─ Tul's Catalyst
-│ ├─ Uul-Netol's Catalyst
-│ └─ Xoph's Catalyst
+│ └─ Breachstone
 │
-└─ Refined
-  ├─ Refined Adaptive Catalyst
-  ├─ Refined Carapace Catalyst
-  ├─ Refined Chayula's Catalyst
-  ├─ Refined Esh's Catalyst
-  ├─ Refined Flesh Catalyst
-  ├─ Refined Necrotic Catalyst
-  ├─ Refined Neural Catalyst
-  ├─ Refined Reaver Catalyst
-  ├─ Refined Sibilant Catalyst
-  ├─ Refined Skittering Catalyst
-  ├─ Refined Tul's Catalyst
-  ├─ Refined Uul-Netol's Catalyst
-  └─ Refined Xoph's Catalyst
+├─ Catalysts
+│ ├─ Standard
+│ │ ├─ Flesh Catalyst
+│ │ ├─ Neural Catalyst
+│ │ ├─ Carapace Catalyst
+│ │ ├─ Adaptive Catalyst
+│ │ ├─ Xoph's Catalyst
+│ │ ├─ Tul's Catalyst
+│ │ ├─ Esh's Catalyst
+│ │ ├─ Uul-Netol's Catalyst
+│ │ ├─ Reaver Catalyst
+│ │ ├─ Sibilant Catalyst
+│ │ ├─ Chayula's Catalyst
+│ │ ├─ Skittering Catalyst
+│ │ └─ Necrotic Catalyst
+│ │
+│ └─ Refined
+│   ├─ Refined Flesh Catalyst
+│   ├─ Refined Neural Catalyst
+│   ├─ Refined Carapace Catalyst
+│   ├─ Refined Uul-Netol's Catalyst
+│   ├─ Refined Xoph's Catalyst
+│   ├─ Refined Tul's Catalyst
+│   ├─ Refined Esh's Catalyst
+│   ├─ Refined Chayula's Catalyst
+│   ├─ Refined Reaver Catalyst
+│   ├─ Refined Sibilant Catalyst
+│   ├─ Refined Skittering Catalyst
+│   ├─ Refined Adaptive Catalyst
+│   └─  Refined Necrotic Catalyst
+│
+└─ Pinnacle Fragments
+  └─ Breachlord Sac

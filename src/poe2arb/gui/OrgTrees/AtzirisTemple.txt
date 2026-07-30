@@ -1,20 +1,24 @@
 Atziri's Temple
 │
-├─ Standard
-│ ├─ Ancient Infuser
+├─ Currency
 │ ├─ Architect's Orb
-│ ├─ Core Destabiliser
 │ ├─ Crystallised Corruption
-│ ├─ Kamasa's Orb of Sacrifice
-│ ├─ Kopec's Orb of Sacrifice
-│ ├─ Orb of Extraction
+│ ├─ Core Destabiliser
+│ ├─ Ancient Infuser
+│ ├─ Vaal Cultivation Orb
 │ ├─ Yaomac's Orb of Sacrifice
-│ └─ Yugul's Orb of Sacrifice
+│ ├─ Kopec's Orb of Sacrifice
+│ ├─ Kamasa's Orb of Sacrifice
+│ ├─ Yugul's Orb of Sacrifice
+│ ├─ Vaal Armourer's Infuser
+│ ├─ Vaal Blacksmith's Infuser
+│ ├─ Vaal Arcanist's Infuser
+│ ├─ Vaal Catalysing Infuser
+│ ├─ Orb of Extraction
+│ └─ Vaal Siphoner
 │
-└─ Vaal
-  ├─ Vaal Arcanist's Infuser
-  ├─ Vaal Armourer's Infuser
-  ├─ Vaal Blacksmith's Infuser
-  ├─ Vaal Catalysing Infuser
-  ├─ Vaal Cultivation Orb
-  └─ Vaal Siphoner
+└─ Sould Cores
+  ├─ Guatelitzi's Thesis
+  ├─ Citaqualotl's Thesis
+  ├─ Jiquani's Thesis
+  └─ Quipolatl's Thesis

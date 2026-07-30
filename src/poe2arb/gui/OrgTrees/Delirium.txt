@@ -1,37 +1,50 @@
 Delirium
 │
-├─ Diluted
-│ ├─ Diluted Liquid Greed
-│ ├─ Diluted Liquid Guilt
-│ └─ Diluted Liquid Ire
+├─ Delirium
+│ ├─ Simulacrum Splinter
+│ ├─ Simulacrum
+│ ├─ Raven's Reflection
+│ └─ Raven-Touched Shard
 │
-├─ Ancient
-│ ├─ Ancient Concentrated Liquid Fear
-│ ├─ Ancient Concentrated Liquid Isolation
-│ ├─ Ancient Concentrated Liquid Suffering
-│ ├─ Ancient Diluted Liquid Greed
-│ ├─ Ancient Diluted Liquid Guilt
-│ ├─ Ancient Diluted Liquid Ire
-│ ├─ Ancient Liquid Despair
-│ ├─ Ancient Liquid Disgust
-│ ├─ Ancient Liquid Envy
-│ ├─ Ancient Liquid Paranoia
-│ ├─ Ancient Potent Liquid Contempt
-│ ├─ Ancient Potent Liquid Ferocity
-│ └─ Ancient Potent Liquid Melancholy
-│
-├─ Standard
-│ ├─ Liquid Despair
-│ ├─ Liquid Disgust
-│ ├─ Liquid Envy
-│ └─ Liquid Paranoia
-│
-├─ Concentrated
-│ ├─ Concentrated Liquid Fear
-│ ├─ Concentrated Liquid Isolation
-│ └─ Concentrated Liquid Suffering
-│
-└─ Potent
-  ├─ Potent Liquid Contempt
-  ├─ Potent Liquid Ferocity
-  └─ Potent Liquid Melancholy
+└─ Liquid Emaitions
+  ├─ Diluted
+  │ ├─ Diluted Liquid Ire
+  │ ├─ Diluted Liquid Guilt
+  │ └─ Diluted Liquid Greed
+  │
+  ├─ Standard
+  │ ├─ Liquid Paranoia
+  │ ├─ Liquid Envy
+  │ ├─ Liquid Disgust
+  │ └─ Liquid Despair
+  │
+  ├─ Concentrated
+  │ ├─ Concentrated Liquid Fear
+  │ ├─ Concentrated Liquid Suffering
+  │ └─ Concentrated Liquid Isolation
+  │
+  ├─ Ancient Diluted
+  │ ├─ Ancient Diluted Liquid Ire
+  │ ├─ Ancient Diluted Liquid Guilt
+  │ └─ Ancient Diluted Liquid Greed
+  │
+  ├─ Ancient Standard
+  │ ├─ Ancient Liquid Paranoia
+  │ ├─ Ancient Liquid Envy
+  │ ├─ Ancient Liquid Disgust
+  │ └─ Ancient Liquid Despair
+  │
+  ├─ Ancient Concentrated
+  │ ├─ Ancient Concentrated Liquid Fear
+  │ ├─ Ancient Concentrated Liquid Suffering
+  │ └─ Ancient Concentrated Liquid Isolation
+  │
+  ├─ Potent
+  │ ├─ Potent Liquid Melancholy
+  │ ├─ Potent Liquid Ferocity
+  │ └─ Potent Liquid Contempt
+  │
+  └─ Ancient Potent
+    ├─ Ancient Potent Liquid Melancholy
+    ├─ Ancient Potent Liquid Ferocity
+    └─ Ancient Potent Liquid Contempt

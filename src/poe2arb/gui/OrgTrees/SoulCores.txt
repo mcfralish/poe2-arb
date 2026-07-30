@@ -4,15 +4,15 @@ Soul Cores
 │ ├─ Atmohua's Soul Core of Retreat
 │ ├─ Cholotl's Soul Core of War
 │ ├─ Citaqualotl's Soul Core of Foulness
-│ ├─ Citaqualotl's Thesis
+│ ├─ 
 │ ├─ Estazunti's Soul Core of Convalescence
 │ ├─ Guatelitzi's Soul Core of Endurance
-│ ├─ Guatelitzi's Thesis
+│ ├─ 
 │ ├─ Hayoxi's Soul Core of Heatproofing
-│ ├─ Jiquani's Thesis
+│ ├─ 
 │ ├─ Opiloti's Soul Core of Assault
 │ ├─ Quipolatl's Soul Core of Flow
-│ ├─ Quipolatl's Thesis
+│ ├─ 
 │ ├─ Raven-Touched Shard
 │ ├─ Soul Core of Atmohua
 │ ├─ Soul Core of Azcapa

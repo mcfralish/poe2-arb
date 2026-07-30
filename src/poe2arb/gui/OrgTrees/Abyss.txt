@@ -1,20 +1,43 @@
 Abyss
 │
-├─ Ancient
-│ ├─ Ancient Collarbone
-│ ├─ Ancient Jawbone
-│ └─ Ancient Rib
+├─ Abyssal Bones
+│ ├─ Jawbone
+│ │ ├─ Gnawed Jawbone
+│ │ ├─ Preserved Jawbone
+│ │ └─ Ancient Jawbone
+│ │
+│ ├─ Rib
+│ │ ├─ Gnawed Rib
+│ │ ├─ Preserved Rib
+│ │ └─ Ancient Rib
+│ │
+│ ├─ Collarbone
+│ │ ├─ Gnawed Collarbone
+│ │ ├─ Preserved Collarbone
+│ │ ├─ Ancient Collarbone
+│ │ └─ Altered Collarbone
+│ │
+│ ├─ Cranium
+│ │ └─ Preserved Cranium
+│ │
+│ └─ Vertebrae
+│   └─ Preserved Vertebrae
 │
-└─ Standard
-  ├─ Altered Collarbone
-  ├─ Amanamu's Gaze
-  ├─ Gnawed Collarbone
-  ├─ Gnawed Jawbone
-  ├─ Gnawed Rib
-  ├─ Kurgal's Gaze
-  ├─ Preserved Collarbone
-  ├─ Preserved Cranium
-  ├─ Preserved Jawbone
-  ├─ Preserved Rib
-  ├─ Tecrod's Gaze
-  └─ Ulaman's Gaze
+├─ Omens
+│ ├─ Omen of Abyssal Echoes
+│ ├─ Omen of the Sovereign
+│ ├─ Omen of the Liege
+│ ├─ Omen of the Blackblooded
+│ ├─ Omen of Putrefaction
+│ ├─ Omen of Light
+│ ├─ Omen of Sinistral Necromancy
+│ └─ Omen of Dextral Necromancy
+│
+├─ Pinnacle Fragments
+│ └─ Kulemak's Invitation
+│
+└─ Abyssal Eyes
+   ├─ Amanamu's Gaze
+   ├─ Tecrod's Gaze
+   ├─ Kurgal's Gaze
+   └─ Ulaman's Gaze
