@@ -8,3 +8,4 @@ poe2arb.toml
 history.jsonl
 Zone.Identifier
 *:Zone.Identifier
+graphify-out/
