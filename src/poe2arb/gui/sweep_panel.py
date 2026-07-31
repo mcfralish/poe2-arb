@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..format import currency_label
 from ..listings import Band, rank_candidates, whisper_text
 from ..outcomes import Outcome
 from .bands import BAND_LABEL, BAND_TIP, legend_text, legend_tooltip
@@ -123,6 +124,12 @@ class SweepPanel(QWidget):
         # Candidate key -> the verdict the user reported, so the table can filter
         # down to what actually happened rather than only what was on offer.
         self._outcomes: dict[tuple, Outcome] = {}
+        # Candidates kept alive past the sweep that found them, because they
+        # were whispered. A listing you *bought* is by definition absent from
+        # the next sweep, so without this "Ones I bought" empties itself the
+        # moment the purchase succeeds — the exact case it exists to answer.
+        # Held out of "Everything found", which means what it says.
+        self._carried: dict[tuple, object] = {}
         # What sales are priced in. Shown per row because it decides the Profit
         # figure, and because after a session you need to know which currency a
         # given trade was costed against.
@@ -270,19 +277,37 @@ class SweepPanel(QWidget):
         waiting for the next sweep is a fifteen-minute round trip to see the
         effect of dragging a slider.
         """
-        self._candidates = rank_candidates(
-            list(result.candidates), risk_appetite=risk_appetite
-        )
-        self._attempt_ids.clear()
+        fresh = rank_candidates(list(result.candidates), risk_appetite=risk_appetite)
+        seen = {c.key for c in fresh}
+        # Anything whispered stays on the table even once the sweep stops
+        # finding it — which is what happens the moment a purchase succeeds.
+        self._carried = {
+            c.key: c
+            for c in list(self._candidates) + list(self._carried.values())
+            if c.key in self._attempt_ids and c.key not in seen
+        }
+        self._candidates = fresh + list(self._carried.values())
+        # `_attempt_ids` and `_outcomes` deliberately survive a sweep. They used
+        # to be cleared here, which emptied "Ones I messaged" and "Ones I
+        # bought" every ten minutes — so by the time a session was worth
+        # reviewing, both filters were blank (reported from the field
+        # 2026-07-31). They are keyed on candidate identity, not on row, so a
+        # re-found listing carries its own history back onto the new table; keys
+        # for listings this sweep didn't see simply match nothing.
         self._rechecked.clear()
-        self._outcomes.clear()
         self._last_copied = None
-        self._update_outcome_buttons()
         self._populate()
-        plausible = sum(1 for c in self._candidates if c.band is Band.PLAUSIBLE)
-        thin = sum(1 for c in self._candidates if c.band is Band.THIN)
-        ghosts = sum(1 for c in self._candidates if c.band is Band.GHOST)
-        best = max((c.profit_divines for c in self._candidates), default=0.0)
+        # After the rebuild, not before. Repopulating leaves the selection on
+        # whatever row index survives, without necessarily emitting a selection
+        # change — so a check run beforehand describes the previous table and
+        # can leave the verdict buttons live against a listing never whispered.
+        self._update_outcome_buttons()
+        # Counted over this sweep's own candidates, never the carried ones —
+        # the line describes what the pass found.
+        plausible = sum(1 for c in fresh if c.band is Band.PLAUSIBLE)
+        thin = sum(1 for c in fresh if c.band is Band.THIN)
+        ghosts = sum(1 for c in fresh if c.band is Band.GHOST)
+        best = max((c.profit_divines for c in fresh), default=0.0)
         # Same words as the legend below the table. These read as three unrelated
         # jargon terms otherwise, with nothing on screen tying them to the glyphs.
         parts = [
@@ -292,18 +317,15 @@ class SweepPanel(QWidget):
             f"{ghosts} too good to be true",
         ]
         if plausible:
-            parts.append(f"best is +{self._best_plausible():.2f} div")
+            best_plausible = max(
+                c.profit_divines for c in fresh if c.band is Band.PLAUSIBLE
+            )
+            parts.append(f"best is +{best_plausible:.2f} div")
         elif best:
             parts.append("nothing worth trying this time")
         if result.errors:
             parts.append(f"{len(result.errors)} item(s) failed — see the Log tab")
         self.set_status("  ·  ".join(parts))
-
-    def _best_plausible(self) -> float:
-        return max(
-            (c.profit_divines for c in self._candidates if c.band is Band.PLAUSIBLE),
-            default=0.0,
-        )
 
     def _populate(self) -> None:
         # Sorting off while filling: Qt re-sorts on every insert otherwise, which
@@ -382,7 +404,8 @@ class SweepPanel(QWidget):
             return candidate.key in self._attempt_ids
         if mode == SHOW_BOUGHT:
             return self._outcomes.get(candidate.key) is Outcome.FILLED
-        return True
+        # "Everything found" is the last pass, not the last pass plus history.
+        return candidate.key not in self._carried
 
     def _note_empty_filter(self, mode: str, shown: int) -> None:
         """Explain an empty table rather than leaving it looking broken.
@@ -454,9 +477,27 @@ class SweepPanel(QWidget):
         self.set_status(f"{verdict} — {c.item_name} from {c.listing.character or c.listing.account}.")
 
     def note_attempt(self, candidate, attempt_id: str) -> None:
-        """Remember which log row a copied whisper produced."""
+        """Remember which log row a copied whisper produced.
+
+        Called for whispers copied here *and* for ones taken from the
+        Opportunities queue, which is where almost all of them come from. Left
+        unwired, the two filters below only ever knew about the handful copied
+        from this table and read as permanently empty.
+        """
         self._attempt_ids[candidate.key] = attempt_id
+        if not any(c.key == candidate.key for c in self._candidates):
+            # Whispered from the queue, and this sweep never surfaced it here —
+            # add it so there is a row for the verdict to land on.
+            self._carried[candidate.key] = candidate
+            self._candidates = list(self._candidates) + [candidate]
+            self._populate()
+            return
         self._update_outcome_buttons()
+        self._apply_filter()
+
+    def note_outcome(self, candidate, outcome: Outcome) -> None:
+        """Record a verdict reached elsewhere, so the filters agree with it."""
+        self._outcomes[candidate.key] = outcome
         self._apply_filter()
 
     def set_settlement_currency(self, currency: str) -> None:
@@ -541,7 +582,7 @@ def _div(value: float) -> str:
 
 
 def _pay_label(currency: str) -> str:
-    return {"exalted": "ex", "divine": "div", "chaos": "chaos"}.get(currency, currency)
+    return currency_label(currency)
 
 
 def _age(seconds: float | None, afk: bool) -> str:

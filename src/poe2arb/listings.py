@@ -1,15 +1,19 @@
 """Cross-venue candidates: Bulk Item Exchange listings priced against the CE.
 
 The trade is: buy an underpriced listing by whisper on the Bulk Item Exchange,
-sell into the in-game Currency Exchange. Two field tests (TODO.md, "Negative
-results") shape everything here:
+sell into the in-game Currency Exchange. Two field tests (docs/FINDINGS.md,
+"Negative results") shape everything here:
 
-1. **Deep discounts do not fill.** Roughly ten whispers at gaps of 3.8x-12.5x
-   produced zero responses; both fills in 14 attempts came from the two
-   smallest gaps sampled (1.13x and 1.9x). A listing far below market is a
-   mistake, an abandonment, or already sold, and its continued visibility is
-   evidence it cannot be taken. Large gaps are therefore *demoted*, not
-   promoted, and `GHOST` exists to keep them visible without wasting whispers.
+1. **Deep discounts fill rarely, not never.** Corrected 2026-07-31 from 156
+   logged whispers; the earlier claim, from n=14 with ~10 large-gap attempts,
+   was that they never fill at all. Measured: plausible 21% (n=24), ghost
+   **2.3%** (n=131) — with fills at 3.92x and 10.94x, gaps the old reading
+   called uncatchable. Large gaps are still *demoted*, because plausible
+   returns ~3.5x more **per whisper sent** (0.40 div against 0.113), and
+   `GHOST` still keeps them visible rather than hidden. They are not worthless
+   though: ghosts earned 71% of the one profitable session's divines, because
+   the rare fill is a large one. See `FILL_PRIOR`, whose 0.0 for ghosts is the
+   part now known to be wrong.
 
 2. **Partial currency cannot be traded, so the settlement currency decides the
    haircut.** A 3.79 CE rate pays 3 if you take divines and 1636 exalted — 3.789
@@ -18,8 +22,10 @@ results") shape everything here:
    into 1.79. Profit is therefore floored to `sale_unit_divines`, never to a
    whole divine and never left unfloored.
 
-Both thresholds are provisional and configurable: they come from 16 whispers,
-and outcome logging is meant to replace them with a fitted curve.
+`max_gap_ratio` is now supported by the log — the fill-rate cliff sits between
+1.5x and 2x, where it already is. `min_gap_ratio` is not: only 2 whispers have
+ever been sent below 1.10x, and it is entangled with the reference price's own
+~26% error on thin items, so the two have to be fitted together or not at all.
 """
 
 from __future__ import annotations
@@ -209,6 +215,12 @@ class Candidate:
     # `Listing.price_per_unit` is in the seller's currency, and a sweep mixes
     # divine- and exalted-priced listings in one table.
     unit_price_divines: float = 0.0
+    # What the resale is settled in. Carried on the candidate rather than looked
+    # up from the config at display time because it is an *input* to
+    # `plan.profit_divines` — the floor is a whole unit of this — so a row must
+    # be able to say which currency its own profit figure was computed against,
+    # even after the setting has since been changed.
+    settle_currency: str = UNIT_CURRENCY
 
     @property
     def key(self) -> tuple:
@@ -241,6 +253,23 @@ class Candidate:
         return self.plan.profit_divines
 
     @property
+    def pay_total(self) -> float:
+        """What the whisper offers, in the seller's own currency.
+
+        The number the user has to recognise when a reply arrives — often hours
+        later, often in a language they don't read. `plan.cost_divines` is the
+        same money in a different unit, and showing only that meant a listing
+        whispered as "2412 exalted" appeared on screen as "5.6 div", which is
+        unrecognisable as the offer that was made.
+        """
+        return self.plan.lots * self.listing.pay_amount
+
+    @property
+    def pay_per_unit(self) -> float:
+        """Per-item price in the seller's currency, to match `pay_total`."""
+        return self.listing.price_per_unit
+
+    @property
     def affordable(self) -> bool:
         return self.plan.lots >= 1
 
@@ -262,6 +291,7 @@ def build_candidates(
     max_gap: float,
     bankroll: dict[str, float] | None = None,
     sale_unit_divines: float = 1.0,
+    settle_currency: str = UNIT_CURRENCY,
     min_profit_divines: float = 0.0,
 ) -> list[Candidate]:
     """Price every listing against the CE and keep the ones worth a whisper.
@@ -311,15 +341,25 @@ def build_candidates(
                 plan=plan,
                 band=classify(gap, min_gap=min_gap, max_gap=max_gap),
                 unit_price_divines=unit_price,
+                settle_currency=settle_currency,
             )
         )
     return out
 
 
-# Roughly how often a band has been seen to fill. Plausible is the only one
-# with fills behind it (2 of ~4 whispers); ghost is 0 of ~10; thin sits in
-# between with too few attempts to call. Deliberately coarse — these weight a
-# sort, they are not probabilities anyone should quote.
+# How much of a band's profit to believe when ranking. Relative weights, not
+# probabilities — do not quote them as fill rates.
+#
+# **Known wrong and not yet fixed (2026-07-31).** These three round numbers came
+# from 14 whispers. The log now holds 156, and says ghosts fill at 2.3% against
+# plausible's 21% — a ratio of ~0.11 on fill rate, or ~0.28 on divines per
+# whisper sent, which is the quantity this actually weights. Either way it is
+# not 0.0: ghosts earned 71% of the one profitable session's take. Thin is still
+# n=1 and uncallable.
+#
+# Deliberately left alone until fitted properly rather than nudged to a guess —
+# see TODO.md, "Fit the ranking to the outcome log", which also has to decide
+# which of the two ratios `fill_weight` is meant to express.
 FILL_PRIOR = {
     Band.PLAUSIBLE: 1.0,
     Band.THIN: 0.5,

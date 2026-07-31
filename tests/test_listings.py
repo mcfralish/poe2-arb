@@ -523,3 +523,62 @@ def test_ranking_is_stable_across_runs():
         order(rank_candidates(graded_candidates(), risk_appetite=0.5)) == once
         for _ in range(5)
     )
+
+
+class TestWhatTheWhisperOffered:
+    """`plan.cost_divines` is the same money in a unit that appears nowhere in
+    the trade. A listing whispered as "2412 exalted" showed as "5.6 div"."""
+
+    def _exalted_candidate(self, *, pay=2412.0, get=1.0, stock=9.0):
+        listing = Listing(
+            item_id="omen", account="Xiaolong#1", character="Xiaolong",
+            pay_currency="exalted", pay_amount=pay, get_amount=get, stock=stock,
+        )
+        [c] = build_candidates(
+            [listing], {"omen": 6.9, "divine": 1.0, "exalted": 0.00231},
+            {"omen": "Omen of Whittling"},
+            min_gap=1.05, max_gap=1.5, sale_unit_divines=0.00231,
+            settle_currency="exalted",
+        )
+        return c
+
+    def test_pay_total_is_the_sellers_currency_not_divines(self):
+        c = self._exalted_candidate()
+        assert c.pay_total == c.plan.lots * 2412.0
+        assert c.listing.pay_currency == "exalted"
+        # The same money, in the unit the maths is done in.
+        assert c.plan.cost_divines == pytest.approx(c.pay_total * 0.00231)
+
+    def test_pay_total_matches_the_amount_in_the_whisper(self):
+        """The one number the user has to recognise when a reply arrives."""
+        listing = Listing(
+            item_id="omen", account="X#1", character="X",
+            pay_currency="exalted", pay_amount=2412.0, get_amount=1.0, stock=9.0,
+            whisper="@X buy {0} for {1}",
+            item_whisper="{0} Omen", pay_whisper="{0} Exalted",
+        )
+        [c] = build_candidates(
+            [listing], {"omen": 6.9, "divine": 1.0, "exalted": 0.00231},
+            {"omen": "Omen of Whittling"},
+            min_gap=1.05, max_gap=1.5, sale_unit_divines=0.00231,
+        )
+        assert f"{c.pay_total:.0f} Exalted" in whisper_text(c)
+
+    def test_pay_per_unit_is_in_the_same_currency(self):
+        c = self._exalted_candidate(pay=4824.0, get=2.0)
+        assert c.pay_per_unit == 2412.0
+
+    def test_a_candidate_records_what_its_profit_was_floored_to(self):
+        """The setting can change afterwards; the row's own figure cannot."""
+        assert self._exalted_candidate().settle_currency == "exalted"
+
+    def test_it_defaults_to_the_pessimistic_reading(self):
+        listing = Listing(
+            item_id="omen", account="X#1", character="X",
+            pay_amount=5.0, get_amount=1.0, stock=2.0,
+        )
+        [c] = build_candidates(
+            [listing], {"omen": 6.9, "divine": 1.0}, {"omen": "Omen"},
+            min_gap=1.05, max_gap=1.5,
+        )
+        assert c.settle_currency == "divine"

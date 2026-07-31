@@ -338,3 +338,123 @@ def test_the_status_line_reports_both_sources(window):
     w._ce_prices_loaded({"chaos": 0.2})
     assert "Currency Exchange" in w.market.status.text()
     assert "poe.ninja" in w.market.status.text()
+
+
+# --- the hotkey acts on something whenever something is takeable ------------
+
+def _queued(window, *, chars=("A",)):
+    """A window with real candidates in its queue, offered and listed."""
+    from datetime import datetime, timedelta, timezone
+
+    from poe2arb.listings import Listing, build_candidates
+
+    t0 = datetime.now(timezone.utc)
+    cands = []
+    for n, char in enumerate(chars):
+        listing = Listing(
+            item_id="omen", account=f"{char}#1", character=char,
+            pay_amount=11.0 - n * 0.5, get_amount=1.0, stock=1.0, indexed=t0,
+            whisper=f"@{char} buy {{0}} for {{1}}",
+            item_whisper="{0} Thing", pay_whisper="{0} Coin",
+        )
+        cands += build_candidates(
+            [listing], {"omen": 12.0, "divine": 1.0}, {"omen": "Omen of Light"},
+            min_gap=1.05, max_gap=1.5, sale_unit_divines=0.0023,
+        )
+    window.trade_queue.submit(cands, t0)
+    window.trade_queue.tick(t0)
+    return t0
+
+
+def test_the_hotkey_takes_the_live_offer(window):
+    w = window()
+    _queued(w)
+    live = w.trade_queue.offered
+    w._hotkey_pressed()
+    assert live.attempt_id is not None
+    assert w.trade_queue.awaiting == [live]
+
+
+def test_the_hotkey_falls_back_to_the_oldest_ready_trade(window):
+    """The alert window is seconds and the listed window is minutes.
+
+    Most of the time nothing is live, and the key used to do nothing at all
+    while the panel was full of perfectly takeable rows.
+    """
+    from datetime import timedelta
+
+    w = window()
+    t0 = _queued(w, chars=("A",))
+    w.trade_queue.tick(t0 + timedelta(seconds=w.cfg.offer_window_s + 1))
+    assert w.trade_queue.offered is None
+    [ready] = w.trade_queue.available
+
+    w._hotkey_pressed()
+    assert w.trade_queue.awaiting == [ready]
+
+
+def test_the_hotkey_says_so_when_there_is_nothing_to_take(window):
+    w = window()
+    w._hotkey_pressed()
+    assert "nothing" in w.statusBar().currentMessage().lower() or \
+        "no trade" in w.statusBar().currentMessage().lower()
+
+
+# --- what the queue does reaches the Trades tab -----------------------------
+
+def test_a_whisper_taken_from_the_queue_shows_under_ones_i_messaged(window):
+    """Almost every whisper comes from the queue, not from the Trades table.
+
+    Unwired, both history filters read as permanently empty.
+    """
+    from poe2arb.gui.sweep_panel import SHOW_WHISPERED
+
+    w = window()
+    _queued(w)
+    live = w.trade_queue.offered
+    w._queue_take(live.id)
+    assert live.candidate.key in w.sweep._attempt_ids
+    assert w.sweep._matches_mode(live.candidate, SHOW_WHISPERED)
+
+
+def test_a_trade_marked_as_bought_shows_under_ones_i_bought(window):
+    from poe2arb.gui.sweep_panel import SHOW_BOUGHT
+    from poe2arb.outcomes import Outcome
+
+    w = window()
+    _queued(w)
+    live = w.trade_queue.offered
+    candidate = live.candidate
+    w._queue_take(live.id)
+    w._queue_outcome(live.id, Outcome.FILLED)
+    assert w.sweep._outcomes[candidate.key] is Outcome.FILLED
+    assert w.sweep._matches_mode(candidate, SHOW_BOUGHT)
+
+
+def test_declining_stops_a_later_sweep_re_offering_it(window):
+    w = window()
+    t0 = _queued(w)
+    live = w.trade_queue.offered
+    candidate = live.candidate
+    w._queue_dismiss(live.id)
+    assert w.trade_queue.submit([candidate], t0) == 0
+
+
+# --- neither pane of the Opportunities tab can be lost ----------------------
+
+def test_the_opportunities_panes_cannot_be_collapsed(window):
+    """A collapsed pane is saved, so a stray drag survived restarts with
+    nothing on screen to explain it but a handle jammed against the edge."""
+    w = window()
+    assert not w.ops_split.childrenCollapsible()
+    assert not w.queue_panel.split.childrenCollapsible()
+
+
+def test_a_saved_collapsed_split_is_not_restored(window, tmp_path):
+    from poe2arb.gui.ui_state import save_ui_state, ui_state_path
+
+    cache = tmp_path / "cache"
+    cache.mkdir(parents=True, exist_ok=True)
+    save_ui_state(ui_state_path(cache), {"ops_split": [0, 476]})
+    w = window()
+    assert min(w.ops_split.sizes()) > 0

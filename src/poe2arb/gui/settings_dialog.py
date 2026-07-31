@@ -124,6 +124,17 @@ class SettingsDialog(QDialog):
         self.sound.setChecked(cfg.alert_sound)
         form.addRow("", self.sound)
 
+        self.always_on_top = QCheckBox("Keep this window above other windows")
+        self.always_on_top.setChecked(cfg.always_on_top)
+        self.always_on_top.setToolTip(
+            "Float the window over everything else, including the game.\n\n"
+            "Worth turning on while you're trading heavily and want the queue\n"
+            "visible without alt-tabbing. Leave it off otherwise — a window that\n"
+            "won't go behind anything is in the way the rest of the time.\n\n"
+            "Full-screen games ignore this; use borderless windowed."
+        )
+        form.addRow("", self.always_on_top)
+
         self._section(form, "Finding trades")
 
         self.sweep_items = QSpinBox()
@@ -205,25 +216,34 @@ class SettingsDialog(QDialog):
         )
         form.addRow("Trade alert lasts", self.offer_window)
 
+        # Minutes, not seconds. Both of these are set in multiples of a minute
+        # in practice, and reading "600 s" off a spin box to work out whether it
+        # is long enough is arithmetic the dialog should be doing (reported from
+        # the field 2026-07-31). The config stays in seconds — every consumer is
+        # a timer — so the conversion lives here and nowhere else.
         self.available_ttl = self._dspin(
-            cfg.available_ttl_s, 15.0, 3600.0, 15.0, " s", decimals=0
+            cfg.available_ttl_s / 60.0, 0.5, 60.0, 0.5, " min", decimals=1
         )
         self.available_ttl.setToolTip(
             "How long a trade stays in Ready to whisper before it's dropped.\n\n"
+            "Counted from when it first appears, so it gets the whole of this\n"
+            "however long its alert was up for.\n\n"
             "Other people are buying these too, so an old offer has usually gone\n"
             "already and messaging about it just wastes the whisper."
         )
         form.addRow("Trade stays listed for", self.available_ttl)
 
         self.awaiting_timeout = self._dspin(
-            cfg.awaiting_timeout_s, 0.0, 3600.0, 30.0, " s", decimals=0
+            cfg.awaiting_timeout_s / 60.0, 0.0, 60.0, 1.0, " min", decimals=0
         )
         self.awaiting_timeout.setSpecialValueText("never")
         self.awaiting_timeout.setToolTip(
             "After you send a whisper, how long the app waits for you to say what\n"
             "happened before writing it down as no reply.\n\n"
             "Silence is the usual answer, so this saves you clicking. Set it to\n"
-            "never if you'd rather record every one yourself."
+            "never if you'd rather record every one yourself.\n\n"
+            "It also frees the money up: currency promised to a whisper is held\n"
+            "against your bankroll until the trade is answered for."
         )
         form.addRow("Mark as no reply after", self.awaiting_timeout)
 
@@ -288,9 +308,10 @@ class SettingsDialog(QDialog):
         self.safety.setValue(round(d.rate_limit_safety_fraction * 100))
         self.retention.setValue(d.history_retention_days)
         self.sound.setChecked(d.alert_sound)
+        self.always_on_top.setChecked(d.always_on_top)
         self.offer_window.setValue(d.offer_window_s)
-        self.available_ttl.setValue(d.available_ttl_s)
-        self.awaiting_timeout.setValue(d.awaiting_timeout_s)
+        self.available_ttl.setValue(d.available_ttl_s / 60.0)
+        self.awaiting_timeout.setValue(d.awaiting_timeout_s / 60.0)
         self.hotkey_enabled.setChecked(d.trade_hotkey_enabled)
         self.hotkey.set_binding(d.trade_hotkey)
         self.sweep_items.setValue(d.sweep_items)
@@ -441,9 +462,10 @@ class SettingsDialog(QDialog):
             request_interval_s=self.request_interval.value(),
             history_retention_days=self.retention.value(),
             alert_sound=self.sound.isChecked(),
+            always_on_top=self.always_on_top.isChecked(),
             offer_window_s=self.offer_window.value(),
-            available_ttl_s=self.available_ttl.value(),
-            awaiting_timeout_s=self.awaiting_timeout.value(),
+            available_ttl_s=self.available_ttl.value() * 60.0,
+            awaiting_timeout_s=self.awaiting_timeout.value() * 60.0,
             trade_hotkey=self.hotkey.binding(),
             trade_hotkey_enabled=self.hotkey_enabled.isChecked(),
             sweep_items=self.sweep_items.value(),

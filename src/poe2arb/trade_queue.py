@@ -17,8 +17,18 @@ short on purpose: it gates how fast the *queue* drains, not how long the user
 has to decide, because an unclaimed offer is not lost — it just stops
 interrupting.
 
-**AVAILABLE** is where an unclaimed offer lands, for `available_ttl_s`. Still
-perfectly good, no longer worth a second interruption.
+**AVAILABLE** is where an unclaimed offer lands. Still perfectly good, no longer
+worth a second interruption.
+
+`available_ttl_s` is measured from the moment a trade is **first shown**, not
+from the moment it stops being the live offer, and `expires_at` is set once at
+that point rather than being restarted on the transition. Reported from the
+field 2026-07-31: the alert window was being spent before the listed window
+began, so "trade stays listed for 5 minutes" meant 20 seconds of alert plus five
+minutes, and the countdown a row showed while live described the alert rather
+than when it would actually drop off. A row now gets its configured time in
+*Ready to whisper* whatever happened to it beforehand, and the Expires column
+means the same thing on every row.
 
 **AWAITING** is the honest cost of the whole scheme: the app cannot see whether
 a seller replied, so the user has to say. It gets its own section rather than
@@ -61,8 +71,14 @@ class QueuedTrade:
     state: QueueState
     queued_at: datetime
     offered_at: datetime | None = None
-    # When the current state lapses. Only meaningful for OFFERED and AVAILABLE.
+    # When this row drops off the list. Set once, when the trade is first shown,
+    # and not touched again as it moves from OFFERED to AVAILABLE — the two
+    # states are one visible lifetime with one deadline.
     expires_at: datetime | None = None
+    # When the *alert* stops: the toast has been up long enough and the hotkey
+    # should move on. Strictly shorter than `expires_at`, and deliberately not
+    # shown anywhere — the user has no decision that hangs on it.
+    alert_until: datetime | None = None
     taken_at: datetime | None = None
     attempt_id: str | None = None
     outcome: Outcome | None = None
@@ -120,6 +136,16 @@ class TradeQueue:
         # strictly a cost. They stay visible in the Trades tab either way.
         self.queue_ghosts = queue_ghosts
         self._trades: list[QueuedTrade] = []
+        # Keys the user actively declined. Never re-offered for the life of the
+        # process: a sweep every ten minutes re-finds the same listing, and
+        # being shown a trade you have already said no to costs exactly as much
+        # attention as a new one while carrying none of the information.
+        # Deliberately not persisted — the reason for declining is usually "not
+        # right now", which does not survive a restart.
+        self._declined: set[tuple] = set()
+        # What the user holds, per currency. Empty (or a zero) means
+        # unconstrained in that currency — see `_affordable`.
+        self._bankroll: dict[str, float] = {}
 
     # --- inspection --------------------------------------------------------
 
@@ -129,26 +155,37 @@ class TradeQueue:
 
     @property
     def available(self) -> list[QueuedTrade]:
-        """Takeable now: the live offer first, then the rest best-first.
+        """Takeable now, oldest first — the newest arrival lands at the bottom.
 
-        The live one is pinned to the top even when a lapsed trade is worth
-        more. It is the one the hotkey acts on and the one the countdown
-        belongs to, so burying it under a better row would be actively
-        misleading about what pressing the key does.
+        Presentation order, not ranking order, and that is the point. This list
+        is read while playing, so a row that jumps position between one glance
+        and the next is a row you click by mistake. Appending at the bottom
+        leaves everything already on screen exactly where it was, and the row
+        nearest expiry is the one at the top where it can be dealt with first.
+
+        The live offer is *not* pinned to the top any more. It sorts to the
+        bottom like anything else, carries the ● marker, and is named in the
+        headline above the table — which is where someone mid-map is looking.
         """
         rows = [
             t for t in self._trades
             if t.state in (QueueState.OFFERED, QueueState.AVAILABLE)
         ]
-        return sorted(
-            rows, key=lambda t: (t.state is not QueueState.OFFERED, *_ranking_key(t))
-        )
+        return sorted(rows, key=lambda t: (t.offered_at or t.queued_at, t.id))
 
     @property
     def awaiting(self) -> list[QueuedTrade]:
-        """Whispered, waiting on the user. Oldest first — those went cold soonest."""
+        """Whispered, waiting on the user. **Newest first.**
+
+        The opposite order to `available`, on purpose. A reply arrives seconds
+        to minutes after the whisper, so the row you need is almost always the
+        one you just sent; the ones at the bottom are the ones going cold, and
+        they self-resolve without being touched.
+        """
         rows = [t for t in self._trades if t.state is QueueState.AWAITING]
-        return sorted(rows, key=lambda t: (t.taken_at or t.queued_at, t.id))
+        return sorted(
+            rows, key=lambda t: (t.taken_at or t.queued_at, t.id), reverse=True
+        )
 
     @property
     def pending(self) -> list[QueuedTrade]:
@@ -156,6 +193,48 @@ class TradeQueue:
 
     def get(self, trade_id: str) -> QueuedTrade | None:
         return next((t for t in self._trades if t.id == trade_id), None)
+
+    # --- the bankroll ledger -----------------------------------------------
+
+    def set_bankroll(self, pots: dict[str, float]) -> None:
+        """What the user holds, by currency id. 0 or absent = unconstrained."""
+        self._bankroll = dict(pots)
+
+    def committed(self) -> dict[str, float]:
+        """Currency already promised to whispers still awaiting an answer.
+
+        `build_candidates` sizes each trade against the *whole* bankroll, which
+        is right for one trade in isolation and wrong for a queue: with 500
+        exalted you were offered, and could accept, four separate 400-exalted
+        trades. Reported from the field 2026-07-31 as costs above bankroll.
+        Money is treated as spent from the moment the whisper is copied —
+        recovering it needs the user to say the trade fell through, which is
+        exactly what the awaiting section asks them for.
+        """
+        spent: dict[str, float] = {}
+        for t in self._trades:
+            if t.state is not QueueState.AWAITING:
+                continue
+            currency = t.candidate.listing.pay_currency
+            spent[currency] = spent.get(currency, 0.0) + t.candidate.pay_total
+        return spent
+
+    def remaining(self) -> dict[str, float]:
+        """Bankroll left to spend, for every capped currency."""
+        spent = self.committed()
+        return {
+            currency: max(0.0, pot - spent.get(currency, 0.0))
+            for currency, pot in self._bankroll.items()
+            if pot > 0
+        }
+
+    def affordable(self, trade: QueuedTrade) -> bool:
+        """Whether this trade still fits in what is left of its currency."""
+        currency = trade.candidate.listing.pay_currency
+        pot = self._bankroll.get(currency, 0.0)
+        if pot <= 0:
+            return True  # unconstrained: the user never told us what they hold
+        return trade.candidate.pay_total <= self.remaining().get(currency, 0.0) + 1e-9
 
     # --- filling -----------------------------------------------------------
 
@@ -165,7 +244,8 @@ class TradeQueue:
         Deduplicated against every trade that isn't finished, including ones the
         user already whispered: a sweep repeated ten minutes later will re-find
         the same listing, and re-offering it would have them message the same
-        seller twice.
+        seller twice. Declined keys are filtered the same way, for the same
+        reason — see `_declined`.
         """
         now = now or _now()
         known = {
@@ -174,7 +254,7 @@ class TradeQueue:
         }
         added = 0
         for c in candidates:
-            if c.key in known:
+            if c.key in known or c.key in self._declined:
                 continue
             if c.band is Band.GHOST and not self.queue_ghosts:
                 continue
@@ -200,13 +280,19 @@ class TradeQueue:
         result = QueueTick()
 
         for t in self._trades:
+            # The alert lapsing and the row expiring are separate clocks, and a
+            # short listing window can retire a trade that is still the live
+            # offer — so both are checked, in that order, on the same tick.
+            if (
+                t.state is QueueState.OFFERED
+                and t.alert_until is not None
+                and now >= t.alert_until
+            ):
+                t.state = QueueState.AVAILABLE
+                result.lapsed_to_available.append(t)
             if t.expires_at is None or now < t.expires_at:
                 continue
-            if t.state is QueueState.OFFERED:
-                t.state = QueueState.AVAILABLE
-                t.expires_at = now + timedelta(seconds=self.available_ttl_s)
-                result.lapsed_to_available.append(t)
-            elif t.state is QueueState.AVAILABLE:
+            if t.state in (QueueState.OFFERED, QueueState.AVAILABLE):
                 t.state = QueueState.EXPIRED
                 t.expires_at = None
                 result.expired.append(t)
@@ -223,12 +309,26 @@ class TradeQueue:
             if nxt is not None:
                 nxt.state = QueueState.OFFERED
                 nxt.offered_at = now
-                nxt.expires_at = now + timedelta(seconds=self.offer_window_s)
+                nxt.alert_until = now + timedelta(seconds=self.offer_window_s)
+                # The listed window starts here and is never restarted. Floored
+                # at the alert window so a short TTL cannot retire a trade
+                # before its own toast has finished.
+                nxt.expires_at = now + timedelta(
+                    seconds=max(self.available_ttl_s, self.offer_window_s)
+                )
                 result.newly_offered = nxt
         return result
 
     def _next_to_offer(self) -> QueuedTrade | None:
-        pending = self.pending
+        """Best pending trade the user can still pay for.
+
+        Affordability is checked here rather than in `build_candidates` because
+        it depends on what is *already* awaiting a reply, which the sweep that
+        built the candidate could not know. An unaffordable trade stays QUEUED
+        rather than being dropped: a "no reply" on an outstanding whisper frees
+        the money up again, and at that point it becomes offerable.
+        """
+        pending = [t for t in self.pending if self.affordable(t)]
         if not pending:
             return None
         return min(pending, key=_ranking_key)
@@ -265,14 +365,31 @@ class TradeQueue:
         t.outcome = outcome
         return t
 
-    def drop(self, trade_id: str) -> bool:
-        """Dismiss a trade the user doesn't want, without recording an attempt."""
+    def drop(self, trade_id: str, *, remember: bool = False) -> bool:
+        """Dismiss a trade the user doesn't want, without recording an attempt.
+
+        `remember` marks the offer as declined for the rest of the session, so
+        later sweeps stop re-finding it. Set it for a deliberate Decline and
+        leave it off for a drop the app performed itself — a listing with no
+        whisper template, say — which is a fact about this fetch rather than a
+        judgement the user made.
+        """
         t = self.get(trade_id)
         if t is None or t.state in (QueueState.AWAITING, QueueState.RESOLVED):
             return False
+        if remember:
+            self._declined.add(t.key)
         t.state = QueueState.EXPIRED
         t.expires_at = None
         return True
+
+    def decline(self, trade_id: str) -> bool:
+        """Drop this trade and never offer it again this session."""
+        return self.drop(trade_id, remember=True)
+
+    @property
+    def declined(self) -> frozenset[tuple]:
+        return frozenset(self._declined)
 
     def cancel_pending(self) -> int:
         """Discard the un-offered backlog. Returns how many were dropped.

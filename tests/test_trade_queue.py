@@ -121,13 +121,33 @@ def test_available_trades_expire_eventually():
     assert q.available == []
 
 
-def test_seconds_left_counts_down():
-    q = queue()
+def test_seconds_left_counts_down_to_the_listed_deadline_not_the_alert():
+    """One clock, set when the trade is first shown and never restarted.
+
+    `expires_at` is when the row leaves the list; the alert window is a
+    separate, shorter thing the user has no decision hanging on. Showing the
+    alert countdown in the Expires column meant a live offer claimed 60 seconds
+    of life and then silently gained ten minutes more.
+    """
+    q = queue()   # 60s alert, 600s listed
+    q.submit([cand()], T0)
+    t = q.tick(T0).newly_offered
+    assert t.seconds_left(T0) == pytest.approx(600.0)
+    assert t.seconds_left(T0 + timedelta(seconds=45)) == pytest.approx(555.0)
+    # Lapsing out of the alert does not restart or shorten it.
+    q.tick(T0 + timedelta(seconds=61))
+    assert t.state is QueueState.AVAILABLE
+    assert t.seconds_left(T0 + timedelta(seconds=61)) == pytest.approx(539.0)
+    assert t.seconds_left(T0 + timedelta(seconds=900)) == 0.0
+
+
+def test_the_listed_window_is_never_shorter_than_the_alert():
+    """A short TTL must not retire a trade whose own toast is still up."""
+    q = TradeQueue(offer_window_s=60.0, available_ttl_s=15.0)
     q.submit([cand()], T0)
     t = q.tick(T0).newly_offered
     assert t.seconds_left(T0) == pytest.approx(60.0)
-    assert t.seconds_left(T0 + timedelta(seconds=45)) == pytest.approx(15.0)
-    assert t.seconds_left(T0 + timedelta(seconds=90)) == 0.0
+    assert q.tick(T0 + timedelta(seconds=30)).expired == []
 
 
 # --- taking and resolving --------------------------------------------------
@@ -187,15 +207,19 @@ def test_only_awaiting_trades_can_be_resolved():
     assert q.resolve(offered.id, Outcome.FILLED) is None
 
 
-def test_awaiting_is_oldest_first():
-    """Whatever went cold longest ago is the thing most in need of an answer."""
+def test_awaiting_is_newest_first():
+    """A reply is almost always to the whisper just sent, so put that on top.
+
+    The opposite order to `available`, deliberately: the rows going cold at the
+    bottom resolve themselves without being touched.
+    """
     q = queue()
     q.submit([cand(char="A"), cand(char="B")], T0)
     q.tick(T0)
     first = q.take_offered(T0 + timedelta(seconds=1))
     q.tick(T0 + timedelta(seconds=2))
     second = q.take_offered(T0 + timedelta(seconds=30))
-    assert [t.id for t in q.awaiting] == [first.id, second.id]
+    assert [t.id for t in q.awaiting] == [second.id, first.id]
 
 
 # --- deduplication ---------------------------------------------------------
@@ -289,8 +313,13 @@ def test_forget_resolved_keeps_live_work():
     assert len(q.available) == 1
 
 
-def test_the_live_offer_is_listed_first_even_when_worth_less():
-    """It's what the hotkey acts on; burying it would misrepresent the key."""
+def test_the_newest_offer_lands_at_the_bottom_of_ready():
+    """Presentation order, not ranking order: nothing already on screen moves.
+
+    The live offer used to be pinned to the top, which reshuffled the list every
+    alert window — and a row that moves between the glance and the click is a
+    row clicked by mistake. It keeps the ● marker and the headline instead.
+    """
     q = queue()
     q.submit([cand(char="Rich", pay=8.0)], T0)
     q.tick(T0)
@@ -298,9 +327,8 @@ def test_the_live_offer_is_listed_first_even_when_worth_less():
     q.submit([cand(char="Poor", pay=11.5)], T0 + timedelta(seconds=62))
     q.tick(T0 + timedelta(seconds=62))        # Poor becomes the live offer
     rows = q.available
-    assert rows[0].state is QueueState.OFFERED
-    assert rows[0].candidate.listing.character == "Poor"
-    assert rows[1].candidate.profit_divines > rows[0].candidate.profit_divines
+    assert [t.candidate.listing.character for t in rows] == ["Rich", "Poor"]
+    assert rows[-1].state is QueueState.OFFERED
 
 
 # --- the three windows are independent -------------------------------------
@@ -390,3 +418,89 @@ def test_the_shipped_windows_are_ordered_sensibly():
 
     cfg = Config()
     assert cfg.offer_window_s < cfg.available_ttl_s < cfg.awaiting_timeout_s
+
+
+# --- declining is remembered for the session -------------------------------
+
+def test_a_declined_trade_is_not_re_offered_by_a_later_sweep():
+    """A sweep every ten minutes re-finds the same listing.
+
+    Being shown a trade you already said no to costs the same attention as a
+    new one and carries none of the information.
+    """
+    q = queue()
+    c = cand(char="Nope")
+    q.submit([c], T0)
+    offered = q.tick(T0).newly_offered
+    assert q.decline(offered.id) is True
+
+    assert q.submit([c], T0 + timedelta(minutes=10)) == 0
+    assert q.tick(T0 + timedelta(minutes=10)).newly_offered is None
+    assert q.available == []
+
+
+def test_a_drop_the_app_made_itself_is_not_a_decline():
+    """Dropping a listing with no whisper template is a fact about the fetch.
+
+    It is not a judgement the user made, so it must not suppress the listing
+    if a later sweep returns it complete.
+    """
+    q = queue()
+    c = cand(char="Silent")
+    q.submit([c], T0)
+    offered = q.tick(T0).newly_offered
+    assert q.drop(offered.id) is True
+    assert q.declined == frozenset()
+    assert q.submit([c], T0 + timedelta(minutes=10)) == 1
+
+
+# --- the bankroll is a total, not a per-trade allowance --------------------
+
+def test_currency_promised_to_a_whisper_is_not_offered_twice():
+    """With 500 exalted you could accept four separate 400-exalted trades.
+
+    Each was affordable on its own, because the sweep sizes every candidate
+    against the whole bankroll and cannot know what is already outstanding.
+    """
+    q = queue()
+    q.set_bankroll({"divine": 20.0})
+    q.submit([cand(char="A", pay=11.0), cand(char="B", pay=11.5)], T0)
+    first = q.tick(T0).newly_offered
+    q.take(first.id, T0)
+    assert q.committed() == {"divine": 11.0}
+    assert q.remaining() == {"divine": 9.0}
+
+    # B costs 11.5 and only 9 is left, so it is not promoted.
+    assert q.tick(T0 + timedelta(seconds=1)).newly_offered is None
+    assert len(q.pending) == 1
+
+
+def test_freeing_the_money_makes_the_held_back_trade_offerable():
+    """It stays QUEUED rather than being dropped, so a no-reply revives it."""
+    q = queue()
+    q.set_bankroll({"divine": 20.0})
+    q.submit([cand(char="A", pay=11.0), cand(char="B", pay=11.5)], T0)
+    first = q.tick(T0).newly_offered
+    q.take(first.id, T0)
+    assert q.tick(T0 + timedelta(seconds=1)).newly_offered is None
+
+    q.resolve(first.id, Outcome.NO_REPLY)
+    assert q.committed() == {}
+    offered = q.tick(T0 + timedelta(seconds=2)).newly_offered
+    assert offered is not None
+    assert offered.candidate.listing.character == "B"
+
+
+def test_an_unset_pot_is_unconstrained():
+    """0 means "I didn't say", not "I have nothing" — capping it would hide trades."""
+    q = queue()
+    q.set_bankroll({"exalted": 500.0})     # nothing said about divine
+    q.submit([cand(char="A", pay=11.0)], T0)    # a divine-priced listing
+    first = q.tick(T0).newly_offered
+    assert first is not None
+    # And it stays unconstrained however much of it is already outstanding.
+    q.take(first.id, T0)
+    assert q.committed() == {"divine": 11.0}
+    assert q.remaining() == {"exalted": 500.0}
+    q.submit([cand(char="B", pay=11.5)], T0)
+    assert q.tick(T0 + timedelta(seconds=1)).newly_offered is not None

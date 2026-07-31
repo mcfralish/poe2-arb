@@ -234,12 +234,14 @@ def test_settings_changes_reach_the_running_queue(qapp, monkeypatch):
             offer_window_s=30.0, available_ttl_s=120.0, awaiting_timeout_s=600.0,
         ),
         trade_queue=SimpleNamespace(
-            offer_window_s=15.0, available_ttl_s=60.0, awaiting_timeout_s=300.0
+            offer_window_s=15.0, available_ttl_s=60.0, awaiting_timeout_s=300.0,
+            set_bankroll=lambda *_a: None,
         ),
         _hotkey=GlobalHotkey(),
         queue_panel=panel,
         sweep=panel,
         _log=lambda *_a: None,
+        _apply_always_on_top=lambda: None,
     )
     before = Config(trade_hotkey="ctrl+alt+d", trade_hotkey_enabled=True)
 

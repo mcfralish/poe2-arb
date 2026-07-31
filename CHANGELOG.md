@@ -6,6 +6,69 @@ says what changed for you and, where it matters, why.
 Versions follow `MAJOR.MINOR.PATCH`. Until 1.0 the minor number moves for
 anything user-visible.
 
+## [0.6.0] — 2026-07-31
+
+The second field test, and the first profitable one — about 20 divines cleared. Almost
+everything here comes from that session. The pricing warning below still stands.
+
+> **Prices are still optimistic on rarely-traded items.** Nothing in this release
+> changes the arithmetic; see the 0.5.0 note. Liquid currency is fine, thin items are
+> not, and the *uncertain* rating says so.
+
+### Fixed
+
+- **The global hotkey did nothing when pressed.** It registered, said so in the log,
+  and then silently ignored every keypress — the code that reads Windows key events
+  was missing an import, and the resulting error was being swallowed. Fixed, and if
+  it ever fails again the app now says so instead of going quiet.
+- **The hotkey now works whenever a trade is takeable**, not only during the few
+  seconds a new trade is flashing. If nothing is flashing it takes the top row of
+  *Ready to whisper* — the one closest to expiring.
+- **Trades could cost more than you have.** Each one was sized against your whole
+  bankroll, so with 500 exalted you could be offered, and accept, four separate
+  400-exalted trades. Currency promised to a whisper you're still waiting on is now
+  held back, and shown next to the bankroll boxes. Say what happened — or let it time
+  out — and the money frees up again.
+- **"Ones I messaged" and "Ones I bought" on the Trades tab were always empty.** They
+  only knew about whispers copied from that table, and almost every whisper comes from
+  the Opportunities queue instead. They also forgot everything on each new pass — and
+  a listing you *bought* is gone from the next pass by definition. Both now follow
+  whatever you actually did, and keep it for the session.
+- **Ready to whisper now gets the full time you set.** The few seconds a trade spent
+  flashing were being spent out of its listed time, and the countdown on a flashing
+  row was describing the alert rather than when it would really drop off. One clock
+  now, meaning the same thing on every row.
+- **Neither half of the Opportunities tab can be lost any more.** Dragging a divider
+  all the way shut collapsed a section to nothing and remembered it, so it stayed
+  collapsed after a restart with nothing to explain it.
+- **The verdict buttons on the Trades tab could stay live after a new pass**, against
+  a listing you had never messaged.
+
+### Changed
+
+- **Costs are shown in the currency the seller asked for**, everywhere — the queue,
+  the alert, the log, the status bar. A listing whispered as "2412 exalted" used to
+  appear as "5.6 div", which is unrecognisable as the offer you made when a reply
+  arrives an hour later in a language you don't read. Both tables now also show the
+  price per item and which currency the trade settles in.
+- **Ready to whisper puts new trades at the bottom; Waiting on a reply puts them at
+  the top.** Ready is read top-down and shouldn't reshuffle under your cursor; a reply
+  is almost always to the whisper you just sent.
+- **Declining a trade means it won't come back.** It used to reappear on the next
+  pass, ten minutes later.
+- **Copy again** on a whisper you're waiting on, for when a seller answers and you
+  need the offer repeated. It doesn't count as a second attempt.
+- **The two Opportunities sections have a divider between them**, like Quick Lookup.
+- **Quick Lookup swaps round.** "1 Omen of Whittling is worth 2,987 ex" or "1 div is
+  worth 0.145 Omens" — the second is how you size a purchase. One side is still always
+  a currency the Exchange has depth in; this is not the any-pair converter that was
+  removed in 0.4.0. It also can't be squeezed shorter than its price note now.
+- **Hovering any button in a row highlights that row**, so it's clear which trade
+  Accept, Decline or a verdict is about to act on.
+- **Settings: "Trade stays listed for" and "Mark as no reply after" are in minutes.**
+- **Settings: keep the window above other windows**, for heavy trading sessions.
+  Off by default. Use borderless windowed — full-screen games ignore it.
+
 ## [0.5.0] — 2026-07-30
 
 The first real field test. Two trades went through and both lost money, which found

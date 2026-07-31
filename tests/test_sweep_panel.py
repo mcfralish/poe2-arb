@@ -297,8 +297,23 @@ def test_reporting_emits_the_attempt_id_and_verdict(qapp):
     assert "traded" in p.status.text().lower()
 
 
-def test_a_new_sweep_clears_stale_attempt_state(qapp):
-    """Buttons must not stay live against candidates from the previous sweep."""
+def _select_seller(p, qapp, name: str):
+    """Select the row for a seller, whatever the current sort put it at."""
+    for row in range(p.table.rowCount()):
+        c = p._candidate_at(row)
+        if c is not None and c.listing.character == name:
+            p.table.selectRow(row)
+            qapp.processEvents()
+            return c
+    raise AssertionError(f"no row for {name!r}")
+
+
+def test_a_new_sweep_leaves_an_unwhispered_candidate_without_a_verdict(qapp):
+    """Buttons follow the attempt, not the selection.
+
+    Reporting an outcome against a listing you never messaged would poison the
+    data the ranking is meant to learn from.
+    """
     from poe2arb.outcomes import Outcome
 
     p = panel(qapp, result_from([listing("omen", 11.0, char="Real")]))
@@ -310,8 +325,7 @@ def test_a_new_sweep_clears_stale_attempt_state(qapp):
     assert p._outcome_btns[Outcome.FILLED].isEnabled()
 
     p.set_result(result_from([listing("omen", 11.5, char="Fresh")]))
-    p.table.selectRow(0)
-    qapp.processEvents()
+    _select_seller(p, qapp, "Fresh")
     assert not p._outcome_btns[Outcome.FILLED].isEnabled()
 
 
@@ -469,17 +483,33 @@ def test_an_empty_filter_explains_itself(qapp):
     assert "marked as Traded" in p.status.text()
 
 
-def test_a_new_sweep_forgets_the_previous_verdicts(qapp):
-    """Outcomes belong to the listings they were reported against."""
+def test_a_whispered_listing_survives_the_next_sweep(qapp):
+    """Otherwise "Ones I bought" empties itself the moment a purchase succeeds.
+
+    A listing you bought is by definition gone from the next sweep, and the
+    verdicts were being cleared alongside it — so both history filters were
+    blank by the time a session was worth reviewing.
+    """
+    from poe2arb.gui.sweep_panel import SHOW_ALL, SHOW_BOUGHT
     from poe2arb.outcomes import Outcome
 
     p = panel(qapp, result_from([listing("omen", 11.0, char="A")]))
     c = p._candidates[0]
     p.note_attempt(c, "a1")
-    p._outcomes[c.key] = Outcome.FILLED
+    p.note_outcome(c, Outcome.FILLED)
+
     p.set_result(result_from([listing("omen", 11.0, char="B")]))
-    assert p._outcomes == {}
-    assert p._attempt_ids == {}
+    assert p._outcomes[c.key] is Outcome.FILLED
+    assert p._attempt_ids[c.key] == "a1"
+
+    _select_mode(p, SHOW_BOUGHT)
+    qapp.processEvents()
+    assert visible_rows(p) == 1
+    # ...but "Everything found" still means what it says.
+    _select_mode(p, SHOW_ALL)
+    qapp.processEvents()
+    assert visible_rows(p) == 1
+    assert _select_seller(p, qapp, "B") is not None
 
 
 # --- settlement currency ----------------------------------------------------

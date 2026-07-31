@@ -60,6 +60,45 @@ def fmt_pct(value: float, *, signed: bool = True) -> str:
     return f"{sign}{value:,.2f}%"
 
 
+# Short suffixes for the currencies the app quotes in. One table, because three
+# panels show these and they had drifted into three private copies.
+CURRENCY_SUFFIX = {
+    "exalted": "ex",
+    "divine": "div",
+    "chaos": "chaos",
+    "annul": "annul",
+}
+
+
+def currency_label(currency: str) -> str:
+    """Short suffix for a currency id, or the id itself if we don't know it."""
+    return CURRENCY_SUFFIX.get(currency, currency)
+
+
+def fmt_qty(value: float) -> str:
+    """A quantity of orbs, at the precision that quantity deserves.
+
+    Amounts in this app span "0.0046 divine" to "2,412 exalted", and a fixed
+    format makes one end of that unreadable. Whole numbers stay whole, because
+    listing prices are whole units of the seller's currency and a trailing
+    ".0" on the figure that went into a whisper reads as a different number.
+    """
+    if value is None or not math.isfinite(value):
+        return "—"
+    if abs(value) >= 1000:
+        return f"{value:,.0f}"
+    if float(value).is_integer():
+        return f"{value:.0f}"
+    if abs(value) >= 10:
+        return f"{value:.1f}"
+    return f"{value:.3g}"
+
+
+def fmt_amount(value: float, currency: str) -> str:
+    """An amount in a named currency: "2,412 ex"."""
+    return f"{fmt_qty(value)} {currency_label(currency)}"
+
+
 def fmt_skew(seconds: float | None) -> str:
     """How far apart a loop's edges were observed, as a duration.
 

@@ -7,13 +7,31 @@ deleted rather than ticked, so this file stays worth reading start to finish.
 ## State of play
 
 **Shipped:** v0.5.0 (2026-07-30) — the first field test and what it exposed. Two real
-trades, both losses. Fixed in that release: the sweep's `cfg.league or "Standard"` fallback,
-stopping the sweep now cancelling the un-offered backlog, the hotkey shipping greyed out,
-Market exclusion ticks going stale, plus a UI pass (league dropdown, recorded hotkey, Quick
-Lookup rebuilt, Trades filter and pay/settle columns, shared band symbols).
+trades, both losses.
 
-**Nothing unreleased on `main`.** Awaiting a field test of v0.5.0 — see *What the next field
-test must measure* below, which unblocks the top item in *Next*.
+**v0.6.0 is on `main`, unreleased.** The second field test (2026-07-31) was the first
+profitable session — **about 20 divines cleared** — and produced a defect list rather
+than a measurement. Everything on it is now fixed: the global hotkey had never once
+worked (a missing `import ctypes.wintypes` swallowed at debug level), the bankroll was
+a per-trade allowance rather than a total, costs were shown in divines for
+exalted-priced listings, both Trades history filters were structurally empty, *Ready to
+whisper* was losing its alert seconds out of its listed time, and a dragged-shut
+splitter could hide half the Opportunities tab permanently. Plus the queue reordering,
+Decline-means-never, Copy again, per-unit and settlement columns, minutes in Settings,
+always-on-top, and a swappable Quick Lookup. Full list in
+[CHANGELOG.md](CHANGELOG.md); the durable half in [docs/FINDINGS.md](docs/FINDINGS.md).
+
+**That session left 147 fully-resolved whispers in `outcomes.jsonl`**, read on
+2026-07-31, and they **overturn the project's second-biggest finding**: ghosts fill at
+2.3% (n=131), not at 0% — including one at 10.94× — and they earned 71% of the
+session's divines on a fat tail. Plausible still wins per whisper sent (0.40 div vs
+0.113), so the ranking stands, but `FILL_PRIOR[GHOST] = 0.0` is now measurably wrong.
+Full tables in [docs/FINDINGS.md](docs/FINDINGS.md), *Negative results* 1. **This
+unblocks "Fit the ranking to the outcome log" in *Next*, which no longer needs another
+field test to start.**
+
+*What the next field test must measure* below still blocks the **pricing** item — that
+one needs a human in game and cannot be recovered from any log.
 
 > **The app is not trustworthy for live trading on thin items.** It overstates resale by
 > ~26% on anything that isn't liquid currency, and it doesn't know gold exists. Both are
@@ -39,10 +57,17 @@ API. If a trade is made in v0.5.0, record all four in the same session:
    error is *spread*, and a tight book says it is not.
 4. The **time** of each reading, since one candidate explanation is a same-day price move.
 
-Also worth confirming, because v0.5.0 changed them and nothing but a human can check:
-Settings shows *"Automatic — currently <temp league>"* and never Standard; switching *Find
-trades* off produces no further offers while leaving on-screen and awaiting rows usable; the
-hotkey is clickable on a fresh config without ticking the box first.
+Also worth confirming, because v0.6.0 changed them and nothing but a human can check:
+
+- **The hotkey actually fires now** — this is the important one, since it has never
+  worked in any shipped build and the fix is Windows-only, so no test covers it. Bind
+  it, tick the box, press it in game, and confirm a whisper lands on the clipboard both
+  while a trade is flashing and while one is merely sitting in *Ready to whisper*.
+- Costs read in the seller's currency everywhere, and match what the whisper actually
+  offered.
+- Committed currency appears beside the bankroll boxes, and a trade you cannot afford
+  is not offered until you answer for the one holding the money.
+- Always-on-top floats over the game in borderless windowed.
 
 **If the install error recurs:** `%LOCALAPPDATA%\poe2-arb\poe2-arb.log`, grep for
 `install to ... failed` or `Start Menu shortcut`. The `--windowed` exe has no console,
@@ -75,11 +100,30 @@ which is why the original occurrence left no trace.
       subtracted from profit — do not "convert gold to divines". Needs a gold-on-hand input
       (there is no API for it; the user must type it) and the per-orb rates confirmed across
       more than one price point, since 120/ex and 800/div may not be flat.
-- [ ] **Fit the ranking to the outcome log.** Every threshold is provisional:
-  `min_gap_ratio` comes from our own price error, `max_gap_ratio` from 14 whispers with 2
-  fills, and `listings.FILL_PRIOR` is three round numbers. The Results tab surfaces
-  `suggested_gap_band` once buckets clear `MIN_SAMPLES` — the next step is letting the
-  user apply it, and fitting `FILL_PRIOR` to measured fill rates instead of guessing.
+- [ ] **Fit the ranking to the outcome log. Unblocked — the data is already on disk**
+      (156 resolved whispers in `outcomes.jsonl`; tables in
+      [docs/FINDINGS.md](docs/FINDINGS.md), *Negative results* 1). Three separate pieces,
+      in order of how well the evidence supports them:
+      - *`FILL_PRIOR[GHOST] = 0.0` is measurably wrong* and is the one clear fix. Measured
+        ratio is ~0.11 on fill rate, ~0.28 on value per whisper. n=131, so this is the
+        best-powered number the project has. Pick which of the two the prior should
+        express — `fill_weight` currently reads as a probability but is used to discount
+        profit, which is the value-per-whisper question.
+      - *`max_gap_ratio = 1.50` survives.* The fill-rate cliff sits between 1.5× and 2×.
+        Leave it alone; the error was in what happens beyond it, not where it is.
+      - *`min_gap_ratio = 1.05` is still unmeasured* — 2 whispers below 1.10×. It comes
+        from our own price error and stays there until the pricing item lands.
+      Then let the user apply `suggested_gap_band` from the Results tab, which already
+      computes `value_per_attempt` — the right objective, and the one that reveals the
+      ghost result. **Do not fit `min_gap` and the pricing correction independently:** both
+      are the same measurement error wearing different hats.
+- [ ] **The whisper budget is the real constraint, and nothing models it.** 131 ghost
+      whispers in 63 minutes is ~2/minute, and that is why chasing a 2.3% fill rate paid:
+      the message is nearly free. So "is this worth whispering?" has no answer that doesn't
+      depend on how much session is left — a ghost is worth sending when the queue is empty
+      and worth skipping when three plausible trades are waiting. `risk_appetite` is the
+      user hand-solving this. Consider making it a rate ("whispers per minute I'm willing
+      to send") that the ranking spends, rather than a taste slider.
 - [ ] **Optional auto-paste on the hotkey.** One `SendInput` for Ctrl+V, as a setting
   defaulting to **off**. Never auto-Enter, never read chat.
 

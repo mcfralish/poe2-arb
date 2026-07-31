@@ -164,6 +164,7 @@ def run_sweep(
                 max_gap=cfg.max_gap_ratio,
                 bankroll=cfg.bankroll(),
                 sale_unit_divines=sale_unit,
+                settle_currency=cfg.sale_currency,
                 min_profit_divines=cfg.min_profit_divines,
             ),
             risk_appetite=cfg.risk_appetite,

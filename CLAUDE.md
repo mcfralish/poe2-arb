@@ -27,15 +27,26 @@ widgets painting over other rows, a whisper quoting the wrong currency, and
 `MarketPanel.set_exclusions` never syncing the table's ticks. Use it rather than assuming a
 widget renders correctly because it constructs.
 
-Two traps when driving panels from a script: `MarketPanel` needs `set_universe(...)` **and**
-`render(names=..., values=..., volumes=...)` before any row exists, and a `QTableWidget`
+Traps when driving panels from a script: `MarketPanel` needs `set_universe(...)` **and**
+`render(names=..., values=..., volumes=...)` before any row exists; a `QTableWidget`
 check indicator is drawn on the leading edge whatever `setTextAlignment` says — centring one
-needs a delegate (`table_items.CentredCheckDelegate`).
+needs a delegate (`table_items.CentredCheckDelegate`); and a `QSplitter` collapses a
+collapsible pane to zero *regardless of its minimum size*, which is saved to `ui-state.json`
+and reproduced on the next launch. Both splitters on the Opportunities tab therefore set
+`setChildrenCollapsible(False)`, and `_restore_ui_state` rejects a saved zero rather than
+clamping it.
 
 Releases are tag-driven: push `vX.Y.Z` and `.github/workflows/release.yml` runs the tests,
 builds the Windows exe with PyInstaller, and cuts release notes from `CHANGELOG.md`. The
 build **fails** if the tag has no matching changelog section, so write the entry first.
 `__init__.py:__version__` and `pyproject.toml:version` must agree with the tag.
+
+The `dev` extra installs **PySide6**, which looks redundant next to `gui` and is not: 13
+of the 30 test modules open with `pytest.importorskip("PySide6")`, so without it the
+release gate silently skipped 313 of 682 tests while staying green (found 2026-07-31).
+The workflow asserts the import separately, because a skipped test is not a passing one.
+`build-windows-exe` has `needs: test`, so a failing gate blocks the release rather than
+shipping past it.
 
 ## Architecture
 
@@ -82,9 +93,13 @@ at a time → `hotkey` puts a whisper on the clipboard → `outcomes.jsonl` reco
 Two results from field tests are load-bearing in `listings.py` and must not be re-derived
 (full evidence in [docs/FINDINGS.md](docs/FINDINGS.md), "Negative results"):
 
-1. **Deep discounts do not fill.** ~10 whispers at 3.8x–12.5x gaps produced zero replies;
-   both fills came from the two smallest gaps sampled. Large gaps are therefore *demoted*,
-   and the `GHOST` band keeps them visible without wasting whispers.
+1. **Deep discounts fill rarely — not never.** *Corrected 2026-07-31 at n=156; the old
+   claim was "they do not fill at all", from n=14.* Measured from `outcomes.jsonl`:
+   plausible fills at **21%** (24 whispers), ghost at **2.3%** (131 whispers, including
+   fills at 3.92x and 10.94x). Large gaps stay *demoted*, because plausible returns ~3.5x
+   more **per whisper sent** — but `FILL_PRIOR[GHOST] = 0.0` is now known to be wrong, and
+   ghosts earned **71% of the one profitable session's divines** on a fat tail. Do not
+   re-assert that big gaps never fill, and do not hide them.
 2. **Settlement denomination decides the haircut.** Partial currency can't be traded, so
    proceeds floor to a whole unit of the settlement currency. Exalted is ~432× finer than
    divine; on the one trade that filled, settling in exalted turned 1.00 divine of profit
@@ -93,6 +108,15 @@ Two results from field tests are load-bearing in `listings.py` and must not be r
    divine (measured 2026-07-30), so settling a high-value item in exalted can cost tens of
    times more gold and strand the user unable to trade at all. Gold is a budget constraint,
    not a cost in divines, and the app does not model it yet.
+
+**Money is displayed in the currency the seller asked for, not in divines.** `Candidate`
+exposes `pay_total` and `pay_per_unit` in `listing.pay_currency`, and the queue, the toast,
+the log and the status bar all use them. `plan.cost_divines` is the same money in the unit
+the arithmetic runs in and appears nowhere in the trade itself — shown alone, a listing
+whispered as "2412 exalted" reads as "5.6 div", which the user cannot match to a reply that
+arrives an hour later in a language they don't read. Profit stays in divines, because it is
+the only unit the two sides can be compared in. `Candidate.settle_currency` records what a
+row's profit was floored to, so the figure survives the setting being changed afterwards.
 
 The league is resolved by `sweep.resolve_league`, which auto-detects and **never falls back
 to a literal name**. It used to read `cfg.league or "Standard"`; Standard priced one measured
@@ -118,7 +142,9 @@ window assembly order.
 
 **Anything two panels both display lives in one module.** `gui/bands.py` owns the band glyph,
 short label and long tooltip because Trades and Results each had their own and showed the
-same fact in two vocabularies. Import from it rather than restating a symbol.
+same fact in two vocabularies. Import from it rather than restating a symbol. `format.py`
+owns `currency_label` / `fmt_qty` / `fmt_amount` for the same reason — three panels had
+drifted into three private copies of the currency suffix table.
 
 **Internal band names and user-facing words are deliberately different.** The enum stays
 `PLAUSIBLE` / `THIN` / `GHOST` — the code, the outcome log and `FINDINGS` all speak that
@@ -202,6 +228,16 @@ Append to the section it belongs in, carrying **the date and the sample size** �
 without its evidence is an opinion, and a fill rate from three whispers is not a rate. When
 a new measurement supersedes an old one, replace the number and say what changed; never
 silently drop the earlier figure, because the size of the correction is itself information.
+
+**Read `outcomes.jsonl` before writing up a field test.** Every whisper and every verdict
+is logged automatically, with band, gap, cost and expected profit — on Windows at
+`%LOCALAPPDATA%\poe2-arb\outcomes.jsonl`, from WSL at
+`/mnt/c/Users/<user>/AppData/Local/poe2-arb/`. Join the `kind: "attempt"` and
+`kind: "outcome"` records on `id`. A session described in conversation as "made about 20
+divines" sounds like an anecdote and is actually 147 fully-resolved whispers; that exact
+mistake was made on 2026-07-31 and put "no fill-rate data was recorded" into this file over
+the top of the data that overturned its biggest finding. **The operator's summary is not
+the record.**
 
 Keep this file and TODO.md current the same way: update the affected section in the change
 that caused it, not afterwards. A stale CLAUDE.md is worse than none, because it is read as
