@@ -86,9 +86,13 @@ at a time → `hotkey` puts a whisper on the clipboard → `outcomes.jsonl` reco
 Two results from field tests are load-bearing in `listings.py` and must not be re-derived
 (full evidence in [docs/FINDINGS.md](docs/FINDINGS.md), "Negative results"):
 
-1. **Deep discounts do not fill.** ~10 whispers at 3.8x–12.5x gaps produced zero replies;
-   both fills came from the two smallest gaps sampled. Large gaps are therefore *demoted*,
-   and the `GHOST` band keeps them visible without wasting whispers.
+1. **Deep discounts fill rarely — not never.** *Corrected 2026-07-31 at n=156; the old
+   claim was "they do not fill at all", from n=14.* Measured from `outcomes.jsonl`:
+   plausible fills at **21%** (24 whispers), ghost at **2.3%** (131 whispers, including
+   fills at 3.92x and 10.94x). Large gaps stay *demoted*, because plausible returns ~3.5x
+   more **per whisper sent** — but `FILL_PRIOR[GHOST] = 0.0` is now known to be wrong, and
+   ghosts earned **71% of the one profitable session's divines** on a fat tail. Do not
+   re-assert that big gaps never fill, and do not hide them.
 2. **Settlement denomination decides the haircut.** Partial currency can't be traded, so
    proceeds floor to a whole unit of the settlement currency. Exalted is ~432× finer than
    divine; on the one trade that filled, settling in exalted turned 1.00 divine of profit
@@ -217,6 +221,16 @@ Append to the section it belongs in, carrying **the date and the sample size** �
 without its evidence is an opinion, and a fill rate from three whispers is not a rate. When
 a new measurement supersedes an old one, replace the number and say what changed; never
 silently drop the earlier figure, because the size of the correction is itself information.
+
+**Read `outcomes.jsonl` before writing up a field test.** Every whisper and every verdict
+is logged automatically, with band, gap, cost and expected profit — on Windows at
+`%LOCALAPPDATA%\poe2-arb\outcomes.jsonl`, from WSL at
+`/mnt/c/Users/<user>/AppData/Local/poe2-arb/`. Join the `kind: "attempt"` and
+`kind: "outcome"` records on `id`. A session described in conversation as "made about 20
+divines" sounds like an anecdote and is actually 147 fully-resolved whispers; that exact
+mistake was made on 2026-07-31 and put "no fill-rate data was recorded" into this file over
+the top of the data that overturned its biggest finding. **The operator's summary is not
+the record.**
 
 Keep this file and TODO.md current the same way: update the affected section in the change
 that caused it, not afterwards. A stale CLAUDE.md is worse than none, because it is read as

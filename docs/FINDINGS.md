@@ -182,18 +182,53 @@ eight versions scanning ten currency items, which is close to exactly the wrong 
 
 ## Negative results
 
-**1. Deep discounts do not fill. Gap size is an inverse credibility signal.**
+**1. Deep discounts fill rarely, not never — and they still earned most of the money.**
 
-| test | whispers | filled | gap on the fills |
+**Superseded 2026-07-31 at n=156, from `outcomes.jsonl`.** The earlier reading, kept
+because the size of the correction is the point:
+
+> At n=14 (2 fills, both at the smallest gaps sampled, ~10 attempts at 3.8×–12.5× producing
+> zero): *"Deep discounts do not fill. A listing far below market is a mistake, an
+> abandonment, or already sold — its continued visibility is evidence it cannot be taken."*
+
+**That was an artefact of ten samples.** Every whisper the app has ever sent is logged, and
+the log now reads:
+
+| band | whispers | filled | fill rate | profit (div) | **div per whisper** |
+|---|---|---|---|---|---|
+| plausible | 24 | 5 (+1 sold) | **21%** | 10.04 | **0.40** |
+| thin | 1 | 0 | — (n=1) | 0 | — |
+| ghost | 131 | 3 | **2.3%** | 14.80 | **0.113** |
+
+Ghosts *do* fill — including one at **10.94×** and one at 3.92×, gaps the old finding said
+were uncatchable. What survives is the **ranking** decision, and only on a per-whisper
+basis: plausible returns ~3.5× more per message sent, so it must still be offered first.
+What does **not** survive is `FILL_PRIOR[GHOST] = 0.0`. Zero is measurably wrong; the
+measured ratio is ~0.11 on fill rate, ~0.28 on value per whisper.
+
+**The uncomfortable part: ghosts produced 14.80 of the session's 20.80 divines — 71%.**
+Not because they fill, but because the ones that land are much bigger (8.00, 5.00, 1.80 div
+against ~2 div for a typical plausible fill). A 2.3% hit rate on a fat tail beat a 20% hit
+rate on a thin one, in absolute terms, because **the whisper is nearly free and the user
+sent 131 of them in 63 minutes**. The binding constraint is attention, not opportunity — so
+"is this worth whispering?" has no answer independent of how many whispers are left in the
+session. The app models none of that.
+
+Fill rate by gap, all 156 whispers — the curve the thresholds should be fitted to:
+
+| gap | whispers | filled | fill rate |
 |---|---|---|---|
-| Core Destabiliser | 4 | 1 | 1.9× |
-| Omen / Fragment | 10 | 1 | 1.13× |
-| **total** | **14** | **2 (14%)** | both the smallest gaps sampled |
+| 1.00–1.10× | 2 | 0 | — |
+| 1.10–1.20× | 4 | 1 | 25% |
+| 1.20–1.35× | 12 | 2 | 17% |
+| 1.35–1.50× | 7 | 2 | 29% |
+| 1.50–2.00× | 15 | 1 | 7% |
+| 2.00–4.00× | 26 | 1 | 4% |
+| >4× | 90 | 1 | 1% |
 
-Roughly ten attempts at 3.8×–12.5× produced **zero** fills. A listing far below market is
-a mistake, an abandonment, or already sold — its continued visibility is evidence it
-*cannot* be taken. **Rank ascending by gap, not descending.** Any large-gap profit total
-is fiction until a fill proves otherwise.
+The cliff sits between 1.5× and 2×, which is roughly where `max_gap_ratio = 1.50` already
+puts it — the threshold is right, the *prior beyond it* is not. Note the top three buckets
+are still under `MIN_SAMPLES`; only 1.5×+ is properly powered.
 
 **2. There are no bulk sellers on the Bulk Item Exchange.** Probed 8 items for the "real
 seller shaving price to move volume" profile:
@@ -214,14 +249,24 @@ the ceiling is about a divine per fill.
 (0.34 div) had *zero* listings below CE. The value gate stays, but for this reason — not
 for the rounding reason it originally had.
 
-**4. The second field test cleared ~20 divines (2026-07-31).** The first session to end
-ahead, and the first evidence the loop works at all when the operator does the pricing
-sanity-check by hand. **No fill-rate or gap-band figures were recorded**, so nothing here
-supersedes the 14-whisper table above — the take is the only number, and a take without
-its denominator is not a rate. The session's value was the defect list, not the profit:
-see *Fixed in 0.6.0* below. **What the next session should record, since it costs nothing
-while the trades are in front of you:** whispers sent, replies, fills, and the gap on
-each — the four columns that would let `FILL_PRIOR` be fitted instead of guessed.
+**4. The second field test cleared ~20 divines in 63 minutes (2026-07-30 10:29–11:32Z).**
+The first session to end ahead. 147 whispers, 6 filled and 1 sold, **20.80 divines of
+*expected* profit** — the app's own estimate, which is the ~26% -optimistic number, so the
+realised figure is lower and was not separately recorded. It is the source of the band and
+gap tables in finding 1 above.
+
+**Where this data lives, because it was nearly lost twice:** `outcomes.jsonl` in the
+platform cache directory — on Windows `%LOCALAPPDATA%\poe2-arb\outcomes.jsonl`, reachable
+from WSL at `/mnt/c/Users/<user>/AppData/Local/poe2-arb/`. It is written automatically on
+every whisper and every verdict, needs nothing from the operator, and **156 of 156 attempts
+carry a resolved outcome** — mostly because `awaiting_timeout_s` self-records the silence.
+Two records per attempt (`kind: "attempt"` carrying band/gap/cost, then `kind: "outcome"`
+carrying only the id), so any analysis has to join on `id`.
+
+The trap: a session summarised in conversation as "made about 20 divines" reads as though
+no measurement was taken, and was written up that way here before anyone opened the file.
+**The log is the record; the operator's recollection is not.** Read it before concluding
+that a session produced no data.
 
 ### Fixed in 0.6.0, all found by one session of real use (2026-07-31)
 
