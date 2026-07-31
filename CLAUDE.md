@@ -22,9 +22,15 @@ python tools/dump_org_trees.py --only Runes   # regenerate OrgTrees reference fi
 
 **Verifying GUI work without a display** — set `QT_QPA_PLATFORM=offscreen`, construct the
 widget, `app.processEvents()`, then `widget.grab().save(path)` and read the image. This has
-caught seven real bugs the test suite did not, including a startup `NameError`, stale cell
-widgets painting over other rows, and a whisper quoting the wrong currency. Use it rather
-than assuming a widget renders correctly because it constructs.
+caught eight real bugs the test suite did not, including a startup `NameError`, stale cell
+widgets painting over other rows, a whisper quoting the wrong currency, and
+`MarketPanel.set_exclusions` never syncing the table's ticks. Use it rather than assuming a
+widget renders correctly because it constructs.
+
+Two traps when driving panels from a script: `MarketPanel` needs `set_universe(...)` **and**
+`render(names=..., values=..., volumes=...)` before any row exists, and a `QTableWidget`
+check indicator is drawn on the leading edge whatever `setTextAlignment` says — centring one
+needs a delegate (`table_items.CentredCheckDelegate`).
 
 Releases are tag-driven: push `vX.Y.Z` and `.github/workflows/release.yml` runs the tests,
 builds the Windows exe with PyInstaller, and cuts release notes from `CHANGELOG.md`. The
@@ -35,7 +41,8 @@ build **fails** if the tag has no matching changelog section, so write the entry
 
 ### The thesis the whole app rests on
 
-PoE2 has two markets. The **Currency Exchange** (in-game, pooled orders, ~1% spreads) is
+PoE2 has two markets. The **Currency Exchange** (in-game, pooled orders; ~1% spread measured
+on one *liquid* pair, and not to be assumed for thin items — see FINDINGS) is
 where essentially all trading happens. The **Bulk Item Exchange** (whisper-and-party, what
 GGG's trade2 API serves) is largely abandoned, with listings sitting for days at stale
 prices. There is no profitable loop *inside* either market — the edge is the gap *between*
@@ -108,6 +115,16 @@ responses in `tests/fixtures/`.
 the network workers stubbed. It exists because a startup crash shipped in 0.3.0 while every
 panel was individually tested and nothing assembled them. Extend it whenever you touch
 window assembly order.
+
+**Anything two panels both display lives in one module.** `gui/bands.py` owns the band glyph,
+short label and long tooltip because Trades and Results each had their own and showed the
+same fact in two vocabularies. Import from it rather than restating a symbol.
+
+**Internal band names and user-facing words are deliberately different.** The enum stays
+`PLAUSIBLE` / `THIN` / `GHOST` — the code, the outcome log and `FINDINGS` all speak that
+language — while the UI says *worth trying* / *uncertain* / *too good to be true*. Do not
+"fix" the mismatch by renaming the enum: `outcomes.jsonl` stores the enum value, and
+`bands.symbol_for_name` has to keep resolving records written months ago.
 
 ### Four taxonomies that disagree
 

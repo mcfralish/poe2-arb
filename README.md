@@ -63,8 +63,10 @@ are exactly where genuinely hostile files land.
 Path of Exile 2 has two of them, and the difference is the whole point of this app.
 
 The **Currency Exchange** is the in-game vendor: pooled orders, matched automatically,
-works while you're offline. Essentially all trading happens there, and its spreads are
-about 1% — far too tight to arbitrage against itself.
+works while you're offline. Essentially all trading happens there, and on a busy pair its
+spread is about 1% — far too tight to arbitrage against itself. (On a rarely-traded item the
+gap between the quoted price and what a sale fetches is much wider; see the limitation under
+**Data** below.)
 
 The **Bulk Item Exchange** is the older whisper-and-party system, and it's what GGG's
 official trade API serves. Hardly anyone uses it any more. Listings sit there for days at
@@ -80,10 +82,17 @@ real trade, and it was removed in 0.4.0.)
 
 ### Data
 
-- **poe2scout** (`api.poe2scout.com`) provides **Currency Exchange** prices — the live
-  market, and the number you'd actually resell at. Spot-checked against five items in
-  game: it ran 0.4%–4.7% low. That error is why a discount under ~5% is reported as
-  uncertain rather than as profit.
+- **poe2scout** (`api.poe2scout.com`) provides **Currency Exchange** prices — the number
+  you'd resell at. Spot-checked against five *heavily traded* items in game it ran
+  0.4%–4.7% low, which is why a discount under ~5% is reported as uncertain rather than
+  as profit.
+
+  > **Known limitation, and it has cost real currency.** That accuracy does not hold for
+  > rarely-traded items. On the first two trades made with this app — an Omen and a Rune,
+  > both thin — the price shown was about **26% above what the Exchange actually paid**,
+  > which turned two apparent profits into losses. Liquid currency is fine. For anything
+  > thin, treat the profit figure as a best case, not an estimate. Being fixed; see
+  > [TODO.md](TODO.md).
 - **poe.ninja** provides the item universe: names, categories, daily traded volume, and
   a consensus value per item. It powers the Market tab and Quick Lookup.
 - **GGG's official trade2 API** provides the live **listings** — who is selling what, for
@@ -103,6 +112,11 @@ real trade, and it was removed in 0.4.0.)
    than divine, and on the first trade that actually filled, settling in exalted was the
    difference between 1.00 and 1.79 divines of profit.
 
+   Exalted is not free, though: the Exchange charges gold per orb traded — roughly 120 per
+   exalted against 800 per divine — so taking thousands of exalted instead of a few divine
+   can cost tens of times more gold and leave you unable to trade at all. The app does not
+   account for gold yet, so on a high-value item, weigh that yourself.
+
 ### Which discounts are worth a message
 
 A listing far below market looks like the best row in the table and is the one that never
@@ -110,11 +124,13 @@ fills — it's a mistake, an abandoned listing, or already sold. So each candida
 
 | | | |
 |---|---|---|
-| ● | plausible | A real seller under market. These are the ones that fill. |
-| ○ | thin | The discount is inside the price reference's own margin of error. |
-| × | ghost | Far below market. Measured fill rate: zero across ~10 whispers. |
+| ● | worth trying | A real seller pricing under market. Both trades that ever worked were these. |
+| ○ | uncertain | The discount is no bigger than the error in our own price estimate. |
+| × | too good to be true | Far below market. Not one has ever been answered, across ~10 whispers. |
 
-Ghosts are **ranked last, never hidden** — hiding them would make the ranking
+The same three symbols appear on the **Trades** and **Results** tabs, with a key under each.
+
+The bottom band is **ranked last, never hidden** — hiding it would make the ranking
 unfalsifiable. The **Long shots** slider on the Opportunities tab decides how hard the
 band suppresses profit when ranking: left ranks by what actually fills, right ranks on
 profit alone and puts the big discounts first.
@@ -140,8 +156,12 @@ The desktop app is the primary surface. The CLI runs one sweep and prints it:
 ```sh
 poe2-arb sweep                        # check listings, print ranked candidates
 poe2-arb sweep --items 30 --limit 10  # fewer items, shorter table
-poe2-arb --league "Standard" sweep
+poe2-arb --league "Runes of Aldur" sweep   # pin a league instead of auto-detecting
 ```
+
+Leave the league alone unless you mean it. It is auto-detected, and pinning the wrong one
+prices every listing against a different economy — Standard has years of accumulated
+currency, so one measured item priced **5.7× higher** there than in the temp league.
 
 A sweep is minutes of deliberately paced requests — see rate limits below.
 

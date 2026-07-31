@@ -15,9 +15,16 @@ PoE2 has **two currency economies that do not share prices.**
 | where | in game | `trade2/exchange`, site's "Bulk Item Exchange" tab |
 | mechanism | pooled, automated | player listings, whisper + party |
 | works offline? | yes | no |
-| spread | ~1% (measured 3.75 / 3.79 on Core Destabiliser) | meaningless |
+| spread | ~1% on a liquid pair (3.75 / 3.79, Core Destabiliser) — **but see below** | meaningless |
 | depth | millions of units | single digits |
 | who uses it | effectively everyone | effectively nobody |
+
+**The 1% spread is one measurement on one liquid item, and the thesis leans on it.** The
+whole edge is "buy on Bulk, resell into the CE", which assumes the resale lands near the
+reference price. On the two thin items actually traded, what the CE paid was ~26% below that
+reference (see "The reference price overstates thin items"). Whether that gap *is* spread is
+the open question, but either way **do not carry ~1% across to illiquid items** — it was
+never measured there, and the sweep selects for exactly the items it wasn't measured on.
 
 **`POST /api/trade2/exchange/{league}` serves the abandoned one.** The pooled book is
 not exposed on it at all. Three structural proofs:
@@ -230,6 +237,12 @@ profit to rounding.** The CE trades these items against exalted, chaos *and* div
 is a free choice at sale time. Items whose lots can clear the floor go from **89 of 635
 (14%) to 528 (83%)** on this change alone.
 
+**It is not, however, a *costless* choice — see "Gold is a real constraint" above.** Gold is
+charged per orb traded, so the finer denomination that saves the rounding also multiplies the
+gold bill, and on 2026-07-30 that ran the maintainer out of gold mid-session. Both findings
+are correct and they pull opposite ways: exalted maximises what you keep *per trade* and
+minimises how many trades you can afford to make. Neither one alone is the rule.
+
 ## Taxonomies that don't agree
 
 **The UI models the in-game selection**, not poe.ninja's categories and not GGG's API
@@ -316,6 +329,15 @@ Also worth not rediscovering:
   measured never to fill is pure cost. They stay visible in Trades.
 - **A whispered trade cannot be dismissed, only resolved.** It is already recorded as an
   attempt; deleting it would bias the outcome log toward whatever the user answered.
+- **Stopping the sweep drops the QUEUED backlog and nothing else** (`cancel_pending`, added
+  0.5.0). `tick` promotes the backlog whether or not a sweep is running, so switching *Find
+  trades* off used to keep producing offers for minutes — reported from the field
+  2026-07-30. It deliberately leaves OFFERED, AVAILABLE and AWAITING alone: retracting an
+  offer mid-decision, or deleting a whisper still owed an answer, loses both the trade and
+  its outcome record. Cancelled rows go to EXPIRED, not a permanent blacklist, so a later
+  sweep can re-find the same listing.
+- **A sweep that lands after the toggle went off does not refill the queue**, but its
+  candidates still appear in Trades. Stopping suppresses interruptions, not information.
 
 ### Cross-venue ranking
 
@@ -352,6 +374,25 @@ Also worth not rediscovering:
 - **Tier ordering is by measured price, not the alphabet.** Numbers in `market.py`.
 - **Menus cap at `MAX_ITEMS_PER_MENU` entries per submenu**; oversized groups split via
   `chunk_group` rather than relying on Qt to scroll off-screen.
+- **The league is never a literal fallback.** `sweep.resolve_league` auto-detects and raises
+  if it cannot; sweeping the wrong league is worse than not sweeping. `cfg.league or
+  "Standard"` shipped through 0.4.0 and priced one measured item 5.7× high.
+- **The Trades *Settle in* column shows the currency the displayed profits were computed
+  against, not the current dropdown.** Settlement only takes effect on the next sweep, so
+  relabelling rows the moment the dropdown moves would attach a currency to figures never
+  computed against it.
+- **Quick Lookup prices one item against a currency; it is not an any-pair converter**
+  (changed 0.5.0). Converting arbitrary item→item implied those two things trade against
+  each other. Almost none do — the Exchange is organised as items against a few currencies,
+  so an Omen-for-Rune ratio was arithmetic we performed, not a market anyone makes.
+- **Internal band names and UI wording differ on purpose.** The enum stays
+  `PLAUSIBLE`/`THIN`/`GHOST` because `outcomes.jsonl` stores those strings and old records
+  must keep resolving; the UI says *worth trying* / *uncertain* / *too good to be true*.
+  `gui/bands.py` is the single source for the glyph and both labels, because Trades and
+  Results previously kept separate copies and drifted apart.
+- **A `QTableWidget` check indicator needs a delegate to centre.** `setTextAlignment` centres
+  only the text; Qt draws the indicator on the leading edge regardless. See
+  `table_items.CentredCheckDelegate`.
 
 ### Rejected approaches
 

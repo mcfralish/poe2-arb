@@ -6,24 +6,43 @@ deleted rather than ticked, so this file stays worth reading start to finish.
 
 ## State of play
 
-**Shipped:** v0.4.0 — triangular scan removed outright, continuous *Find trades* toggle,
-Results tab, per-currency bankroll, long-shots slider, wrapping market tabs, rate-limit
-readout.
+**Shipped:** v0.5.0 (2026-07-30) — the first field test and what it exposed. Two real
+trades, both losses. Fixed in that release: the sweep's `cfg.league or "Standard"` fallback,
+stopping the sweep now cancelling the un-offered backlog, the hotkey shipping greyed out,
+Market exclusion ticks going stale, plus a UI pass (league dropdown, recorded hotkey, Quick
+Lookup rebuilt, Trades filter and pay/settle columns, shared band symbols).
 
-**Unreleased on `main`:** the first field test happened on 2026-07-30 and produced two real
-trades, both losses. Fixed since: the sweep's `cfg.league or "Standard"` fallback, stopping
-the sweep now cancelling the un-offered backlog, the hotkey shipping greyed out, Market
-exclusion ticks going stale, plus the UI pass below. **The reason both trades lost money is
-not fixed** — see the next section.
+**Nothing unreleased on `main`.** Awaiting a field test of v0.5.0 — see *What the next field
+test must measure* below, which unblocks the top item in *Next*.
 
-> **The app is not currently trustworthy for live trading on thin items.** It overstates
-> resale by ~26% on anything that isn't liquid currency, and it doesn't know gold exists.
-> Both are quantified in [docs/FINDINGS.md](docs/FINDINGS.md).
+> **The app is not trustworthy for live trading on thin items.** It overstates resale by
+> ~26% on anything that isn't liquid currency, and it doesn't know gold exists. Both are
+> quantified in [docs/FINDINGS.md](docs/FINDINGS.md). The UI says so in the *uncertain* band
+> tooltip and in Quick Lookup; the arithmetic underneath is still wrong.
 
 **The shape of the app.** Toolbar: *Find trades* (a toggle — sweeps, waits, sweeps again)
-and *Settings*. Tabs: *Opportunities* (the queue, plus bankroll, settlement and
-long-shots), *Market* (the whole economy from poe.ninja), *Trades* (everything the last
-sweep found, browsable), *Results* (the whisper log — fill rates and takings), *Log*.
+and *Settings*. Tabs: *Opportunities* (the queue, plus bankroll, settlement, long-shots and
+Quick Lookup), *Market* (the whole economy from poe.ninja), *Trades* (what the last sweep
+found, filterable down to what you messaged or bought), *Results* (the whisper log — fill
+rates and takings), *Log*.
+
+## What the next field test must measure
+
+The top item in *Next* is blocked on one observation, and it is cheap to collect but only
+**while in game with a trade in front of you** — it cannot be recovered afterwards from any
+API. If a trade is made in v0.5.0, record all four in the same session:
+
+1. The **CE rate the app showed** for the item, and the settlement currency.
+2. What the CE **actually paid** on the sale.
+3. Both sides of the in-game book for that item if visible — the rate to **buy** it and the
+   rate to **sell** it. This is the discriminator: a ~26% gap between those two says the
+   error is *spread*, and a tight book says it is not.
+4. The **time** of each reading, since one candidate explanation is a same-day price move.
+
+Also worth confirming, because v0.5.0 changed them and nothing but a human can check:
+Settings shows *"Automatic — currently <temp league>"* and never Standard; switching *Find
+trades* off produces no further offers while leaving on-screen and awaiting rows usable; the
+hotkey is clickable on a fresh config without ticking the box first.
 
 **If the install error recurs:** `%LOCALAPPDATA%\poe2-arb\poe2-arb.log`, grep for
 `install to ... failed` or `Start Menu shortcut`. The `--windowed` exe has no console,
