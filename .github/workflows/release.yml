@@ -16,7 +16,21 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
+      # The GUI tests are most of the suite and they need a display. Offscreen
+      # gives them one without an X server; libEGL is what PySide6 dlopens on a
+      # bare runner even in offscreen mode.
+      - run: sudo apt-get update && sudo apt-get install -y libegl1
       - run: python -m pytest -q
+        env:
+          QT_QPA_PLATFORM: offscreen
+      # A skipped test is not a passing test. 13 test modules open with
+      # `importorskip("PySide6")`, so a missing GUI dependency turned 313 of 682
+      # tests into silent skips and left the job green — exactly the hole the
+      # 0.3.0 startup crash shipped through. Asserting the import is enough,
+      # because that import is the only thing standing between those tests and
+      # running.
+      - name: Fail if the GUI dependency is missing
+        run: python -c "import PySide6; print('PySide6', PySide6.__version__)"
       # Fails the release before anything is built if the tag has no changelog
       # entry — a shipped build whose notes nobody wrote is what this prevents.
       - name: Check the changelog covers this tag

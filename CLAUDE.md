@@ -41,6 +41,13 @@ builds the Windows exe with PyInstaller, and cuts release notes from `CHANGELOG.
 build **fails** if the tag has no matching changelog section, so write the entry first.
 `__init__.py:__version__` and `pyproject.toml:version` must agree with the tag.
 
+The `dev` extra installs **PySide6**, which looks redundant next to `gui` and is not: 13
+of the 30 test modules open with `pytest.importorskip("PySide6")`, so without it the
+release gate silently skipped 313 of 682 tests while staying green (found 2026-07-31).
+The workflow asserts the import separately, because a skipped test is not a passing one.
+`build-windows-exe` has `needs: test`, so a failing gate blocks the release rather than
+shipping past it.
+
 ## Architecture
 
 ### The thesis the whole app rests on

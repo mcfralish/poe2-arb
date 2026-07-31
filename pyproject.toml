@@ -13,7 +13,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+# PySide6 belongs here, not only in [gui]: 13 of the 30 test modules open with
+# `pytest.importorskip("PySide6")`, so installing without it silently skips 313
+# of 682 tests — including every one covering window assembly, which is the
+# thing a release gate most needs to check. Measured 2026-07-31, after the
+# release workflow was found to be testing 54% of the suite.
+dev = ["pytest>=8", "PySide6>=6.6"]
 gui = ["PySide6>=6.6"]
 
 [project.scripts]
