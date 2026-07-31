@@ -133,3 +133,56 @@ class TestDisplay:
         """Excluding something from the sweep must not stop you pricing it."""
         ask(lookup, "mirror", "divine")
         assert "4,886" in lookup.value.text()
+
+
+class TestSwappingSides:
+    """Both questions are real: what will this fetch me, and how many does one
+    divine buy. Only the first was answerable, and inverting a small decimal in
+    your head mid-map is what this panel exists to avoid."""
+
+    def test_it_starts_pricing_the_item_in_the_denomination(self, lookup):
+        assert lookup.inverted is False
+        ask(lookup, "mirror", "divine")
+        assert lookup.value.text() == "4,886.00 div"
+
+    def test_swapping_inverts_the_same_ratio(self, lookup):
+        ask(lookup, "mirror", "divine")
+        lookup.swap.click()
+        assert lookup.inverted is True
+        # 1 divine buys 1/4886 of a Mirror.
+        assert lookup.value.text() == "0.00020"
+
+    def test_swapping_back_restores_the_original_reading(self, lookup):
+        ask(lookup, "mirror", "divine")
+        first = lookup.value.text()
+        lookup.swap.click()
+        lookup.swap.click()
+        assert lookup.inverted is False
+        assert lookup.value.text() == first
+
+    def test_the_item_stays_selected_across_a_swap(self, lookup):
+        """Re-laying the row must not destroy the picker's selection."""
+        ask(lookup, "mirror", "divine")
+        lookup.swap.click()
+        assert lookup.item_picker.current_id() == "mirror"
+
+    def test_the_denomination_side_is_still_only_a_denomination(self, lookup):
+        """Swapping must not reopen the any-pair converter that was removed.
+
+        Whichever way round it is, one side is one of the four the Exchange has
+        depth in — a Rune-for-Omen ratio is still not on offer.
+        """
+        lookup.swap.click()
+        assert [
+            lookup.denomination.itemData(i)
+            for i in range(lookup.denomination.count())
+        ] == [c for c, _ in DENOMINATIONS]
+
+
+def test_the_source_note_cannot_be_squeezed_out(lookup):
+    """It says whether the number is a live Exchange price or a consensus guess.
+
+    Dragged shut, the panel took that with it — and the difference is the whole
+    difference between a figure you can trade on and one you can't.
+    """
+    assert lookup.minimumSizeHint().height() >= 90

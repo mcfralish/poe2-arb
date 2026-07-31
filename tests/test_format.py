@@ -4,7 +4,17 @@ from __future__ import annotations
 
 import math
 
-from poe2arb.format import fmt_depth, fmt_num, fmt_pct, fmt_rate, fmt_value, fmt_volume
+from poe2arb.format import (
+    currency_label,
+    fmt_amount,
+    fmt_depth,
+    fmt_num,
+    fmt_pct,
+    fmt_qty,
+    fmt_rate,
+    fmt_value,
+    fmt_volume,
+)
 
 
 class TestFmtNum:
@@ -59,3 +69,26 @@ class TestSortabilityRegression:
         formatted = [fmt_value(8.77), fmt_value(4886.0)]
         assert sorted(formatted) == ["4,886.0000", "8.7700"]  # string order
         assert sorted([8.77, 4886.0]) == [8.77, 4886.0]       # true order differs
+
+
+# --- amounts in the seller's own currency ----------------------------------
+
+class TestAmounts:
+    def test_whole_numbers_stay_whole(self):
+        """The figure in a whisper is a whole number of orbs; ".0" reads wrong."""
+        assert fmt_qty(2412) == "2,412"
+        assert fmt_qty(155.0) == "155"
+        assert fmt_qty(9) == "9"
+
+    def test_fractions_keep_enough_to_be_useful(self):
+        assert fmt_qty(0.0046) == "0.0046"
+        assert fmt_qty(12.5) == "12.5"
+
+    def test_an_amount_names_its_currency(self):
+        assert fmt_amount(2412, "exalted") == "2,412 ex"
+        assert fmt_amount(5.5, "divine") == "5.5 div"
+
+    def test_an_unknown_currency_keeps_its_id(self):
+        """Better a raw id than a number with no unit at all."""
+        assert fmt_amount(3, "regal") == "3 regal"
+        assert currency_label("regal") == "regal"

@@ -7,13 +7,24 @@ deleted rather than ticked, so this file stays worth reading start to finish.
 ## State of play
 
 **Shipped:** v0.5.0 (2026-07-30) — the first field test and what it exposed. Two real
-trades, both losses. Fixed in that release: the sweep's `cfg.league or "Standard"` fallback,
-stopping the sweep now cancelling the un-offered backlog, the hotkey shipping greyed out,
-Market exclusion ticks going stale, plus a UI pass (league dropdown, recorded hotkey, Quick
-Lookup rebuilt, Trades filter and pay/settle columns, shared band symbols).
+trades, both losses.
 
-**Nothing unreleased on `main`.** Awaiting a field test of v0.5.0 — see *What the next field
-test must measure* below, which unblocks the top item in *Next*.
+**v0.6.0 is on `main`, unreleased.** The second field test (2026-07-31) was the first
+profitable session — **about 20 divines cleared** — and produced a defect list rather
+than a measurement. Everything on it is now fixed: the global hotkey had never once
+worked (a missing `import ctypes.wintypes` swallowed at debug level), the bankroll was
+a per-trade allowance rather than a total, costs were shown in divines for
+exalted-priced listings, both Trades history filters were structurally empty, *Ready to
+whisper* was losing its alert seconds out of its listed time, and a dragged-shut
+splitter could hide half the Opportunities tab permanently. Plus the queue reordering,
+Decline-means-never, Copy again, per-unit and settlement columns, minutes in Settings,
+always-on-top, and a swappable Quick Lookup. Full list in
+[CHANGELOG.md](CHANGELOG.md); the durable half in [docs/FINDINGS.md](docs/FINDINGS.md).
+
+**No fill-rate data came out of that session** — the take is the only number recorded,
+and a take without its denominator is not a rate. *What the next field test must
+measure* below is unchanged and still blocks the top item in *Next*; the four ranking
+columns named there are the cheap thing to write down next time.
 
 > **The app is not trustworthy for live trading on thin items.** It overstates resale by
 > ~26% on anything that isn't liquid currency, and it doesn't know gold exists. Both are
@@ -39,10 +50,17 @@ API. If a trade is made in v0.5.0, record all four in the same session:
    error is *spread*, and a tight book says it is not.
 4. The **time** of each reading, since one candidate explanation is a same-day price move.
 
-Also worth confirming, because v0.5.0 changed them and nothing but a human can check:
-Settings shows *"Automatic — currently <temp league>"* and never Standard; switching *Find
-trades* off produces no further offers while leaving on-screen and awaiting rows usable; the
-hotkey is clickable on a fresh config without ticking the box first.
+Also worth confirming, because v0.6.0 changed them and nothing but a human can check:
+
+- **The hotkey actually fires now** — this is the important one, since it has never
+  worked in any shipped build and the fix is Windows-only, so no test covers it. Bind
+  it, tick the box, press it in game, and confirm a whisper lands on the clipboard both
+  while a trade is flashing and while one is merely sitting in *Ready to whisper*.
+- Costs read in the seller's currency everywhere, and match what the whisper actually
+  offered.
+- Committed currency appears beside the bankroll boxes, and a trade you cannot afford
+  is not offered until you answer for the one holding the money.
+- Always-on-top floats over the game in borderless windowed.
 
 **If the install error recurs:** `%LOCALAPPDATA%\poe2-arb\poe2-arb.log`, grep for
 `install to ... failed` or `Start Menu shortcut`. The `--windowed` exe has no console,

@@ -153,6 +153,10 @@ class Config:
     sweep_interval_minutes: float = 10.0
     alert_sound: bool = True            # GUI: play a sound with the toast notification
     skip_install_prompt: bool = False   # set once the user declines the install offer
+    # Keep the window above other windows, including the game. Off by default
+    # because it is only wanted during a heavy trading session — the rest of the
+    # time a window that will not go behind anything is an obstruction.
+    always_on_top: bool = False
 
     # Politeness / caching
     refresh_minutes: int = 10           # min age before re-fetching any remote data

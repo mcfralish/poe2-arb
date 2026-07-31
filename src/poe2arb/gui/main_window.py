@@ -42,7 +42,7 @@ from ..config import (
     save_config,
     user_config_path,
 )
-from ..format import fmt_depth, fmt_pct, fmt_skew
+from ..format import fmt_amount, fmt_depth, fmt_pct, fmt_skew
 from ..market import BASE_CURRENCY_CHOICES, Universe
 from ..rate_limit import Severity, check_pacing, min_safe_interval, worst_severity
 from ..trade_queue import TradeQueue
@@ -138,6 +138,11 @@ class MainWindow(QMainWindow):
             # so they have to be allowed into the queue to be offered at all.
             queue_ghosts=self.cfg.risk_appetite > 0.0,
         )
+        # So the queue can hold back currency already promised to an outstanding
+        # whisper. The sweep sizes each trade against the whole bankroll, which
+        # is right one trade at a time and wrong across a queue of them.
+        self.trade_queue.set_bankroll(self.cfg.bankroll())
+        self._apply_always_on_top()
 
         self.icons = IconProvider(self.cfg.cache_dir, self)
         # One repaint per batch of arrivals rather than per icon: a table of 600
@@ -269,6 +274,7 @@ class MainWindow(QMainWindow):
         self.queue_panel.take_requested.connect(self._queue_take)
         self.queue_panel.outcome_reported.connect(self._queue_outcome)
         self.queue_panel.dismiss_requested.connect(self._queue_dismiss)
+        self.queue_panel.recopy_requested.connect(self._queue_recopy)
         self.lookup = QuickLookup()
         self.ops_split = QSplitter(Qt.Orientation.Vertical)
         self.ops_split.addWidget(self.queue_panel)
@@ -282,7 +288,15 @@ class MainWindow(QMainWindow):
         # claim about half the tab. The queues are the point of this tab, so give
         # them the lion's share outright; the splitter is still draggable.
         self.ops_split.setSizes([680, 140])
-        self.ops_split.setCollapsible(1, True)
+        # Neither pane collapses. A QSplitter will take a collapsible pane to
+        # zero regardless of its minimum size, and the position is saved — so a
+        # stray drag left the tab showing only Quick Lookup, and stayed that way
+        # across restarts with nothing on screen to explain it but a handle
+        # jammed against the top edge. Observed by screenshot from a saved
+        # `ops_split` of [0, 476]. Dragged shut the other way, Quick Lookup lost
+        # the note saying whether its number is a live Exchange price or a
+        # poe.ninja guess.
+        self.ops_split.setChildrenCollapsible(False)
         self.tabs.addTab(self.ops_split, "Opportunities")
 
         self.market = MarketPanel()
@@ -712,6 +726,7 @@ class MainWindow(QMainWindow):
         if trade.attempt_id:
             assert self.cfg.outcomes_path is not None
             record_outcome(self.cfg.outcomes_path, trade.attempt_id, trade.outcome)
+        self.sweep.note_outcome(trade.candidate, trade.outcome)
         self._log(f"{trade.candidate.item_name}: no reply (timed out)")
         self.results.reload()
 
@@ -728,21 +743,36 @@ class MainWindow(QMainWindow):
             if self.cfg.trade_hotkey_enabled and self._hotkey.active
             else ""
         )
+        # Priced in what the seller asked for, matching the whisper and the
+        # table — a toast quoting divines for an exalted listing is a number
+        # that appears nowhere else in the trade.
+        price = fmt_amount(c.pay_total, c.listing.pay_currency)
         self._notify(
             f"Trade: +{c.profit_divines:.2f} div{key_hint}",
-            f"{c.plan.units:g} × {c.item_name} from {seller} "
-            f"for {c.plan.cost_divines:.1f} div",
+            f"{c.plan.units:g} × {c.item_name} from {seller} for {price}",
         )
         self._log(
             f"offered: {c.plan.units:g} × {c.item_name} from {seller} "
-            f"for {c.plan.cost_divines:.1f} div (+{c.profit_divines:.2f})"
+            f"for {price} (+{c.profit_divines:.2f} div)"
         )
 
     def _hotkey_pressed(self) -> None:
-        """Take the live offer, if there is one. Otherwise do nothing loudly."""
+        """Take the live offer — or, if none is live, the oldest ready trade.
+
+        The fallback matters more than it looks. The alert window is seconds and
+        the listed window is minutes, so most of the time there is no live offer
+        and the key did nothing at all while the panel was full of perfectly
+        takeable rows. Falling through to the top of Ready to whisper — the one
+        nearest expiry, which is the row the user would have clicked — makes the
+        key mean "take the next trade" at every moment rather than only during
+        the toast.
+        """
         trade = self.trade_queue.offered
         if trade is None:
-            self.statusBar().showMessage("No trade is being offered right now", 4000)
+            ready = self.trade_queue.available
+            trade = ready[0] if ready else None
+        if trade is None:
+            self.statusBar().showMessage("No trade is ready to whisper right now", 4000)
             return
         self._queue_take(trade.id)
 
@@ -772,15 +802,49 @@ class MainWindow(QMainWindow):
             retention_days=self.cfg.history_retention_days,
         )
         c = taken.candidate
+        # The Trades tab is told too, so its "Ones I messaged" and "Ones I
+        # bought" filters cover whispers taken from the queue. Almost every
+        # whisper comes from here rather than from that table, so without this
+        # both filters read as permanently empty.
+        self.sweep.note_attempt(c, taken.attempt_id)
         self.statusBar().showMessage(
             f"Copied — paste in game with Ctrl+V, then Enter.  "
-            f"{c.plan.units:g} × {c.item_name} for {c.plan.cost_divines:.1f} div",
+            f"{c.plan.units:g} × {c.item_name} for "
+            f"{fmt_amount(c.pay_total, c.listing.pay_currency)}",
             15000,
         )
-        self._log(f"whisper copied: {c.item_name} from "
-                  f"{c.listing.character or c.listing.account}")
+        self._log(
+            f"whisper copied: {c.plan.units:g} × {c.item_name} from "
+            f"{c.listing.character or c.listing.account} for "
+            f"{fmt_amount(c.pay_total, c.listing.pay_currency)}"
+        )
         self.results.reload()
         self.queue_panel.refresh(self.trade_queue)
+
+    def _queue_recopy(self, trade_id: str) -> None:
+        """Put an already-sent whisper back on the clipboard, unchanged.
+
+        No new attempt is logged and no state moves: this is the same offer
+        being repeated to a seller who answered, and counting it twice would
+        put a second whisper in the fill-rate denominator for one message.
+        """
+        from PySide6.QtGui import QGuiApplication
+
+        from ..listings import whisper_text
+
+        trade = self.trade_queue.get(trade_id)
+        if trade is None:
+            return
+        text = whisper_text(trade.candidate)
+        if not text:
+            return
+        QGuiApplication.clipboard().setText(text)
+        c = trade.candidate
+        self.statusBar().showMessage(
+            f"Copied again — {c.plan.units:g} × {c.item_name} for "
+            f"{fmt_amount(c.pay_total, c.listing.pay_currency)}",
+            10000,
+        )
 
     def _queue_outcome(self, trade_id: str, outcome) -> None:
         from ..outcomes import record_outcome
@@ -794,15 +858,21 @@ class MainWindow(QMainWindow):
         if resolved.attempt_id:
             assert self.cfg.outcomes_path is not None
             record_outcome(self.cfg.outcomes_path, resolved.attempt_id, outcome)
+        self.sweep.note_outcome(resolved.candidate, outcome)
         self._log(f"{resolved.candidate.item_name}: {outcome.value}")
         self.results.reload()
         self.trade_queue.forget_resolved()
         self.queue_panel.refresh(self.trade_queue)
 
     def _queue_dismiss(self, trade_id: str) -> None:
+        """Decline: drop it, and don't offer it again for the rest of the session."""
         trade = self.trade_queue.get(trade_id)
-        if trade is not None and self.trade_queue.drop(trade_id):
-            self._log(f"dismissed: {trade.candidate.item_name}")
+        if trade is not None and self.trade_queue.decline(trade_id):
+            self._log(
+                f"declined: {trade.candidate.item_name} from "
+                f"{trade.candidate.listing.character or trade.candidate.listing.account}"
+                " — won't be offered again this session"
+            )
         self.queue_panel.refresh(self.trade_queue)
 
     def _setup_hotkey(self) -> None:
@@ -870,7 +940,24 @@ class MainWindow(QMainWindow):
             log.warning("no bankroll field for %r", currency)
             return
         setattr(self.cfg, field, held)
+        self.trade_queue.set_bankroll(self.cfg.bankroll())
         self._bankroll_save_timer.start()
+
+    def _apply_always_on_top(self) -> None:
+        """Float the window over the game, or stop doing so.
+
+        `setWindowFlag` re-creates the native window, which hides it on most
+        platforms — so a visible window has to be shown again afterwards, and a
+        hidden one (watching from the tray) must *not* be, or turning the
+        setting on would yank it back on screen.
+        """
+        flag = Qt.WindowType.WindowStaysOnTopHint
+        if bool(self.windowFlags() & flag) == self.cfg.always_on_top:
+            return
+        visible = self.isVisible()
+        self.setWindowFlag(flag, self.cfg.always_on_top)
+        if visible:
+            self.show()
 
     def _appetite_changed(self, appetite: float) -> None:
         """Re-rank what's already on screen, then persist lazily.
@@ -915,11 +1002,18 @@ class MainWindow(QMainWindow):
             ):
                 self.resize(720, 460)
                 self.move(100, 100)
-        sizes = state.get("ops_split")
-        if isinstance(sizes, list) and len(sizes) == 2 and all(
-            isinstance(n, int) and n >= 0 for n in sizes
+        for key, splitter in (
+            ("ops_split", self.ops_split), ("queue_split", self.queue_panel.split)
         ):
-            self.ops_split.setSizes(sizes)
+            sizes = state.get(key)
+            # A zero is rejected rather than clamped. Neither splitter allows a
+            # pane to be collapsed any more, so a saved zero is from a version
+            # that did — and restoring it would reproduce the collapsed tab the
+            # change exists to prevent.
+            if isinstance(sizes, list) and len(sizes) == 2 and all(
+                isinstance(n, int) and n > 0 for n in sizes
+            ):
+                splitter.setSizes(sizes)
         tab = state.get("tab")
         if isinstance(tab, int) and 0 <= tab < self.tabs.count():
             self.tabs.setCurrentIndex(tab)
@@ -930,6 +1024,7 @@ class MainWindow(QMainWindow):
             {
                 "geometry": encode_geometry(self.saveGeometry()),
                 "ops_split": self.ops_split.sizes(),
+                "queue_split": self.queue_panel.split.sizes(),
                 "tab": self.tabs.currentIndex(),
             },
         )
@@ -971,6 +1066,8 @@ class MainWindow(QMainWindow):
         self.trade_queue.available_ttl_s = self.cfg.available_ttl_s
         self.trade_queue.awaiting_timeout_s = self.cfg.awaiting_timeout_s
         self.trade_queue.queue_ghosts = self.cfg.risk_appetite > 0.0
+        self.trade_queue.set_bankroll(self.cfg.bankroll())
+        self._apply_always_on_top()
 
         rebind = (
             previous.trade_hotkey != self.cfg.trade_hotkey

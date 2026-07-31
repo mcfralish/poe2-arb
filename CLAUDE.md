@@ -27,10 +27,14 @@ widgets painting over other rows, a whisper quoting the wrong currency, and
 `MarketPanel.set_exclusions` never syncing the table's ticks. Use it rather than assuming a
 widget renders correctly because it constructs.
 
-Two traps when driving panels from a script: `MarketPanel` needs `set_universe(...)` **and**
-`render(names=..., values=..., volumes=...)` before any row exists, and a `QTableWidget`
+Traps when driving panels from a script: `MarketPanel` needs `set_universe(...)` **and**
+`render(names=..., values=..., volumes=...)` before any row exists; a `QTableWidget`
 check indicator is drawn on the leading edge whatever `setTextAlignment` says — centring one
-needs a delegate (`table_items.CentredCheckDelegate`).
+needs a delegate (`table_items.CentredCheckDelegate`); and a `QSplitter` collapses a
+collapsible pane to zero *regardless of its minimum size*, which is saved to `ui-state.json`
+and reproduced on the next launch. Both splitters on the Opportunities tab therefore set
+`setChildrenCollapsible(False)`, and `_restore_ui_state` rejects a saved zero rather than
+clamping it.
 
 Releases are tag-driven: push `vX.Y.Z` and `.github/workflows/release.yml` runs the tests,
 builds the Windows exe with PyInstaller, and cuts release notes from `CHANGELOG.md`. The
@@ -94,6 +98,15 @@ Two results from field tests are load-bearing in `listings.py` and must not be r
    times more gold and strand the user unable to trade at all. Gold is a budget constraint,
    not a cost in divines, and the app does not model it yet.
 
+**Money is displayed in the currency the seller asked for, not in divines.** `Candidate`
+exposes `pay_total` and `pay_per_unit` in `listing.pay_currency`, and the queue, the toast,
+the log and the status bar all use them. `plan.cost_divines` is the same money in the unit
+the arithmetic runs in and appears nowhere in the trade itself — shown alone, a listing
+whispered as "2412 exalted" reads as "5.6 div", which the user cannot match to a reply that
+arrives an hour later in a language they don't read. Profit stays in divines, because it is
+the only unit the two sides can be compared in. `Candidate.settle_currency` records what a
+row's profit was floored to, so the figure survives the setting being changed afterwards.
+
 The league is resolved by `sweep.resolve_league`, which auto-detects and **never falls back
 to a literal name**. It used to read `cfg.league or "Standard"`; Standard priced one measured
 item 5.7× above the temp league, so a default install valued every listing against the wrong
@@ -118,7 +131,9 @@ window assembly order.
 
 **Anything two panels both display lives in one module.** `gui/bands.py` owns the band glyph,
 short label and long tooltip because Trades and Results each had their own and showed the
-same fact in two vocabularies. Import from it rather than restating a symbol.
+same fact in two vocabularies. Import from it rather than restating a symbol. `format.py`
+owns `currency_label` / `fmt_qty` / `fmt_amount` for the same reason — three panels had
+drifted into three private copies of the currency suffix table.
 
 **Internal band names and user-facing words are deliberately different.** The enum stays
 `PLAUSIBLE` / `THIN` / `GHOST` — the code, the outcome log and `FINDINGS` all speak that

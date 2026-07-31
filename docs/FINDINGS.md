@@ -214,6 +214,48 @@ the ceiling is about a divine per fill.
 (0.34 div) had *zero* listings below CE. The value gate stays, but for this reason — not
 for the rounding reason it originally had.
 
+**4. The second field test cleared ~20 divines (2026-07-31).** The first session to end
+ahead, and the first evidence the loop works at all when the operator does the pricing
+sanity-check by hand. **No fill-rate or gap-band figures were recorded**, so nothing here
+supersedes the 14-whisper table above — the take is the only number, and a take without
+its denominator is not a rate. The session's value was the defect list, not the profit:
+see *Fixed in 0.6.0* below. **What the next session should record, since it costs nothing
+while the trades are in front of you:** whispers sent, replies, fills, and the gap on
+each — the four columns that would let `FILL_PRIOR` be fitted instead of guessed.
+
+### Fixed in 0.6.0, all found by one session of real use (2026-07-31)
+
+Kept because each is a class of bug the test suite could not see, and the pattern is
+worth more than the individual fixes:
+
+- **The global hotkey had never worked.** `nativeEventFilter` read `ctypes.wintypes.MSG`
+  without `import ctypes.wintypes` — a submodule, not an attribute — so every keypress
+  raised `AttributeError` inside the filter's own catch-all and was logged at *debug*.
+  Registration succeeded and reported success, so the log said the hotkey was live.
+  Two lessons: a `except Exception: log.debug(...)` around a feature's only code path can
+  hide the feature being entirely absent, and it was invisible to tests because the whole
+  branch is Windows-only. It is now logged at warning and reported to the user once.
+- **The bankroll was a per-trade allowance, not a total.** `build_candidates` sizes each
+  candidate against the whole pot, which is correct in isolation and wrong across a queue:
+  four separate 400-exalted trades are each affordable with 500 exalted. The queue now
+  holds committed currency back until the whisper is answered for. Affordability belongs
+  in the queue, not the sweep — the sweep cannot know what is already outstanding.
+- **Costs were displayed in divines for exalted-priced listings.** A listing whispered as
+  "2412 exalted" appeared as "5.6 div". Same money, but the user has to recognise the
+  offer when a reply arrives an hour later, often in a language they do not read. Money is
+  now shown in the seller's own currency everywhere.
+- **The Trades history filters were structurally empty.** "Ones I messaged" and "Ones I
+  bought" only learned about whispers copied from that table, and every whisper comes from
+  the queue. They were also cleared on each sweep — and a listing you *bought* is absent
+  from the next sweep by definition, so the one case the filter exists for was the one it
+  could never show.
+- **A collapsed splitter pane persists and looks like a missing feature.** A `QSplitter`
+  takes a collapsible pane to zero regardless of its minimum size, and the position is
+  saved: a stray drag left the Opportunities tab showing only Quick Lookup, across
+  restarts, with only a handle jammed against the top edge to explain it. Found by
+  screenshot, from a real saved `ops_split` of `[0, 476]`. Neither splitter is
+  collapsible now, and a saved zero is rejected rather than clamped.
+
 ## Denomination — the correction that mattered most
 
 **Exalted is the *more* common denomination.** 3,502 cached listings priced in exalted
@@ -310,6 +352,15 @@ Also worth not rediscovering:
   *not* how long the user has to decide; `available_ttl_s` (5 min); then
   `awaiting_timeout_s` (10 min) before a whisper self-records as NO_REPLY. Settings changes
   take effect immediately — needing a restart for a countdown you just shortened looks broken.
+  The latter two are **entered in minutes and stored in seconds**; the conversion lives in
+  the Settings dialog and nowhere else.
+- **The alert window and the listed window are two clocks on one lifetime, not two
+  lifetimes.** `expires_at` is set once when a trade is first shown and never restarted;
+  `alert_until` is the shorter one, and is deliberately not displayed. Until 0.6.0 the
+  Expires column showed whichever applied, so a live offer claimed 20 seconds of life and
+  then silently gained five minutes — and the seconds it spent flashing came out of the
+  listed time the user had configured. `expires_at` is floored at the alert window so a
+  short TTL cannot retire a trade whose own toast is still up.
 - **An unanswered whisper self-marks as NO_REPLY.** Silence is the majority outcome;
   leaving rows pending forever would bias the log toward whatever the user came back and
   clicked. Timeout 0 answers every one by hand.
@@ -317,14 +368,39 @@ Also worth not rediscovering:
   highlight would imply a second step that doesn't exist. This constrains the redraw:
   countdowns tick every second, and rebuilding a row would destroy the button under the
   cursor mid-click, so `refresh` rebuilds only when the set of trades changes.
+- **Rows do highlight on *hover*, which is not the same thing** — it is feedback about
+  what a click would act on, not a state to clear. Two traps, both found by screenshot:
+  in-row buttons are widgets parented to the viewport, so the view receives no mouse
+  event at all while the pointer is over one (`RowHoverTable.watch` reports it instead);
+  and setting `State_MouseOver` alone paints nothing under the styles this ships with, so
+  the delegate fills the row itself with a translucent tint from the palette's highlight.
 - **Action widgets must be unparented, not just removed, on rebuild.** `removeCellWidget`
   only schedules deletion; the orphan keeps painting at its old geometry until the event
   loop catches up, which put a live Accept/Decline on top of another row's Item column.
-- **The live offer is pinned to the top even when a lapsed trade is worth more** — it is
-  what the hotkey acts on. For the same reason the queue tables are **not sortable**.
+- **The two sections are ordered oppositely, and by presentation, not by rank.** Ready to
+  whisper is oldest-first so a new arrival appends at the bottom and nothing already on
+  screen moves; Waiting on a reply is newest-first because a reply is almost always to the
+  whisper just sent. The queue tables are **not sortable** for the same reason a row must
+  not move: a row that shifts between the glance and the click is a row clicked by mistake.
+  The live offer is **no longer pinned to the top** (it was until 0.6.0, which reshuffled
+  the list every alert window) — it carries the ● marker and is named in the headline,
+  which is where someone mid-map is looking.
+- **The hotkey falls through to the top of Ready when nothing is live.** The alert window
+  is seconds and the listed window is minutes, so most of the time there is no OFFERED
+  trade and the key did nothing while the panel was full of takeable rows.
 - **Submissions are deduplicated against everything unfinished**, including already-
   whispered trades. Sweeps overlap, and re-offering would have the user message the same
   seller twice.
+- **A declined trade is suppressed for the session; an app-initiated drop is not.**
+  `decline` remembers the key, `drop` does not. Declining is a judgement the user made and
+  a sweep ten minutes later re-finds the same listing; dropping a listing with no whisper
+  template is a fact about that fetch, and suppressing it would hide the listing if a
+  later fetch returned it complete. Deliberately **not persisted** — the reason for
+  declining is usually "not right now", which does not survive a restart.
+- **Currency promised to an outstanding whisper is held back from new offers.** See
+  *Negative results*, 0.6.0. Unaffordable candidates stay QUEUED rather than being
+  dropped, so a NO_REPLY frees the money and makes them offerable again. A pot left at 0
+  still means "I didn't say", not "I have nothing" — capping it would silently hide trades.
 - **Ghosts are never queued** (`queue_ghosts=False`). Interrupting a map for something
   measured never to fill is pure cost. They stay visible in Trades.
 - **A whispered trade cannot be dismissed, only resolved.** It is already recorded as an

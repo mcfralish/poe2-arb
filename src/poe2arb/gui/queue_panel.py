@@ -2,12 +2,21 @@
 
 Two lists, because they ask the user for two different things:
 
-- **Ready to whisper** — the live offer sits at the top with a countdown and the
-  hotkey armed. Anything that lapsed stays below it until it expires. Both are
-  takeable; the difference is only whether it's currently worth interrupting a
-  map for.
-- **Waiting on a reply** — everything already whispered, each self-marking as
-  "no reply" when its timer runs out.
+- **Ready to whisper** — everything takeable, oldest at the top and the newest
+  arrival at the bottom, with the live offer marked. Both are takeable; the
+  difference is only whether it's currently worth interrupting a map for.
+- **Waiting on a reply** — everything already whispered, **newest first**, each
+  self-marking as "no reply" when its timer runs out.
+
+The two orders are deliberately opposite. Ready is read top-down and must not
+reshuffle under the cursor, so new rows append at the bottom. Waiting is read
+when a reply arrives, and a reply is almost always to the whisper just sent.
+
+**Money is shown in the currency the seller asked for**, not in divines. A
+listing whispered as "2412 exalted" displayed as "5.6 div" is unrecognisable as
+the offer that was made — which matters most when a reply lands an hour later in
+a language the user doesn't read. Profit stays in divines, because that is the
+only unit the two sides of the trade can be compared in.
 
 **Every action is one click on the row itself.** No select-then-press: the
 buttons live in the row they act on, because this is used mid-map and a
@@ -29,47 +38,64 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QPushButton,
+    QSplitter,
     QTableWidget,
     QVBoxLayout,
     QWidget,
 )
 
+from ..format import currency_label, fmt_amount, fmt_qty
 from ..listings import Band
 from ..outcomes import Outcome
 from ..trade_queue import QueueState
 from .bankroll_bar import BankrollBar
-from .table_items import NumericItem, TextItem
+from .table_items import NumericItem, RowHoverTable, TextItem
 from .theme import muted_color
 
 log = logging.getLogger(__name__)
+
+_COST_TIP = (
+    "Total you'd hand over, in the currency the seller asked for — the figure "
+    "that goes into the whisper."
+)
+_EACH_TIP = "Price of one, in the same currency, so rows stay comparable."
+_SETTLE_TIP = (
+    "What you'd take when reselling on the Currency Exchange. It sets the "
+    "Profit figure, because proceeds round down to a whole unit of it — a whole "
+    "divine if you settle in divines, which is the expensive way round."
+)
 
 READY_COLUMNS = [
     ("", "A dot marks the live offer — the one the hotkey will copy."),
     ("Item", "What you'd be buying."),
     ("Buy", "How many to ask for."),
-    ("Cost", "Divines you'd spend."),
+    ("Each", _EACH_TIP),
+    ("Cost", _COST_TIP),
     ("Profit", "Divines you'd clear, after rounding."),
+    ("Settle", _SETTLE_TIP),
     ("Seller", "Character to whisper."),
     ("Expires", "How long before this drops off the list."),
-    ("", "Accept copies the whisper. Decline drops it."),
+    ("", "Accept copies the whisper. Decline drops it for the rest of the session."),
 ]
 
 AWAITING_COLUMNS = [
     ("Item", "What you asked for."),
     ("Buy", "How many you asked for."),
-    ("Cost", "Divines offered."),
+    ("Each", _EACH_TIP),
+    ("Cost", _COST_TIP),
     ("Profit", "Divines you'd clear if they trade."),
+    ("Settle", _SETTLE_TIP),
     ("Seller", "Who you whispered."),
     ("Sent", "How long ago you copied the whisper."),
     ("Auto", "Marks itself as no reply when this runs out."),
-    ("", "One click records what happened."),
+    ("", "Copy again puts the same whisper back on the clipboard."),
 ]
 
-READY_TIMER_COLUMN = 6
-READY_ACTION_COLUMN = 7
-AWAITING_ELAPSED_COLUMN = 5
-AWAITING_TIMER_COLUMN = 6
-AWAITING_ACTION_COLUMN = 7
+READY_TIMER_COLUMN = 8
+READY_ACTION_COLUMN = 9
+AWAITING_ELAPSED_COLUMN = 7
+AWAITING_TIMER_COLUMN = 8
+AWAITING_ACTION_COLUMN = 9
 
 TRADE_ID = Qt.ItemDataRole.UserRole
 
@@ -80,6 +106,7 @@ class QueuePanel(QWidget):
     take_requested = Signal(str)              # trade id
     outcome_reported = Signal(str, object)    # (trade id, Outcome)
     dismiss_requested = Signal(str)           # trade id
+    recopy_requested = Signal(str)            # trade id, already whispered
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -103,13 +130,18 @@ class QueuePanel(QWidget):
         self.bankroll = BankrollBar()
         layout.addWidget(self.bankroll)
 
-        layout.addWidget(_section_label(self, "Ready to whisper"))
+        # Draggable, like Quick Lookup below it. How the two sections should be
+        # divided depends entirely on which half of the loop you're in — early
+        # in a session everything is Ready, late in one everything is awaiting a
+        # reply — and that is not a split the app can guess.
+        self.split = QSplitter(Qt.Orientation.Vertical)
+        self.split.setChildrenCollapsible(False)
         self.ready = _make_table(READY_COLUMNS)
-        layout.addWidget(self.ready, stretch=1)
-
-        layout.addWidget(_section_label(self, "Waiting on a reply"))
         self.awaiting = _make_table(AWAITING_COLUMNS)
-        layout.addWidget(self.awaiting, stretch=1)
+        self.split.addWidget(_section(self, "Ready to whisper", self.ready))
+        self.split.addWidget(_section(self, "Waiting on a reply", self.awaiting))
+        self.split.setSizes([300, 300])
+        layout.addWidget(self.split, stretch=1)
 
         self._icons = None
         self._hotkey_hint = ""
@@ -147,6 +179,7 @@ class QueuePanel(QWidget):
         now = now or datetime.now(timezone.utc)
         self._sync_ready(queue.available, now)
         self._sync_awaiting(queue.awaiting, now)
+        self.bankroll.set_committed(queue.committed())
         self._update_headline(queue, now)
 
     def _update_headline(self, queue, now) -> None:
@@ -155,8 +188,9 @@ class QueuePanel(QWidget):
             left = offered.seconds_left(now) or 0
             c = offered.candidate
             self.headline.setText(
-                f"{c.plan.units:g} × {c.item_name} for {c.plan.cost_divines:.1f} div "
-                f"→ +{c.profit_divines:.2f} div     ({left:.0f}s)"
+                f"{fmt_qty(c.plan.units)} × {c.item_name} for "
+                f"{fmt_amount(c.pay_total, c.listing.pay_currency)} "
+                f"→ +{c.profit_divines:.2f} div     ({_countdown(left)})"
             )
             self.hint.setText(
                 f"Press {self._hotkey_hint} to copy it, or click Accept below."
@@ -206,40 +240,20 @@ class QueuePanel(QWidget):
             marker.setData(TRADE_ID, t.id)
             self.ready.setItem(row, 0, marker)
 
-            name = TextItem(c.item_name)
-            if self._icons is not None:
-                icon = self._icons.icon(c.listing.item_id)
-                if icon is not None:
-                    name.setIcon(icon)
-            if c.band is Band.THIN:
-                name.setToolTip(
-                    "The discount is inside the Exchange price's own margin of "
-                    "error, so the profit figure is uncertain."
-                )
-            self.ready.setItem(row, 1, name)
-            self.ready.setItem(row, 2, NumericItem(f"{c.plan.units:g}", c.plan.units))
-            self.ready.setItem(
-                row, 3, NumericItem(f"{c.plan.cost_divines:.1f}", c.plan.cost_divines)
-            )
-            self.ready.setItem(
-                row, 4, NumericItem(f"+{c.profit_divines:.2f}", c.profit_divines)
-            )
-            self.ready.setItem(
-                row, 5, TextItem(c.listing.character or c.listing.account)
-            )
+            self.ready.setItem(row, 1, self._name_cell(c))
+            self._set_money(self.ready, row, c, first=2)
+            self.ready.setItem(row, 7, TextItem(_seller(c)))
             self.ready.setItem(row, READY_TIMER_COLUMN, TextItem(""))
-            self.ready.setCellWidget(
-                row,
-                READY_ACTION_COLUMN,
-                _actions(
-                    [
-                        ("Accept", "Copy the whisper and move this to 'waiting on a reply'.",
-                         lambda tid=t.id: self.take_requested.emit(tid)),
-                        ("Decline", "Drop this trade without whispering anyone.",
-                         lambda tid=t.id: self.dismiss_requested.emit(tid)),
-                    ]
-                ),
+            actions = _actions(
+                [
+                    ("Accept", "Copy the whisper and move this to 'waiting on a reply'.",
+                     lambda tid=t.id: self.take_requested.emit(tid)),
+                    ("Decline", "Drop this trade. It won't be offered again this session.",
+                     lambda tid=t.id: self.dismiss_requested.emit(tid)),
+                ]
             )
+            self.ready.setCellWidget(row, READY_ACTION_COLUMN, actions)
+            self.ready.watch(actions, row)
 
     # --- awaiting section --------------------------------------------------
 
@@ -262,39 +276,71 @@ class QueuePanel(QWidget):
         self.awaiting.setRowCount(len(trades))
         for row, t in enumerate(trades):
             c = t.candidate
-            name = TextItem(c.item_name)
+            name = self._name_cell(c)
             name.setData(TRADE_ID, t.id)
-            if self._icons is not None:
-                icon = self._icons.icon(c.listing.item_id)
-                if icon is not None:
-                    name.setIcon(icon)
             self.awaiting.setItem(row, 0, name)
-            self.awaiting.setItem(row, 1, NumericItem(f"{c.plan.units:g}", c.plan.units))
-            self.awaiting.setItem(
-                row, 2, NumericItem(f"{c.plan.cost_divines:.1f}", c.plan.cost_divines)
-            )
-            self.awaiting.setItem(
-                row, 3, NumericItem(f"+{c.profit_divines:.2f}", c.profit_divines)
-            )
-            self.awaiting.setItem(
-                row, 4, TextItem(c.listing.character or c.listing.account)
-            )
+            self._set_money(self.awaiting, row, c, first=1)
+            self.awaiting.setItem(row, 6, TextItem(_seller(c)))
             self.awaiting.setItem(row, AWAITING_ELAPSED_COLUMN, TextItem(""))
             self.awaiting.setItem(row, AWAITING_TIMER_COLUMN, TextItem(""))
-            self.awaiting.setCellWidget(
-                row,
-                AWAITING_ACTION_COLUMN,
-                _actions(
-                    [
-                        ("Traded", "The trade went through.",
-                         lambda tid=t.id: self.outcome_reported.emit(tid, Outcome.FILLED)),
-                        ("No reply", "They never answered.",
-                         lambda tid=t.id: self.outcome_reported.emit(tid, Outcome.NO_REPLY)),
-                        ("Already sold", "They replied to say it's gone.",
-                         lambda tid=t.id: self.outcome_reported.emit(tid, Outcome.SOLD)),
-                    ]
-                ),
+            actions = _actions(
+                [
+                    # First, because it is the one with a deadline: a seller who
+                    # answers wants the offer repeated, and retyping it by hand
+                    # is how a trade gets lost.
+                    ("Copy again", "Put this whisper back on the clipboard, unchanged.",
+                     lambda tid=t.id: self.recopy_requested.emit(tid)),
+                    ("Traded", "The trade went through.",
+                     lambda tid=t.id: self.outcome_reported.emit(tid, Outcome.FILLED)),
+                    ("No reply", "They never answered.",
+                     lambda tid=t.id: self.outcome_reported.emit(tid, Outcome.NO_REPLY)),
+                    ("Already sold", "They replied to say it's gone.",
+                     lambda tid=t.id: self.outcome_reported.emit(tid, Outcome.SOLD)),
+                ]
             )
+            self.awaiting.setCellWidget(row, AWAITING_ACTION_COLUMN, actions)
+            self.awaiting.watch(actions, row)
+
+    # --- shared cells ------------------------------------------------------
+
+    def _name_cell(self, candidate) -> TextItem:
+        name = TextItem(candidate.item_name)
+        if self._icons is not None:
+            icon = self._icons.icon(candidate.listing.item_id)
+            if icon is not None:
+                name.setIcon(icon)
+        if candidate.band is Band.THIN:
+            name.setToolTip(
+                "The discount is inside the Exchange price's own margin of "
+                "error, so the profit figure is uncertain."
+            )
+        return name
+
+    @staticmethod
+    def _set_money(table: QTableWidget, row: int, c, *, first: int) -> None:
+        """Buy / Each / Cost / Profit / Settle, in that order from `first`.
+
+        One writer for both tables. They showed the same five facts in two
+        vocabularies once already; the columns only stay in step if there is a
+        single place that fills them.
+        """
+        pay = c.listing.pay_currency
+        table.setItem(row, first, NumericItem(fmt_qty(c.plan.units), c.plan.units))
+        each = NumericItem(fmt_amount(c.pay_per_unit, pay), c.pay_per_unit)
+        each.setToolTip(_EACH_TIP)
+        table.setItem(row, first + 1, each)
+        cost = NumericItem(fmt_amount(c.pay_total, pay), c.pay_total)
+        cost.setToolTip(
+            f"{_COST_TIP}\n\nThat's {c.plan.cost_divines:.2f} divines' worth."
+        )
+        table.setItem(row, first + 2, cost)
+        table.setItem(
+            row, first + 3, NumericItem(f"+{c.profit_divines:.2f}", c.profit_divines)
+        )
+        settle = TextItem(currency_label(c.settle_currency))
+        settle.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        settle.setToolTip(_SETTLE_TIP)
+        table.setItem(row, first + 4, settle)
 
     # --- helpers used by tests ---------------------------------------------
 
@@ -317,6 +363,10 @@ class QueuePanel(QWidget):
         return False
 
 
+def _seller(candidate) -> str:
+    return candidate.listing.character or candidate.listing.account
+
+
 def _clear_widgets(table: QTableWidget, column: int) -> None:
     """Drop the action widgets before a rebuild.
 
@@ -329,6 +379,10 @@ def _clear_widgets(table: QTableWidget, column: int) -> None:
     orphan keeps painting until the event loop gets round to it. Unparenting is
     what actually takes it off screen this frame.
     """
+    # The highlighted row index describes the old row set, and the rebuild is
+    # what changed it. Cleared here rather than left to drift onto whichever
+    # trade inherits the index; the fresh widget under the cursor re-reports it.
+    table.set_hover_row(-1)
     for row in range(table.rowCount()):
         widget = table.cellWidget(row, column)
         if widget is None:
@@ -354,31 +408,43 @@ def _actions(specs) -> QWidget:
     return holder
 
 
-def _section_label(widget: QWidget, text: str) -> QLabel:
+def _section(widget: QWidget, text: str, table: QTableWidget) -> QWidget:
+    """A titled table, as one splitter pane so the label travels with it."""
+    page = QWidget()
+    layout = QVBoxLayout(page)
+    layout.setContentsMargins(0, 0, 0, 0)
     label = QLabel(text)
     font = label.font()
     font.setBold(True)
     label.setFont(font)
-    return label
+    layout.addWidget(label)
+    layout.addWidget(table, stretch=1)
+    return page
 
 
-def _make_table(columns) -> QTableWidget:
-    table = QTableWidget(0, len(columns))
+def _make_table(columns) -> RowHoverTable:
+    table = RowHoverTable(len(columns))
     table.setHorizontalHeaderLabels([c[0] for c in columns])
     for i, (_, tip) in enumerate(columns):
         table.horizontalHeaderItem(i).setToolTip(tip)
     # No selection at all: every action is a button in its own row, so a
-    # highlighted row would only suggest a second step that doesn't exist.
+    # highlighted row would only suggest a second step that doesn't exist. The
+    # row still lights up on hover — see RowHoverTable — which is feedback about
+    # what a click would act on rather than a state the user has to clear.
     table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
     table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
     table.setAlternatingRowColors(True)
     table.verticalHeader().setVisible(False)
-    # Deliberately not sortable: the order is the queue's ranking, and a click
-    # that reordered it would move the live offer away from the top.
+    # Deliberately not sortable: the order is presentation order — oldest first
+    # in Ready, newest first in Waiting — and a click that reordered it would
+    # move rows out from under the cursor mid-click.
     header = table.horizontalHeader()
     header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
-    seller = next(i for i, (title, _) in enumerate(columns) if title == "Seller")
-    header.setSectionResizeMode(seller, QHeaderView.ResizeMode.Stretch)
+    # Item absorbs the slack, not Seller. Item names run to "Zarokh's Reliquary
+    # Key: Against the Darkness"; character names are short, and stretching
+    # them left a third of the table as one empty column.
+    item = next(i for i, (title, _) in enumerate(columns) if title == "Item")
+    header.setSectionResizeMode(item, QHeaderView.ResizeMode.Stretch)
     return table
 
 

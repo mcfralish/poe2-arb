@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..format import fmt_amount
 from .theme import muted_color
 
 # The two currencies sellers actually quote in. Anything else is unconstrained.
@@ -87,6 +88,21 @@ class BankrollBar(QWidget):
             self.spins[currency] = spin
             layout.addWidget(spin)
 
+        # What is already promised to whispers still awaiting an answer. Shown
+        # because the pots above are what you *had*: with 500 exalted you could
+        # accept four separate 400-exalted trades, each individually affordable
+        # (reported from the field 2026-07-31). Hidden when nothing is
+        # outstanding, which is most of the time.
+        self.committed_label = QLabel()
+        self.committed_label.setStyleSheet(f"color: {muted_color(self)};")
+        self.committed_label.setToolTip(
+            "Currency promised to whispers you're still waiting on. It's held "
+            "back from the trades you're offered until you say what happened, "
+            "so you can't commit the same orbs twice."
+        )
+        self.committed_label.hide()
+        layout.addWidget(self.committed_label)
+
         layout.addSpacing(12)
         layout.addWidget(QLabel("Settle in:"))
         # Here rather than in Settings because it changes every Profit figure
@@ -149,6 +165,18 @@ class BankrollBar(QWidget):
 
     def values(self) -> dict[str, float]:
         return {c: spin.value() for c, spin in self.spins.items()}
+
+    def set_committed(self, spent: dict[str, float]) -> None:
+        """Show what outstanding whispers have already claimed, if anything."""
+        parts = [
+            fmt_amount(amount, currency)
+            for currency, amount in sorted(spent.items())
+            if amount > 0
+        ]
+        self.committed_label.setText(
+            f"({' + '.join(parts)} committed)" if parts else ""
+        )
+        self.committed_label.setVisible(bool(parts))
 
     # -- settlement currency
 

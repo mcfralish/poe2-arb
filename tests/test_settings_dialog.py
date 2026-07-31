@@ -157,3 +157,50 @@ class TestLeague:
         )
         d.restore_defaults()
         assert d.result_config().league is None
+
+
+class TestTheQueueTimersAreInMinutes:
+    """Reading "600 s" off a spin box to work out whether it's long enough is
+    arithmetic the dialog should be doing. The config stays in seconds."""
+
+    def test_the_widgets_show_minutes(self, dialog):
+        assert dialog.available_ttl.suffix().strip() == "min"
+        assert dialog.awaiting_timeout.suffix().strip() == "min"
+        assert dialog.available_ttl.value() == 5.0     # 300 s
+        assert dialog.awaiting_timeout.value() == 10.0  # 600 s
+
+    def test_saving_converts_back_to_seconds(self, dialog):
+        dialog.available_ttl.setValue(2.5)
+        dialog.awaiting_timeout.setValue(15)
+        cfg = dialog.result_config()
+        assert cfg.available_ttl_s == 150.0
+        assert cfg.awaiting_timeout_s == 900.0
+
+    def test_an_untouched_dialog_round_trips_exactly(self, dialog):
+        """A dialog opened and OK'd must not quietly change the saved values."""
+        cfg = dialog.result_config()
+        assert cfg.available_ttl_s == Config().available_ttl_s
+        assert cfg.awaiting_timeout_s == Config().awaiting_timeout_s
+
+    def test_zero_still_means_never(self, dialog):
+        dialog.awaiting_timeout.setValue(0)
+        assert dialog.awaiting_timeout.specialValueText() == "never"
+        assert dialog.result_config().awaiting_timeout_s == 0.0
+
+    def test_the_alert_window_stays_in_seconds(self, dialog):
+        """Twenty seconds expressed in minutes is a third of a decimal place."""
+        assert dialog.offer_window.suffix().strip() == "s"
+
+
+class TestAlwaysOnTop:
+    def test_it_is_offered_and_defaults_off(self, dialog):
+        assert dialog.always_on_top.isChecked() is False
+
+    def test_it_round_trips(self, dialog):
+        dialog.always_on_top.setChecked(True)
+        assert dialog.result_config().always_on_top is True
+
+    def test_restore_defaults_clears_it(self, dialog):
+        dialog.always_on_top.setChecked(True)
+        dialog.restore_defaults()
+        assert dialog.always_on_top.isChecked() is False

@@ -26,6 +26,20 @@ from PySide6.QtCore import QAbstractNativeEventFilter, QObject, Signal
 
 log = logging.getLogger(__name__)
 
+# `ctypes.wintypes` is a submodule, not an attribute: `import ctypes` alone
+# leaves `ctypes.wintypes` undefined. The event filter read `ctypes.wintypes.MSG`
+# without it, so every keypress raised AttributeError inside the filter's own
+# catch-all and was logged at debug and dropped — the hotkey registered
+# successfully, said so in the log, and then did nothing at all when pressed
+# (reported from the field 2026-07-31). Imported here, once, and guarded because
+# the module only exists on Windows.
+if sys.platform == "win32":  # pragma: no cover - exercised only on Windows
+    import ctypes.wintypes
+
+    MSG = ctypes.wintypes.MSG
+else:
+    MSG = None
+
 WM_HOTKEY = 0x0312
 
 MOD_ALT = 0x0001
@@ -128,6 +142,7 @@ class GlobalHotkey(QObject, QAbstractNativeEventFilter):
         self._registered = False
         self._binding: str | None = None
         self._filter_installed = False
+        self._filter_failed = False
 
     @property
     def supported(self) -> bool:
@@ -188,17 +203,26 @@ class GlobalHotkey(QObject, QAbstractNativeEventFilter):
 
     def nativeEventFilter(self, event_type, message):  # noqa: N802 (Qt naming)
         """Qt hands us every native message; we care about exactly one."""
-        if not self._registered:
+        if not self._registered or MSG is None:
             return False, 0
         try:
             if event_type not in (b"windows_generic_MSG", b"windows_dispatcher_MSG"):
                 return False, 0
-            msg = ctypes.wintypes.MSG.from_address(int(message))  # type: ignore[attr-defined]
+            msg = MSG.from_address(int(message))
             if msg.message == WM_HOTKEY and msg.wParam == self.HOTKEY_ID:
                 self.pressed.emit()
                 # Not consumed: the message is ours by registration, and Qt has
                 # no further use for it either way.
                 return False, 0
         except Exception:  # noqa: BLE001 — this runs for every native message
-            log.debug("hotkey filter error", exc_info=True)
+            # Warning, not debug: this path silently disabled the hotkey for a
+            # whole release. It runs per native message, so it is logged once
+            # and then suppressed rather than flooding the file.
+            if not self._filter_failed:
+                self._filter_failed = True
+                log.warning("hotkey event filter failed; hotkey is inert", exc_info=True)
+                self.error.emit(
+                    "the hotkey registered but its key events can't be read — "
+                    "use the Accept button instead"
+                )
         return False, 0

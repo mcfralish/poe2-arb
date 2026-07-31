@@ -209,6 +209,12 @@ class Candidate:
     # `Listing.price_per_unit` is in the seller's currency, and a sweep mixes
     # divine- and exalted-priced listings in one table.
     unit_price_divines: float = 0.0
+    # What the resale is settled in. Carried on the candidate rather than looked
+    # up from the config at display time because it is an *input* to
+    # `plan.profit_divines` — the floor is a whole unit of this — so a row must
+    # be able to say which currency its own profit figure was computed against,
+    # even after the setting has since been changed.
+    settle_currency: str = UNIT_CURRENCY
 
     @property
     def key(self) -> tuple:
@@ -241,6 +247,23 @@ class Candidate:
         return self.plan.profit_divines
 
     @property
+    def pay_total(self) -> float:
+        """What the whisper offers, in the seller's own currency.
+
+        The number the user has to recognise when a reply arrives — often hours
+        later, often in a language they don't read. `plan.cost_divines` is the
+        same money in a different unit, and showing only that meant a listing
+        whispered as "2412 exalted" appeared on screen as "5.6 div", which is
+        unrecognisable as the offer that was made.
+        """
+        return self.plan.lots * self.listing.pay_amount
+
+    @property
+    def pay_per_unit(self) -> float:
+        """Per-item price in the seller's currency, to match `pay_total`."""
+        return self.listing.price_per_unit
+
+    @property
     def affordable(self) -> bool:
         return self.plan.lots >= 1
 
@@ -262,6 +285,7 @@ def build_candidates(
     max_gap: float,
     bankroll: dict[str, float] | None = None,
     sale_unit_divines: float = 1.0,
+    settle_currency: str = UNIT_CURRENCY,
     min_profit_divines: float = 0.0,
 ) -> list[Candidate]:
     """Price every listing against the CE and keep the ones worth a whisper.
@@ -311,6 +335,7 @@ def build_candidates(
                 plan=plan,
                 band=classify(gap, min_gap=min_gap, max_gap=max_gap),
                 unit_price_divines=unit_price,
+                settle_currency=settle_currency,
             )
         )
     return out

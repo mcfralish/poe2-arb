@@ -14,7 +14,14 @@ from PySide6.QtWidgets import (  # noqa: E402
     QWidget,
 )
 
-from poe2arb.gui.queue_panel import TRADE_ID, QueuePanel  # noqa: E402
+from poe2arb.gui.queue_panel import (  # noqa: E402
+    AWAITING_ACTION_COLUMN,
+    AWAITING_TIMER_COLUMN,
+    READY_ACTION_COLUMN,
+    READY_TIMER_COLUMN,
+    TRADE_ID,
+    QueuePanel,
+)
 from poe2arb.listings import Listing, build_candidates  # noqa: E402
 from poe2arb.outcomes import Outcome  # noqa: E402
 from poe2arb.trade_queue import QueueState, TradeQueue  # noqa: E402
@@ -66,7 +73,9 @@ def test_the_headline_names_the_live_offer_and_its_countdown(qapp):
     text = p.headline.text()
     assert "Omen of Light" in text
     assert "+" in text and "div" in text
-    assert "15s" in text
+    # The listed deadline, not the alert window: "how long until this is gone"
+    # is the only one of the two clocks the user has a decision hanging on.
+    assert "1m" in text
 
 
 def test_taking_moves_a_trade_between_the_sections(qapp):
@@ -178,22 +187,22 @@ def test_a_countdown_tick_does_not_rebuild_the_row(qapp):
     """The tables redraw every second; rebuilding would kill the button under
     the cursor between press and release."""
     p, q = loaded(qapp, cand())
-    widget = p.ready.cellWidget(0, 7)
+    widget = p.ready.cellWidget(0, READY_ACTION_COLUMN)
     p.refresh(q, T0 + timedelta(seconds=5))
     qapp.processEvents()
-    assert p.ready.cellWidget(0, 7) is widget          # same widget object
-    assert p.ready.item(0, 6).text() != "15s"          # but the timer moved
+    assert p.ready.cellWidget(0, READY_ACTION_COLUMN) is widget          # same widget object
+    assert p.ready.item(0, READY_TIMER_COLUMN).text() != "1m"           # but the timer moved
 
 
 def test_a_changed_row_set_does_rebuild(qapp):
     p, q = loaded(qapp, cand(char="A"))
-    first = p.ready.cellWidget(0, 7)
+    first = p.ready.cellWidget(0, READY_ACTION_COLUMN)
     q.submit([cand(char="B")], T0)
     q.tick(T0 + timedelta(seconds=16))
     p.refresh(q, T0 + timedelta(seconds=16))
     qapp.processEvents()
     assert p.ready.rowCount() == 2
-    assert p.ready.cellWidget(0, 7) is not first
+    assert p.ready.cellWidget(0, READY_ACTION_COLUMN) is not first
 
 
 def test_awaiting_shows_its_auto_no_reply_countdown(qapp):
@@ -201,10 +210,10 @@ def test_awaiting_shows_its_auto_no_reply_countdown(qapp):
     q.take_offered(T0)
     p.refresh(q, T0)
     qapp.processEvents()
-    assert p.awaiting.item(0, 6).text() == "5m"
+    assert p.awaiting.item(0, AWAITING_TIMER_COLUMN).text() == "5m"
     p.refresh(q, T0 + timedelta(seconds=270))
     qapp.processEvents()
-    assert p.awaiting.item(0, 6).text() == "30s"
+    assert p.awaiting.item(0, AWAITING_TIMER_COLUMN).text() == "30s"
 
 
 def test_an_auto_resolved_trade_leaves_the_lower_section(qapp):
@@ -240,3 +249,127 @@ def test_shrinking_the_list_removes_its_widgets(qapp):
     holders = [w for w in p.ready.findChildren(QWidget)
                if w.findChildren(QPushButton) and w.parent() is p.ready.viewport()]
     assert holders == []
+
+
+# --- money is shown in the currency the seller asked for --------------------
+
+def ex_cand(*, char="Xiaolong", pay=2412.0, get=1.0, item="omen"):
+    """An exalted-priced listing, which is the more common kind on this venue."""
+    listing = Listing(
+        item_id=item, account=f"{char}#1", character=char,
+        pay_currency="exalted", pay_amount=pay, get_amount=get, stock=9.0,
+        indexed=T0, whisper=f"@{char} buy {{0}} for {{1}}",
+        item_whisper="{0} Thing", pay_whisper="{0} Coin",
+    )
+    [c] = build_candidates(
+        [listing], {item: 6.9, "divine": 1.0, "exalted": 0.00231},
+        {item: "Omen of Whittling"},
+        min_gap=1.05, max_gap=1.5, sale_unit_divines=0.00231,
+        settle_currency="exalted",
+    )
+    return c
+
+
+class TestCostColumns:
+    """A listing whispered as "2412 exalted" showed on screen as "5.6 div".
+
+    Unrecognisable as the offer that was made — which is exactly the problem
+    when a reply lands an hour later in a language you don't read.
+    """
+
+    def test_ready_shows_the_total_in_the_sellers_currency(self, qapp):
+        p, q = loaded(qapp, ex_cand())
+        assert p.ready.item(0, 4).text() == "21,708 ex"
+
+    def test_ready_shows_the_per_unit_price_alongside_it(self, qapp):
+        p, q = loaded(qapp, ex_cand())
+        assert p.ready.item(0, 3).text() == "2,412 ex"
+
+    def test_ready_names_the_settlement_currency(self, qapp):
+        """It sets the Profit figure, so a row has to say which one it used."""
+        p, q = loaded(qapp, ex_cand())
+        assert p.ready.item(0, 6).text() == "ex"
+
+    def test_the_same_five_columns_appear_in_waiting(self, qapp):
+        p, q = loaded(qapp, ex_cand())
+        q.take_offered(T0)
+        p.refresh(q, T0)
+        qapp.processEvents()
+        assert p.awaiting.item(0, 2).text() == "2,412 ex"   # each
+        assert p.awaiting.item(0, 3).text() == "21,708 ex"  # cost
+        assert p.awaiting.item(0, 5).text() == "ex"         # settle
+
+    def test_the_headline_quotes_the_sellers_currency_too(self, qapp):
+        p, q = loaded(qapp, ex_cand())
+        assert "21,708 ex" in p.headline.text()
+
+
+# --- hovering a button highlights the row it acts on ------------------------
+
+def _enter(widget):
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QEnterEvent
+
+    pos = QPoint(2, 2)
+    QApplication.sendEvent(
+        widget, QEnterEvent(pos, pos, widget.mapToGlobal(pos))
+    )
+
+
+class TestRowHover:
+    """Cell widgets are separate widgets the view never sees a mouse event for,
+    so hovering Accept used to highlight nothing at all."""
+
+    def _button(self, panel, table, row, label):
+        column = (
+            READY_ACTION_COLUMN if table is panel.ready else AWAITING_ACTION_COLUMN
+        )
+        widget = table.cellWidget(row, column)
+        return next(b for b in widget.findChildren(QPushButton) if b.text() == label)
+
+    def test_hovering_accept_marks_its_own_row(self, qapp):
+        p, q = loaded(qapp, cand(char="A"), cand(char="B"))
+        q.tick(T0 + timedelta(seconds=16))
+        p.refresh(q, T0 + timedelta(seconds=16))
+        qapp.processEvents()
+        assert p.ready.rowCount() == 2
+        _enter(self._button(p, p.ready, 1, "Accept"))
+        assert p.ready.hover_row == 1
+
+    def test_hovering_decline_marks_the_same_row(self, qapp):
+        p, q = loaded(qapp, cand())
+        _enter(self._button(p, p.ready, 0, "Decline"))
+        assert p.ready.hover_row == 0
+
+    def test_the_waiting_verdict_buttons_do_it_too(self, qapp):
+        p, q = loaded(qapp, cand())
+        q.take_offered(T0)
+        p.refresh(q, T0)
+        qapp.processEvents()
+        for label in ("Traded", "No reply", "Already sold"):
+            p.awaiting.set_hover_row(-1)
+            _enter(self._button(p, p.awaiting, 0, label))
+            assert p.awaiting.hover_row == 0, label
+
+
+# --- repeating a whisper ----------------------------------------------------
+
+def test_copy_again_asks_for_the_same_trade(qapp):
+    """A seller who answers wants the offer repeated; retyping it loses trades."""
+    p, q = loaded(qapp, cand())
+    taken = q.take_offered(T0)
+    p.refresh(q, T0)
+    qapp.processEvents()
+    seen = []
+    p.recopy_requested.connect(seen.append)
+    assert p.click_action(p.awaiting, 0, "Copy again")
+    assert seen == [taken.id]
+
+
+# --- the two sections can be resized against each other ---------------------
+
+def test_the_two_sections_share_a_draggable_splitter(qapp):
+    """How to divide them depends on which half of the loop you're in."""
+    p, _ = loaded(qapp, cand())
+    assert p.split.count() == 2
+    assert not p.split.childrenCollapsible()
