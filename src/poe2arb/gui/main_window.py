@@ -994,6 +994,18 @@ class MainWindow(QMainWindow):
         self.queue_panel.refresh(self.trade_queue)
 
     def _setup_hotkey(self) -> None:
+        """Wire up the hotkey object. Deliberately does *not* register the key.
+
+        Construction and registration are split because building the window is
+        not the same event as deciding to keep this process. See
+        `start_hotkey`, which the caller runs once that decision is made.
+        """
+        self._hotkey = GlobalHotkey(self)
+        self._hotkey.pressed.connect(self._hotkey_pressed)
+        self._hotkey.error.connect(lambda msg: self._log(f"hotkey: {msg}"))
+        self._hotkey.recovered.connect(self._hotkey_bound)
+
+    def start_hotkey(self) -> None:
         """Bind the global hotkey, if the user turned it on and the OS allows it.
 
         Failure is reported on the Trades tab and in the log rather than raised:
@@ -1001,11 +1013,16 @@ class MainWindow(QMainWindow):
         the tab works fine without it. It is also *recoverable* — ownership is
         first-come-first-served, so `GlobalHotkey` keeps retrying and says so
         through `recovered`, which is why the hint is set from one place.
+
+        **Called after the install handover, not from `__init__`, and that
+        ordering is the whole point.** A hotkey is owned per *process*, and the
+        updater launches the installed copy while this one is still alive. When
+        registration happened during construction, an upgrade produced two
+        poe2-arb processes a second apart and Windows refused the second with
+        1409 — the app locking itself out of its own hotkey on every update.
+        Observed in the 0.8.0 log, 2026-08-01; see FINDINGS. A process that is
+        about to hand over now never takes the key in the first place.
         """
-        self._hotkey = GlobalHotkey(self)
-        self._hotkey.pressed.connect(self._hotkey_pressed)
-        self._hotkey.error.connect(lambda msg: self._log(f"hotkey: {msg}"))
-        self._hotkey.recovered.connect(self._hotkey_bound)
         if not self.cfg.trade_hotkey_enabled or not self.cfg.trade_hotkey:
             return
         if not self._hotkey.supported:

@@ -68,6 +68,14 @@ def main() -> int:
     if maybe_offer_install(window.cfg, window):
         return 0
 
+    # Only now, because a global hotkey belongs to a process and the line above
+    # can start a second one. On the handover path the installed copy launches
+    # while this one is still exiting, and whichever registered first keeps the
+    # key — so an update used to leave the surviving process refused with 1409
+    # and the hotkey dead until it was rebound by hand. Registering after the
+    # handover means the process that is leaving never claims it.
+    window.start_hotkey()
+
     # Catch-all: whatever triggers the quit (tray menu, window close, session
     # logout), worker threads get joined before the interpreter tears down.
     app.aboutToQuit.connect(window.shutdown)

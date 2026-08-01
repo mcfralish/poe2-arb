@@ -33,13 +33,21 @@ crosses back to the GUI thread through Qt's own queued-connection machinery.
 
 **And the delivery path was never the bug.** Diagnosed 2026-08-01: none of the
 three fixes above mattered, because `RegisterHotKey` was *returning 0* the whole
-time, and Windows hands a hotkey to whoever asks first. **Why it was refused is
-still unknown** — the first answer, "Sidekick owns the combination", came from a
-test that quit Sidekick *and* rebound the key, and was withdrawn the same day
-when the app registered fine with Sidekick running throughout. The live
-candidates are the specific combination being taken by something, or a stale
-poe2-arb process still holding it; see FINDINGS. Three releases could not see any
-of this because the false return was swallowed silently, so this module now:
+time, and Windows hands a hotkey to whoever asks first. The first answer,
+"Sidekick owns the combination", came from a test that quit Sidekick *and*
+rebound the key, and was withdrawn the same day when the app registered fine
+with Sidekick running throughout.
+
+**Then 0.8.0's own diagnostic caught it in the act, within minutes of first
+running on Windows: the program holding the key was poe2-arb.** The updater
+launches the installed copy and lets this one exit, so an upgrade puts two
+processes a second apart — and the one that survives is the one that asked
+second. It got 1409. The fix is ordering rather than anything in this module:
+`MainWindow` no longer registers during construction, and `app.main` calls
+`start_hotkey()` only after the install handover, so a process that is about to
+hand over never claims the key. Full evidence in FINDINGS, 2026-08-01. Three
+releases could not see any of this because the false return was swallowed
+silently, so this module now:
 
 - calls `GetLastError` on a refusal and reports it, giving Settings a third
   state — *refused* — that the old "listening / not listening" line could not
@@ -131,18 +139,23 @@ class HotkeyError(ValueError):
 def describe_error(code: int) -> str:
     """A Windows error from `RegisterHotKey`, in words a player can act on.
 
-    **Deliberately does not name a program.** An earlier draft blamed Sidekick,
-    on a one-shot test that changed two variables at once and was withdrawn the
-    same day — see FINDINGS, 2026-08-01. Naming a specific culprit on that
-    evidence sends people to close something innocent, and the honest advice
-    ("try a different combination") is the one that works whoever is holding it.
+    **Names poe2-arb and nothing else.** An earlier draft blamed Sidekick on a
+    one-shot test that changed two variables at once, and was withdrawn the same
+    day — naming a specific third-party culprit on that evidence sends people to
+    close something innocent. Our own second copy is different: it was caught in
+    the log holding the key (2026-08-01, see FINDINGS), it is the one owner we
+    can be sure about, and it is the one the user can do something about
+    immediately. The rest stays generic on purpose.
     """
     if code == ERROR_HOTKEY_ALREADY_REGISTERED:
         return (
             "another program already owns this combination, so Windows refused "
-            "it. Overlays and trade tools claim hotkeys without always showing "
-            "them in their own settings, so the quickest fix is a different "
-            "combination — a rarely-used one with two modifiers."
+            "it. The usual culprit is a second copy of poe2-arb still running — "
+            "check for one before changing anything. Otherwise overlays and "
+            "trade tools claim hotkeys without always showing them in their own "
+            "settings, so the quickest fix is a different combination — a "
+            "rarely-used one with two modifiers. This retries by itself every "
+            "minute, so a key held by something that closes comes back on its own."
         )
     return f"Windows refused to register it (error {code})."
 

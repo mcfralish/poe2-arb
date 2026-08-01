@@ -63,15 +63,42 @@ def test_it_opens_again_with_the_hotkey_enabled(window):
     tab exists. First launch was fine because the hotkey defaults to off, so
     the logging path was never reached until the user turned it on — and then
     the app would not start at all.
+
+    `start_hotkey` is called explicitly because registration no longer happens
+    during construction; without it this exercises neither logging path.
     """
     w = window(trade_hotkey_enabled=True, trade_hotkey="ctrl+alt+d")
+    w.start_hotkey()
     assert w.tabs.count() > 0
 
 
 def test_startup_notices_survive_into_the_log(window):
     """Buffered lines must be flushed, not dropped on the floor."""
     w = window(trade_hotkey_enabled=True, trade_hotkey="ctrl+alt+d")
+    w.start_hotkey()
     assert w._pending_log == []
+
+
+def test_building_the_window_does_not_claim_the_hotkey(window, monkeypatch):
+    """Constructing is not the same event as deciding to keep this process.
+
+    The updater launches the installed copy and lets this one exit, so an
+    upgrade briefly runs two poe2-arb processes. A global hotkey is owned per
+    process and Windows gives it to whoever asks first, so registering during
+    construction meant the surviving copy was refused with 1409 — the app
+    locking itself out of its own hotkey on every update (observed 2026-08-01).
+    Registration belongs to `start_hotkey`, which the handover path never runs.
+    """
+    tried: list[str] = []
+    monkeypatch.setattr(
+        mw.GlobalHotkey, "register", lambda self, text, **kw: tried.append(text) or True
+    )
+    # Otherwise `start_hotkey` returns at the platform check and proves nothing.
+    monkeypatch.setattr(mw.GlobalHotkey, "supported", property(lambda self: True))
+    w = window(trade_hotkey_enabled=True, trade_hotkey="ctrl+alt+d")
+    assert tried == []
+    w.start_hotkey()
+    assert tried == ["ctrl+alt+d"]
 
 
 def test_logging_before_the_widget_exists_does_not_raise(qapp):

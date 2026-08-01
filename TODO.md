@@ -8,7 +8,10 @@ deleted rather than ticked, so this file stays worth reading start to finish.
 
 **Shipped:** v0.7.0 (2026-07-31). **v0.8.0 is written and untagged** on `field-test-4`:
 the outcome-log integrity half of the fourth session's defect list, plus the hotkey
-diagnostic and the column work. Nothing in it has been run on Windows or in game.
+diagnostic and the column work. **It has now been run on Windows once**, via a manual
+`workflow_dispatch` build, and that single run paid for the whole diagnostic: it caught
+the hotkey refusal in the act and root-caused four releases of failure to the app's own
+updater. That fix is in 0.8.0 too. Nothing else in it has been used in game.
 
 **Four field tests behind the project.** The fourth ran on 2026-08-01 across four sessions
 and 969 log records. Evidence for all of it is in [docs/FINDINGS.md](docs/FINDINGS.md),
@@ -25,12 +28,16 @@ saving it and retries in the background. Full list in [CHANGELOG.md](CHANGELOG.m
 
 **Start here next session.** In order of what unblocks what:
 
-1. **Verify 0.8.0 in game before building more of the list.** Three things in it can only
-   be checked on Windows: whether the hotkey pre-check and the *Refused* line say
-   something true once a refusal can be reproduced at all — see the note below, the
-   Sidekick answer was withdrawn — whether the icon buttons render, and whether
-   pinning is reachable mid-map. The hotkey especially — this project has shipped a broken
-   Windows-only hotkey three times, and the fourth fix is again untestable here.
+1. **Verify the rest of 0.8.0 in game.** **The hotkey half is done and the answer was
+   worth the four releases it cost**: the diagnostic fired within four seconds of the
+   first Windows run and caught **poe2-arb itself** holding the key — the updater launches
+   the installed copy while this one is still alive, so an upgrade always refused the
+   surviving process with 1409. Fixed by claiming the key after the install handover
+   (`app.main` → `MainWindow.start_hotkey`). Evidence and the log extract are in
+   [docs/FINDINGS.md](docs/FINDINGS.md), 2026-08-01, *RESOLVED*. **Still unchecked on
+   Windows:** whether the icon buttons render, whether pinning is reachable mid-map, and
+   whether the 60-second retry actually fires — it would have recovered the observed
+   refusal on its own, but the rebind by hand came first, so it has never been seen to work.
 2. **Did the ghost fills fill at the listed price, or at a counteroffer?** (*Next*) — the
    one ghost fill observed on 2026-08-01 was a counteroffer at **10× the listed price** and
    lost money on a record claiming +38 div. If the n=131 sample's fills were the same, the
@@ -118,19 +125,17 @@ Also worth confirming, because nothing but a human can check them.
 **New in 0.8.0, and none of it has run on Windows.** This is the list to work through
 first — see item 1 of *Start here*:
 
-- **The hotkey — and first, find a binding that actually gets refused.** Measured on
-  v0.7.0, 2026-08-01: with Sidekick running throughout and poe2-arb restarted *after* it,
-  registration succeeded and the hotkey works. So the "Sidekick owns it" answer is
-  withdrawn (FINDINGS) and **there is currently no known way to reproduce a refusal.**
-  The cheap experiment first: **bind `ctrl+shift+c` specifically, with Sidekick running**
-  — the combination from the original failure. If that is refused, the cause was the
-  combination; if it is not, the original refusal was transient and a stale poe2-arb
-  process is the leading candidate. *Either answer is worth having*, and 0.8.0's
-  `GetLastError` reporting is what makes it readable at all.
-  Once a refusing binding is found: Settings should say *Refused* with the reason rather
-  than *"Not listening…"*; pressing OK on it should be blocked; and freeing the key should
-  make the hotkey start working **without reopening Settings**, which is the 60-second
-  retry and the part no test here means anything about.
+- ~~**The hotkey — and first, find a binding that actually gets refused.**~~ **Answered
+  2026-08-01, and the refusal reproduced itself.** Running the 0.8.0 artifact triggered the
+  in-place update, which launches the installed copy while the downloaded one is still
+  alive; the survivor was refused with 1409 because *the other poe2-arb had the key*. The
+  Sidekick hypothesis stays withdrawn and the "stale process" one is confirmed with a
+  mechanism the app creates itself on every update. Fixed; full write-up in FINDINGS.
+  **What is left of this bullet is one line: the 60-second retry has still never been
+  observed firing.** It would have recovered the refusal at ~06:33:20 on its own, but the
+  key was rebound by hand at 06:32:46 first. To see it: with the hotkey refused, leave
+  Settings closed, free the key, and wait — it must start working **without reopening
+  Settings**. No test here means anything about that path.
 - **The icon buttons render**, in the game's own font environment. They are dingbats
   rather than emoji precisely because emoji fall back to identical empty boxes, but that
   was verified on Linux only.
@@ -186,19 +191,21 @@ which is why the original occurrence left no trace.
       build an explicit **Pause** that holds the queue without ending the session. Note
       `session.py` already treats a toggle mid-session as *continue*, so the session
       boundary is not the thing that needs changing.
-- [ ] **The hotkey fix is written and unverified.** 0.8.0 does everything the diagnosis
-      called for — `GetLastError` on a false return, a *Refused* state in Settings, a trial
-      registration before the setting saves, and a 60-second retry so a key lost to startup
-      order comes back on its own. Reasoning and the three traps are in
-      [docs/FINDINGS.md](docs/FINDINGS.md), 2026-08-01. **None of it has run on Windows,
-      and the cause it was built for is no longer known.** The "Sidekick owns the
-      combination" answer was withdrawn hours after it was written — see the verification
-      list in *What the next field test must measure*, which now starts by trying to
-      reproduce a refusal at all.
-      **This does not weaken the work**, and is the argument for it: the diagnosis was
-      wrong because a refused registration reported nothing, and `GetLastError` on the
-      false return is the only thing that will settle it. Ship the diagnostic, then use it.
-      *Overlay research remains optional, not blocking.* Focus was never implicated.
+- [ ] **The hotkey is root-caused and fixed. What is left is one unobserved code path.**
+      0.8.0's diagnostic worked exactly as intended: within four seconds of its first
+      Windows run it reported `GetLastError=1409` and named the launch that caused it.
+      **The program holding the key was poe2-arb** — `_update_in_place` launches the
+      installed copy and lets this one exit, and `MainWindow.__init__` had already
+      registered the key, so every update handed the hotkey to the process that was
+      leaving. Since running the new exe *is* how you update, the hotkey was dead on
+      precisely the launch anyone would test it on, which is the likeliest explanation for
+      all three earlier failures (not proven — those releases logged nothing). Fixed by
+      moving registration out of construction into `MainWindow.start_hotkey`, called from
+      `app.main` after the install handover; `tests/test_app.py` pins the order. Log
+      extract and reasoning in [docs/FINDINGS.md](docs/FINDINGS.md), 2026-08-01.
+      **Still open:** the 60-second retry has never been seen to fire (see the verification
+      list above), and a crashed poe2-arb holding a live pump thread is the case it exists
+      for. *Overlay research remains optional, not blocking.* Focus was never implicated.
 - [ ] **The reference price question is UNBLOCKED — the fork resolved to *movement*, and
       the spread branch is disproved.** Measured 2026-08-01 off both sides of the in-game
       book against the app's own snapshot minutes later; table in

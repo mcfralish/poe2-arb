@@ -500,6 +500,54 @@ attempts — 06:05:45Z ↔ `2026/07/31 23:05:47`.
   If it is, the cause is that combination. If it is not, the original refusal was
   transient, and a stale process is the leading candidate.
 
+  **RESOLVED 2026-08-01, and the experiment above was never needed — the second
+  hypothesis is right, and the stale process is one poe2-arb starts itself.** The 0.8.0
+  build was run on Windows for the first time and refused a hotkey within four seconds,
+  with `GetLastError` finally saying why. From `poe2-arb.log`, four lines, unedited:
+
+  | time | line |
+  |---|---|
+  | 06:32:16 | `gui.app: poe2-arb starting` |
+  | 06:32:16 | `gui.hotkey: global hotkey registered: CTRL + SHIFT + C` |
+  | 06:32:18 | `gui.install_prompt: updated installed copy from 0.7.0 to 0.8.0` |
+  | 06:32:19 | `gui.app: poe2-arb starting` |
+  | 06:32:20 | `gui.hotkey: RegisterHotKey refused (GetLastError=1409 …)` |
+
+  **The app was locking itself out of its own hotkey, on every update.** `_update_in_place`
+  replaces the installed exe, calls `launch()` on it and returns True so `main` exits — but
+  `MainWindow.__init__` had already registered the hotkey *two seconds earlier*, and a
+  `RegisterHotKey(NULL, …)` is held until its process dies. So the copy that was leaving
+  owned the key and the copy that was staying asked second and was refused. The leaving
+  copy was gone by 06:32:46 (the rebind to `CTRL + ALT + D` succeeded then, and
+  `CTRL + SHIFT + C` again at 06:32:52), so the window is only a few seconds wide — and
+  permanent, because nothing before 0.8.0 ever asked again.
+
+  **This is very likely the whole three-release story.** The upgrade path *is* the test
+  path: download the new exe, run it, it updates the installed copy and hands over, and the
+  surviving process has no hotkey. Every field test began that way. It also explains the
+  two facts that made the Sidekick answer look right and then wrong — quitting Sidekick
+  involved restarting poe2-arb (which is what actually fixed it), and the isolating test on
+  2026-08-01 restarted poe2-arb *without* an update pending, so nothing was holding the key
+  and it registered fine. Not proven for the earlier releases, which logged nothing; stated
+  as the leading explanation, not as measurement.
+
+  **Fixed by ordering, not by anything in `hotkey.py`.** `MainWindow._setup_hotkey` now only
+  wires the object up; registration moved to `MainWindow.start_hotkey`, which `app.main`
+  calls **after** `maybe_offer_install` returns. A process about to hand over never claims
+  the key. `tests/test_app.py` pins the call order; `test_main_window.py` pins the split
+  between constructing the window and claiming the key.
+
+  **Two things this does not fix, deliberately.** A poe2-arb that crashed or hung with a
+  live pump thread still holds the key for the next launch — that is what the 60-second
+  retry is for. And the retry *would* have recovered this case on its own at ~06:33:20;
+  the maintainer rebound by hand at 06:32:46 first, **so the retry has still never been
+  observed firing.** It remains unverified.
+
+  **`describe_error(1409)` now names poe2-arb** as the usual culprit, and only poe2-arb.
+  That is not a reversal of "do not name a program": a third-party guess sends people to
+  close something innocent, whereas our own second copy was caught in the log holding the
+  key and is the one thing the user can check immediately.
+
   - **Do not tell the user it is Sidekick.** The shipped wording said so and has been
     softened to name overlays as *a* common cause, because naming a specific program on
     this evidence would send people to close something innocent.

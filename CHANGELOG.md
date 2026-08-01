@@ -34,6 +34,14 @@ reports is computed from that file.
   read as "rofit", `Expires` as "xpire". No column will now shrink below its own heading,
   and Item and Seller get room for a real name. The window's minimum width went up to
   match what the tables actually need.
+- **Updating the app broke its own hotkey — and this is almost certainly why the hotkey
+  never worked.** When a new version updates the installed copy, it starts that copy and
+  closes itself. Both are running for a second or two, and Windows gives a hotkey to
+  whichever program asks for it first — so the copy that was closing took the key and the
+  copy you were left with couldn't have it. Since the way you get a new version is to run
+  it, the hotkey was broken on exactly the launch you'd test it on. It is now claimed after
+  the handover, by the copy that's staying. Found by the diagnostic added below, four
+  seconds into the first Windows run of this release.
 
 ### Changed
 
