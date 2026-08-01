@@ -20,12 +20,13 @@ it has been used in game.
 > The editable rows went in on the same reasoning. `__version__` and `pyproject.toml` stay
 > at 0.8.0; no bump.
 >
-> **A current exe exists and has not been run.** Built 2026-08-01 from `dc3f360` on
-> `field-test-4`: [run 30723103465](https://github.com/mcfralish/poe2-arb/actions/runs/30723103465),
-> artifact `poe2-arb-field-test-4-dc3f360…`, 14-day retention. It carries the ranking
-> refit and the editable rows; it predates the Node-20 bump and the `FILL_PRIOR` 0.16→0.17
-> change, neither of which affects what a field test would look at. **Nothing in it has
-> been used in game.**
+> **A current exe exists and has not been run.** Built 2026-08-01 from `a60c97d` on
+> `field-test-4`: [run 30724078593](https://github.com/mcfralish/poe2-arb/actions/runs/30724078593),
+> artifact `poe2-arb-field-test-4-a60c97db…`, **14-day retention — expires 2026-08-15.**
+> It carries everything in 0.8.0 including the ranking refit, the editable rows and
+> `FILL_PRIOR[GHOST] = 0.17`; only the documentation commit after it is newer. **Nothing
+> in it has been used in game.** If the artifact has expired, re-run the workflow rather
+> than trusting this link.
 
 **Stop counting field tests by ordinal — they no longer agree.** This file has called the
 20:49–21:29Z run of 2026-08-01 "the fifth"; the maintainer calls it the sixth, and both are
