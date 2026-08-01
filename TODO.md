@@ -275,4 +275,13 @@ which is why the original occurrence left no trace.
   certificate (~$100–400/yr), `--onedir` as the free fallback.
 - [ ] **Mobile push on a good trade.** Needs a delivery path — ntfy, Pushover, Telegram —
   plus a decision on whether the desktop app pushes directly.
+- [ ] **Bump the release workflow's actions off Node 20.** GitHub warned on the v0.7.0
+  build (2026-08-01): `actions/checkout@v4` and `actions/setup-python@v5` target Node 20
+  and are being forced onto Node 24, per
+  [the deprecation notice](https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/).
+  Four `uses:` lines in `.github/workflows/release.yml` — checkout and setup-python appear
+  once each in both the `test` and `build-windows-exe` jobs; `softprops/action-gh-release@v2`
+  was not flagged. Warning only today, so the release still builds; it becomes a broken
+  release the day the forcing stops, and the only way to find out is to tag. Worth doing
+  on a quiet day rather than discovering it mid-release.
 - [ ] Packaging beyond one exe — PyPI for the CLI, Scoop/winget manifests.
