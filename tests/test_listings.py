@@ -9,11 +9,14 @@ import pytest
 
 from poe2arb.client import parse_listings
 from poe2arb.listings import (
+    FILL_PRIOR,
+    STALE_LISTING_S,
     Band,
     Listing,
     build_candidates,
     classify,
     fill_weight,
+    is_stale,
     plan_trade,
     rank_candidates,
     replan_units,
@@ -170,14 +173,9 @@ def test_thin_still_ranks_above_ghost():
     assert Band.PLAUSIBLE.rank < Band.THIN.rank
 
 
-def test_ghosts_rank_below_plausible_however_profitable():
-    """The 12x listing is worth more on paper and fills less often.
-
-    Zero of roughly ten whispers at 3.8x-12.5x got a response; both fills came
-    from the smallest gaps sampled. Sorting by profit alone would put the user
-    straight back onto the listings that never answer.
-    """
-    ghost = listing(item_id="omen-of-light", pay_amount=1.0, get_amount=1.0, stock=2.0)
+def _ghost_and_plausible(*, ghost_pay: float):
+    """A ghost and a plausible on the same reference price, ranked."""
+    ghost = listing(item_id="omen-of-light", pay_amount=ghost_pay, get_amount=1.0, stock=1.0)
     plausible = listing(item_id="core-destabiliser", pay_amount=11.0, get_amount=1.0, stock=1.0)
     cands = build_candidates(
         [ghost, plausible],
@@ -186,7 +184,33 @@ def test_ghosts_rank_below_plausible_however_profitable():
         min_gap=1.05,
         max_gap=1.5,
     )
-    ranked = rank_candidates(cands)
+    return rank_candidates(cands)
+
+
+def test_a_ghost_has_to_be_worth_several_plausibles_to_outrank_one():
+    """The demotion is a discount with a crossover, not a floor.
+
+    Superseded the old assertion that a ghost ranks below a plausible *however*
+    profitable, which encoded `FILL_PRIOR[GHOST] = 0.0` and was measured wrong
+    at n=601 (docs/FINDINGS.md, "Negative results" 1). The prior is now the
+    measured fill-rate ratio, 0.16, so a ghost has to be worth more than ~6x a
+    plausible before it is the better whisper.
+
+    Here the ghost pays 2 against a 12.48 reference: 10 divines of profit
+    against the plausible's 1, which is 10x on paper and 1.6x once discounted.
+    """
+    ranked = _ghost_and_plausible(ghost_pay=2.0)
+    assert ranked[0].band is Band.GHOST
+    assert ranked[0].profit_divines > 6 * ranked[-1].profit_divines
+
+
+def test_a_ghost_worth_only_a_few_plausibles_still_ranks_below():
+    """The other side of the same crossover — 4x on paper is not enough.
+
+    Deliberately a *pair* with the test above: a single example proves nothing
+    about a ranking that is now a comparison rather than a rule.
+    """
+    ranked = _ghost_and_plausible(ghost_pay=8.0)
     assert ranked[0].band is Band.PLAUSIBLE
     assert ranked[-1].band is Band.GHOST
     # ...and the ghost really was the more profitable one on paper.
@@ -493,10 +517,16 @@ def test_bands_are_labelled_as_expected():
     }
 
 
-def test_zero_appetite_buries_the_long_shot():
-    """The default. The 12x listing is the most profitable and never fills."""
+def test_zero_appetite_demotes_the_long_shot():
+    """The default. The 12x listing is the most profitable and rarely fills.
+
+    At 11 div of profit it is 5.5x the plausible on paper, just under the ~6x
+    the 0.16 prior asks for, so it lands second rather than last. It used to
+    land last because the prior was 0.0 and no profit could lift it — that is
+    the part the log overturned, not the demotion itself.
+    """
     assert order(rank_candidates(graded_candidates(), risk_appetite=0.0)) == [
-        "plausible", "thin", "ghost",
+        "plausible", "ghost", "thin",
     ]
 
 
@@ -513,13 +543,19 @@ def test_the_default_matches_zero_appetite():
 
 
 def test_long_shots_climb_gradually_rather_than_all_at_once():
-    """A slider people can tune, not a switch with two positions."""
+    """A slider people can tune, not a switch with two positions.
+
+    The climb is one place shorter than it was: fitting `FILL_PRIOR[GHOST]` to
+    0.16 starts this ghost at second rather than last, so the slider has less
+    distance to cover. That is the measurement arriving, not a regression — the
+    property under test is that it moves *monotonically* and ends on top.
+    """
     positions = [
         order(rank_candidates(graded_candidates(), risk_appetite=a)).index("ghost")
         for a in (0.0, 0.25, 0.5, 0.75, 1.0)
     ]
     assert positions == sorted(positions, reverse=True)
-    assert positions[0] == 2 and positions[-1] == 0
+    assert positions[0] == 1 and positions[-1] == 0
 
 
 def test_nothing_is_ever_dropped_at_any_appetite():
@@ -528,8 +564,19 @@ def test_nothing_is_ever_dropped_at_any_appetite():
 
 
 def test_appetite_outside_the_range_is_clamped():
-    assert fill_weight(Band.GHOST, -5.0) == 0.0
+    assert fill_weight(Band.GHOST, -5.0) == FILL_PRIOR[Band.GHOST]
     assert fill_weight(Band.GHOST, 99.0) == 1.0
+
+
+def test_the_ghost_prior_is_the_measured_ratio_not_zero():
+    """Pins the fit, because zero survived four field tests by being untested.
+
+    2.0% of 601 ghost whispers filled against 12.4% of 178 plausible ones — a
+    ratio of 0.16. See docs/FINDINGS.md, "Negative results" 1, and the note on
+    `FILL_PRIOR` for why this is the fill-rate ratio and not the 0.66 measured
+    on divines per whisper.
+    """
+    assert FILL_PRIOR[Band.GHOST] == 0.16
 
 
 def test_a_proven_band_is_believed_at_any_appetite():
@@ -663,3 +710,61 @@ def test_replan_units_clamps_to_the_original_ask():
     )
     assert replan_units(c, 99.0).plan.units == c.plan.units
     assert replan_units(c, 0.0).plan.units == 1.0
+
+
+# --- staleness: three days without a sale predicts a flat zero ---------------
+#
+# 0 fills in 102 whispers to listings >= 3 days old, against a 4.56% base rate
+# over all 789 logged attempts; the oldest listing that ever filled was 62.9
+# hours old. docs/FINDINGS.md, "A listing older than ~3 days has never filled".
+
+NOW = datetime(2026, 8, 2, 12, 0, tzinfo=timezone.utc)
+
+
+def aged_candidate(account, pay_amount, age_s):
+    [c] = build_candidates(
+        [
+            Listing(
+                item_id="omen", account=account, character=account,
+                pay_amount=pay_amount, get_amount=1.0, stock=1.0,
+                pay_currency="divine",
+                indexed=NOW - timedelta(seconds=age_s),
+            )
+        ],
+        {"omen": 12.0, "divine": 1.0}, {}, min_gap=1.05, max_gap=1.5,
+    )
+    return c
+
+
+def test_a_listing_is_stale_only_once_it_passes_three_days():
+    assert not is_stale(aged_candidate("a", 10.0, STALE_LISTING_S - 1), NOW)
+    assert is_stale(aged_candidate("a", 10.0, STALE_LISTING_S), NOW)
+
+
+def test_an_undated_listing_counts_as_fresh():
+    """`indexed` is absent on some responses. Missing is not evidence of age."""
+    assert not is_stale(graded_candidates()[0], NOW)
+
+
+def test_a_stale_listing_sorts_below_a_fresh_one_whatever_it_is_worth():
+    """The one signal in the log that predicts zero, so it outranks the others.
+
+    The stale listing is a plausible worth 11 divines; the fresh one is a
+    plausible worth 2. Profit and band both favour the stale one and it still
+    sorts last.
+    """
+    ranked = rank_candidates(
+        [
+            aged_candidate("stale", 1.0, 5 * 24 * 3600),
+            aged_candidate("fresh", 10.0, 60),
+        ],
+        risk_appetite=1.0,
+        now=NOW,
+    )
+    assert order(ranked) == ["fresh", "stale"]
+
+
+def test_a_stale_listing_is_demoted_not_dropped():
+    """Same reason ghosts are never hidden: a hidden row cannot be falsified."""
+    ranked = rank_candidates([aged_candidate("stale", 1.0, 30 * 24 * 3600)], now=NOW)
+    assert len(ranked) == 1

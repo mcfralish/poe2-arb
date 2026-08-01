@@ -30,20 +30,28 @@ BAND_LEGEND = {
     Band.GHOST: "too good to be true",
 }
 
+# Every number here is measured and dated, because all three of these tooltips
+# were wrong at once before 2026-08-02 — one said ghosts had never been answered
+# when 12 had, and one said the price estimate ran 25% high when it runs ~6%
+# either way. A tooltip is where a stale finding is least likely to be noticed
+# and most likely to be believed. Sources: docs/FINDINGS.md, "Negative results"
+# 1 and "The reference price does not match what a sale realises".
 BAND_TIP = {
     Band.PLAUSIBLE: (
-        "Worth trying — a real seller pricing under market. Both trades that "
-        "ever worked came from this band."
+        "Worth trying — a real seller pricing under market. About 1 whisper in 8 "
+        "leads to a trade (12% of 178), the best rate of any band."
     ),
     Band.THIN: (
         "Uncertain — the discount is no bigger than the error in our own price "
-        "estimate, so the profit shown may not be real. On rarely-traded items "
-        "that estimate has been measured more than 25% too high."
+        "estimate, so the profit shown may not be real. That estimate has been "
+        "measured about 6% out in either direction, and further on rarely-traded "
+        "items."
     ),
     Band.GHOST: (
-        "Too good to be true — far below market, and not one has ever been "
-        "answered: they're mistakes, abandoned listings, or already sold. Shown "
-        "so you can judge for yourself, ranked last so they don't waste whispers."
+        "Too good to be true — far below market. Most are mistakes, abandoned "
+        "listings or already sold, and only 1 whisper in 50 leads to a trade "
+        "(2% of 601) — but the ones that land are large, so these are ranked "
+        "below a plausible trade rather than last. Never hidden."
     ),
 }
 

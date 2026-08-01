@@ -58,7 +58,7 @@ COLUMNS = [
         "Whether this is the kind of discount that has been seen to work out.\n"
         "●  worth trying — a real seller pricing under market.\n"
         "○  uncertain — the discount is no bigger than our price estimate's error.\n"
-        "×  too good to be true — never once worked.",
+        "×  too good to be true — works about 1 time in 50, but pays well when it does.",
     ),
     ("Item", "What you'd be buying."),
     (

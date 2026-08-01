@@ -258,51 +258,78 @@ eight versions scanning ten currency items, which is close to exactly the wrong 
 
 **1. Deep discounts fill rarely, not never — and they still earned most of the money.**
 
-**Superseded 2026-07-31 at n=156, from `outcomes.jsonl`.** The earlier reading, kept
-because the size of the correction is the point:
+**Superseded twice. Current reading is 2026-08-02 at n=789**, five times the sample the
+last revision had. The two earlier readings are kept because the size of each correction is
+the point:
 
 > At n=14 (2 fills, both at the smallest gaps sampled, ~10 attempts at 3.8×–12.5× producing
 > zero): *"Deep discounts do not fill. A listing far below market is a mistake, an
 > abandonment, or already sold — its continued visibility is evidence it cannot be taken."*
 
-**That was an artefact of ten samples.** Every whisper the app has ever sent is logged, and
-the log now reads:
+> At n=156 (2026-07-31): plausible 24 whispers / 21% fill / **0.40 div per whisper**; ghost
+> 131 whispers / 2.3% fill / **0.113 div per whisper**; ratio ~0.28 on value per whisper.
+> "Ghosts fill rarely but are worth roughly a quarter of a plausible whisper."
 
-| band | whispers | filled | fill rate | profit (div) | **div per whisper** |
+**Both were under-sampled, and both under-rated ghosts.** Every whisper the app has ever
+sent is logged. All 789 attempts in `outcomes.jsonl` carry a resolved outcome, and the log
+now reads:
+
+| band | whispers | filled | fill rate | sold | exp. profit (div) | **div per whisper** |
+|---|---|---|---|---|---|---|
+| plausible | 178 | 22 | **12.4%** | 5 | 68.0 | **0.382** |
+| thin | 10 | 2 | 20% (n=10) | 1 | 2.0 | 0.200 |
+| ghost | 601 | 12 | **2.0%** | 2 | 150.7 | **0.251** |
+
+Fill rates fell as the sample grew (plausible 21% → 12.4%) and the **value ratio rose:
+ghost is now 0.66 of a plausible whisper, not 0.28.** The ranking decision still survives —
+plausible is worth ~1.5× more per message and must be offered first — but the margin is far
+narrower than either earlier reading, and `FILL_PRIOR[GHOST] = 0.0` is now wrong by a wide,
+well-powered margin (n=601). Measured ratios: **0.16 on fill rate, 0.66 on value per
+whisper**; 0.49 on value if the one counteroffered ghost (a real loss logged as +38.00) is
+struck out.
+
+**Read the profit column as an upper bound, and most loosely on ghosts.** It is
+`expected_profit_divines`, the app's own estimate, which carries ±6% on liquid pairs and is
+least trustworthy exactly where the gap is largest. 118 of the ghost column's 150.7 divines
+come from three fills at 8.75×, 14.09× and 42.91×. Two of the three are independently
+corroborated and one is a known loss — see *Ghost fills are real fills* below.
+
+Fill rate by gap, all 789 whispers — the curve the thresholds should be fitted to:
+
+| gap | whispers | filled | fill rate | exp. profit (div) | div/whisper |
 |---|---|---|---|---|---|
-| plausible | 24 | 5 (+1 sold) | **21%** | 10.04 | **0.40** |
-| thin | 1 | 0 | — (n=1) | 0 | — |
-| ghost | 131 | 3 | **2.3%** | 14.80 | **0.113** |
+| 1.00–1.10× | 56 | 8 | 14% | 22.0 | 0.393 |
+| 1.10–1.20× | 39 | 6 | 15% | 23.0 | 0.590 |
+| 1.20–1.35× | 53 | 5 | 9% | 7.9 | 0.148 |
+| 1.35–1.50× | 40 | 5 | 12% | 17.2 | 0.430 |
+| 1.50–2.00× | 86 | 3 | 3% | 17.0 | 0.198 |
+| 2.00–4.00× | 152 | 4 | 3% | 13.0 | 0.086 |
+| >4× | 363 | 5 | 1% | 120.7 | 0.333 |
 
-Ghosts *do* fill — including one at **10.94×** and one at 3.92×, gaps the old finding said
-were uncatchable. What survives is the **ranking** decision, and only on a per-whisper
-basis: plausible returns ~3.5× more per message sent, so it must still be offered first.
-What does **not** survive is `FILL_PRIOR[GHOST] = 0.0`. Zero is measurably wrong; the
-measured ratio is ~0.11 on fill rate, ~0.28 on value per whisper.
+**The cliff is confirmed and it sits between 1.35× and 1.50×, not at 2×** — everything
+below 1.5× fills at 9%–15%, everything above at 1%–3%. `max_gap_ratio = 1.50` lands on it.
+Every bucket is now over `MIN_SAMPLES`.
 
-**The uncomfortable part: ghosts produced 14.80 of the session's 20.80 divines — 71%.**
-Not because they fill, but because the ones that land are much bigger (8.00, 5.00, 1.80 div
-against ~2 div for a typical plausible fill). A 2.3% hit rate on a fat tail beat a 20% hit
-rate on a thin one, in absolute terms, because **the whisper is nearly free and the user
-sent 131 of them in 63 minutes**. The binding constraint is attention, not opportunity — so
-"is this worth whispering?" has no answer independent of how many whispers are left in the
-session. The app models none of that.
+**`min_gap_ratio = 1.05` is no longer unmeasured.** The 1.00–1.10× bucket was 2 whispers at
+n=156 and is 56 whispers at n=789: it fills at **14%**, as well as any bucket below the
+cliff, and returns 0.393 div per whisper. Fill *behaviour* gives no reason to raise the
+floor. The reason to raise it is unchanged and is not about fills: at a 1.05 gap the entire
+edge is inside the ±6% error bar on the reference price that found it, so those 8 fills may
+not have been profitable at all. **Do not read this bucket as vindicating 1.05** — read it
+as showing that the question is a pricing question, exactly as the pricing item says.
 
-Fill rate by gap, all 156 whispers — the curve the thresholds should be fitted to:
+**The uncomfortable part holds and got stronger: the whisper is nearly free.** 601 ghost
+whispers across ~5 hours of play returned 0.251 div each against 0.382 for a plausible one,
+on a 2% hit rate carried by a fat tail. A 6× cheaper hit rate stayed within 35% of the
+value per message. The binding constraint is attention, not opportunity — "is this worth
+whispering?" has no answer independent of how many whispers are left in the session, and
+the app models none of that.
 
-| gap | whispers | filled | fill rate |
-|---|---|---|---|
-| 1.00–1.10× | 2 | 0 | — |
-| 1.10–1.20× | 4 | 1 | 25% |
-| 1.20–1.35× | 12 | 2 | 17% |
-| 1.35–1.50× | 7 | 2 | 29% |
-| 1.50–2.00× | 15 | 1 | 7% |
-| 2.00–4.00× | 26 | 1 | 4% |
-| >4× | 90 | 1 | 1% |
-
-The cliff sits between 1.5× and 2×, which is roughly where `max_gap_ratio = 1.50` already
-puts it — the threshold is right, the *prior beyond it* is not. Note the top three buckets
-are still under `MIN_SAMPLES`; only 1.5×+ is properly powered.
+**Sample provenance.** 789 attempts over 2026-07-29 to 2026-08-01: 189 pre-0.7.0 records
+with no `session_id`, then seven sessions. `11fc03d0a4f3` (2026-08-01 20:49–21:29Z, 227
+attempts, 14 fills) is a **fifth** field-test session, run on 0.8.0 — it is the first to
+write `expired` rather than `no_reply` (209 of them), and it postdates the *fourth session*
+write-up below, which does not include it.
 
 **2. There are no bulk sellers on the Bulk Item Exchange.** Probed 8 items for the "real
 seller shaving price to move volume" profile:
@@ -341,6 +368,72 @@ The trap: a session summarised in conversation as "made about 20 divines" reads 
 no measurement was taken, and was written up that way here before anyone opened the file.
 **The log is the record; the operator's recollection is not.** Read it before concluding
 that a session produced no data.
+
+### Ghost fills are real fills, not counteroffers — measured 2026-08-02, n=36 fills
+
+**The question, and why it mattered.** On 2026-08-01 the one ghost fill observed by hand
+was a **counteroffer at 10× the listed price** that lost money while logging +38.00 divines
+of expected profit. If the fat-tail fills behind the ghost correction were all seller
+haggling, the correction was measuring negotiation rather than fills and ghost value per
+whisper was overstated or negative. That would have invalidated the largest revision the
+project has made.
+
+**It did not.** Every one of the 36 fills in `outcomes.jsonl` was joined to the seller's
+`@From` lines in `Client.txt` (attempt `id` → character → whispers within −1/+25 min of the
+logged `@To`). Result: **35 of 36 fills went through at the listed price. One was a
+counteroffer** — `9adaaa859e10`, the already-known one. Of the 12 ghost fills, **11 were at
+the listed price**, including both fills the 0.7.0 correction rested on:
+
+| id | item | ask | gap | seller's reply |
+|---|---|---|---|---|
+| `fa91398cc414` | Ancient Rib | 2 @ 1 div | 3.92× | `ty` — traded 51s after the whisper |
+| `0980dfa320d3` | Uhtred's Saga | 2 @ 80 ex | 10.94× | *nothing* — joined, traded, done |
+| `9adaaa859e10` | Faded Crisis Fragment | 5 @ 1 div | 8.75× | `10 div` … `so 50 div total 5x 10` |
+
+The replies to the other 33 are pleasantries (`ty`, `oki`, `1min`), GGG's own auto-thank, or
+GGG's **"Ready to be picked up: 10 Ancient Crisis Fragment listed for 10 Divine Orb"**
+template — which is itself confirmation the price was the listed one, since the game
+generates it from the listing. **The 0.7.0 correction stands.** Do not re-open this.
+
+**Two extreme gaps are independently corroborated, which is the stronger result.** The
+concern behind the counteroffer question was really "is a 40× gap ever real?", and the log
+answers it without a trade:
+
+- **Aldur's Saga**, bought at 1 div against a CE reference of 42.9 (42.91×). A *different*
+  Bulk seller was asking **42.0 divine** for the same item in the same sweep. Two
+  independent sources agree; the 1-div listing was genuinely mispriced and the fill was a
+  real ~41 div gain.
+- **Preserved Cranium**, bought 3 @ 1 div against a CE of 14.1 (14.09×). Across 66 attempts
+  on that item, sellers ask 9–10 div, and the same seller re-listed at 9 div eleven minutes
+  later. The gain was real, though nearer ~24 div than the logged 39.
+
+So the fat tail is a **real property of the Bulk Item Exchange**, not an artefact of the
+reference price. The counteroffer risk is real but rare (1 in 36) and is a reason to make a
+row's **price** amendable, not a reason to distrust the band.
+
+### A listing older than ~3 days has never filled — measured 2026-08-02, n=789
+
+Fill rate against `listing_age_s` at the moment of the whisper, all resolved attempts:
+
+| listing age | whispers | filled | fill rate |
+|---|---|---|---|
+| < 1 h | 283 | 18 | 6.4% |
+| 1–6 h | 177 | 8 | 4.5% |
+| 6–24 h | 159 | 5 | 3.1% |
+| 1–3 d | 68 | 5 | 7.4% |
+| **≥ 3 d** | **102** | **0** | **0%** |
+
+**The oldest listing that ever filled was 62.9 hours (2.62 days) old.** At ≥2 days it is 1
+fill in 125; at ≥3 days, 0 in 102. Against the 4.56% base rate, P(0 fills in 102) ≈ 0.008,
+so this is not sampling noise. The effect holds in both large bands separately (ghost 0/79,
+plausible 0/23), so it is **age, not gap** — an old listing means an absent or uninterested
+seller whichever band it sits in.
+
+**This is the cheapest ranking signal the project has found.** 102 of 789 whispers — 13% of
+the whole budget — went to listings that have never once produced a trade. Nothing in
+`listings.py` reads `listing_age_s` today. Note the shape: below 3 days age barely predicts
+anything (6.4% → 3.1% → 7.4%, non-monotonic), so this is a **cliff to gate on, not a decay
+curve to weight by**. Do not build a continuous freshness discount from these numbers.
 
 ### Fixed in 0.6.0, all found by one session of real use (2026-07-31)
 
@@ -394,7 +487,9 @@ worth more than the individual fixes:
 - **The holdback was the wrong fix.** 0.6.0 treated a copied whisper as money spent until
   the user said otherwise. Against the measured fill rates — 21% plausible, 2.3% ghost,
   so 79%+ of whispers never touch the bankroll — the guard withheld far more real trades
-  than it prevented double-spends. Reverted on the maintainer's call. **The general
+  than it prevented double-spends. Reverted on the maintainer's call. *The n=789 refit
+  (2026-08-02) makes the case stronger, not weaker: 12.4% and 2.0%, so 95% of whispers
+  never touch it.* **The general
   lesson:** a correctness argument that ignores the base rate can be locally sound and
   still net negative. Sizing every candidate against the whole bankroll is the accurate
   model when whispers rarely fill.
@@ -598,13 +693,14 @@ attempts — 06:05:45Z ↔ `2026/07/31 23:05:47`.
   read RuinousLuck's listing as 5 Faded Crisis Fragments for 5 divine — 1 div each against
   a CE reference of 8.75, ghost band, logged `expected_profit_divines: 38.0`. The seller's
   reply was `10 div`, then `so 50 div total 5x 10`. Taken at 10 div each against a real CE
-  of ~9.4, it was a **small loss** on a record that claims +38. **This is a candidate
-  explanation for the entire ghost result**: if the 3.92× and 10.94× "fills" in the n=131
-  sample were also counteroffers at the real price rather than fills at the listed one,
-  then ghost value-per-whisper (0.113 div) is overstated and may be negative. `Client.txt`
-  carries both sides and can settle it. **Do not treat the ghost figures as settled, in
-  either direction, until that check is done** — and note this cuts against the 0.7.0
-  correction as sharply as the 0.7.0 correction cut against the original claim.
+  of ~9.4, it was a **small loss** on a record that claims +38. It was raised here as a
+  candidate explanation for the entire ghost result — if the 3.92× and 10.94× fills were
+  also counteroffers, ghost value-per-whisper would be overstated or negative.
+  **Checked 2026-08-02 and it is not the explanation: 35 of 36 fills were at the listed
+  price, this one included as the sole exception.** See *Ghost fills are real fills, not
+  counteroffers* above. What survives is the narrow version: a counteroffer happens about
+  1 fill in 36, and the app has no way to record one, so **a row must be amendable in
+  price and not only in quantity.**
 - **The second false expiry that evening was a seller finishing a map — the case a pin
   solves.** Same listing, `9adaaa859e10`: whispered 02:32:27, seller replied `map` then
   `finish` at 02:33:23, auto-expired to `no_reply` at 02:37:25, **traded at ~02:43** and

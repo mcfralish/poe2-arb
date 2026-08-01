@@ -137,23 +137,35 @@ running **and** nothing is outstanding, so pressing the toggle again mid-session
 it. Its id and the league go on every attempt — neither is recoverable from the log
 afterwards, and league names rotate.
 
-Two results from field tests are load-bearing in `listings.py` and must not be re-derived
+Four results from field tests are load-bearing in `listings.py` and must not be re-derived
 (full evidence in [docs/FINDINGS.md](docs/FINDINGS.md), "Negative results"):
 
-1. **Deep discounts fill rarely — not never.** *Corrected 2026-07-31 at n=156; the old
-   claim was "they do not fill at all", from n=14.* Measured from `outcomes.jsonl`:
-   plausible fills at **21%** (24 whispers), ghost at **2.3%** (131 whispers, including
-   fills at 3.92x and 10.94x). Large gaps stay *demoted*, because plausible returns ~3.5x
-   more **per whisper sent** — but `FILL_PRIOR[GHOST] = 0.0` is now known to be wrong, and
-   ghosts earned **71% of the one profitable session's divines** on a fat tail. Do not
-   re-assert that big gaps never fill, and do not hide them.
-2. **A listing is a ratio, not a bundle.** `listings.smallest_lot` reduces
+1. **Deep discounts fill rarely — not never.** *Fitted 2026-08-02 at n=789, superseding a
+   correction at n=156 which superseded "they do not fill at all" from n=14.* Measured
+   from `outcomes.jsonl`: plausible **12.4%** (n=178), ghost **2.0%** (n=601). Both earlier
+   readings under-rated ghosts; ghost is worth **0.66** of a plausible whisper in divines,
+   not 0.28. `FILL_PRIOR[GHOST]` is now **0.16** — the *fill-rate* ratio, because the
+   weight multiplies profit, so `profit × weight` is already the divines-per-whisper
+   estimate and the value ratio would count the fat tail twice. Consequence, and it is
+   deliberate: a big enough ghost now outranks a plausible. Do not re-assert that big gaps
+   never fill, do not restore the 0.0, and do not hide them.
+   **The counteroffer worry is closed** (2026-08-02): 35 of 36 fills went through at the
+   listed price, checked against `Client.txt`, including both fat-tail fills the
+   correction rested on.
+
+2. **A listing three days old has never filled** — 0 in 102 whispers, in every band,
+   against a 4.56% base rate. `STALE_LISTING_S` gates on it and `rank_candidates` sorts
+   those listings below everything fresh. It is a **cliff, not a decay curve**: below three
+   days age barely predicts anything, so do not build a continuous freshness discount from
+   it. Unknown age counts as fresh — `indexed` is missing on some responses, and that is
+   not evidence of abandonment.
+3. **A listing is a ratio, not a bundle.** `listings.smallest_lot` reduces
    `pay_amount:get_amount` to lowest terms, so "10 for 100 divine" is buyable 1-at-10 and a
    20-divine bankroll asks for 2 rather than being shown nothing. The floor on how finely
    it divides is the same one as below: partial currency cannot be traded, so 7:3 divides
    at nothing smaller. `TradePlan.pay_units` is what the whisper offers;
    `plan.lots × listing.pay_amount` is **wrong** now that a lot is the reduced one.
-3. **Settlement denomination decides the haircut.** Partial currency can't be traded, so
+4. **Settlement denomination decides the haircut.** Partial currency can't be traded, so
    proceeds floor to a whole unit of the settlement currency. Exalted is ~432× finer than
    divine; on the one trade that filled, settling in exalted turned 1.00 divine of profit
    into 1.79. Profit floors to `sale_unit_divines` — never to a whole divine, never unfloored.
@@ -265,7 +277,11 @@ not 30.
   ship; reacting to a reply may not.
 - **No fill rate is claimed below `outcomes.MIN_SAMPLES`.** The Results tab shows an em-dash
   and says how many more whispers it needs. Do not soften this to "show it greyed out".
-- **Ghosts rank last, never hidden.** Hiding them would make the ranking unfalsifiable.
+- **Nothing is ever hidden from the queue** — not ghosts, not stale listings. Both are
+  *demoted*, by a measured weight rather than a rule. Hiding either would make the ranking
+  unfalsifiable, which is exactly how `FILL_PRIOR[GHOST] = 0.0` survived four field tests.
+  ("Ghosts rank last" was the rule until 2026-08-02 and is no longer true: a big enough
+  ghost outranks a plausible, because at a 2.0% fill rate it should.)
 
 [docs/FINDINGS.md](docs/FINDINGS.md), "Deliberate decisions — do not 'fix' these", is the
 full list. Read it before changing queue timing, banding, or anything that looks like an

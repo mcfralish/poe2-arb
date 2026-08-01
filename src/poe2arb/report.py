@@ -99,8 +99,8 @@ def print_candidates(result, limit: int = 25) -> None:
         console.print(f"\n[bold]whisper for the top candidate[/bold]\n{text}")
     console.print(
         "\n[dim]Profit is floored — partial currency can't be traded, so a 3.79 rate "
-        "pays 3 on one unit. Ghosts are listings far enough below market that the "
-        "measured fill rate is zero; they rank last on purpose. "
+        "pays 3 on one unit. Ghosts are listings far enough below market that only "
+        "about 1 whisper in 50 leads to a trade; they are demoted, not hidden. "
         "Analysis only — whisper and trade by hand.[/dim]"
     )
     if result.errors:

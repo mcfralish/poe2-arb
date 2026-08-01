@@ -55,6 +55,18 @@ reports is computed from that file.
 - **The Trades tab's filters are renamed** to *All Results*, *Attempts* and *Trades*.
 - **The row buttons are icons rather than words**, with the full wording on hover. Seven
   actions as words was wider than the rest of the table.
+- **The order trades are offered in has been fitted to what actually filled** — 789
+  whispers, five times the evidence the last ordering had. Two changes you will see:
+  - **Long shots are no longer pinned to the bottom.** The app used to score a "too good
+    to be true" listing at zero, on the grounds that they never fill. They do — 2.0% of
+    601 of them — and the ones that land are large, so a long shot now has to be worth
+    roughly six ordinary trades before it is offered first, rather than never being
+    offered first at all. It is still a demotion, just an honest one. Nothing is hidden,
+    and the *long shots* switch works as before.
+  - **A listing that has sat unsold for three days now sorts last**, whatever it is worth.
+    Of 102 whispers sent to listings that old, **none has ever produced a trade** — the
+    oldest listing that ever sold was under three days. Those whispers were 13% of every
+    message the app has ever suggested. They are still shown, just no longer first.
 
 ### Added
 

@@ -38,18 +38,29 @@ saving it and retries in the background. Full list in [CHANGELOG.md](CHANGELOG.m
    Windows:** whether the icon buttons render, whether pinning is reachable mid-map, and
    whether the 60-second retry actually fires — it would have recovered the observed
    refusal on its own, but the rebind by hand came first, so it has never been seen to work.
-2. **Did the ghost fills fill at the listed price, or at a counteroffer?** (*Next*) — the
-   one ghost fill observed on 2026-08-01 was a counteroffer at **10× the listed price** and
-   lost money on a record claiming +38 div. If the n=131 sample's fills were the same, the
-   ghost result is overstated and possibly negative. `Client.txt` can answer it without a
-   field test. **This still blocks the ranking item.**
-3. **Pricing is unblocked and one branch of it is dead** (*Next*) — the book is tight
+2. **Pricing is unblocked and one branch of it is dead** (*Next*) — the book is tight
    (~2%), so the liquidity haircut must not be built; the error is movement, so build
    freshness. One un-measured cell left: a genuinely thin item.
-4. **The Send button** (*Next*) — route **decided: keystrokes**. Unblocked, ordinary work.
-5. **Editing a past record from the Trades tab** (*UI*) — the other half of the auto-expiry
-   fix. Pinning stops good rows expiring in future; nothing yet reaches back to the
-   Rigwald's Ferocity record that was already written wrong.
+3. **The Send button** (*Next*) — route **decided: keystrokes**. Unblocked, ordinary work.
+4. **Editing a past record from the Trades tab** (*UI*) — the other half of the auto-expiry
+   fix, and now also the route to amending a **price** after a counteroffer. Pinning stops
+   good rows expiring in future; nothing yet reaches back to the Rigwald's Ferocity record
+   that was already written wrong.
+
+**Done since this file was last written (2026-08-02, no game time needed).** The
+counteroffer question and the ranking fit, both from data already on disk:
+
+- **The counteroffer worry is closed.** 35 of 36 fills went through at the **listed
+  price**, joined attempt-by-attempt to `Client.txt`. Both fat-tail fills the 0.7.0
+  correction rested on were unnegotiated, and two extreme gaps are corroborated by
+  independent listings on the same item. The correction stands; do not re-open it.
+- **The ranking is fitted at n=789** — five times the last sample, because a **fifth**
+  field-test session (`11fc03d0a4f3`, 227 attempts, 14 fills, the first run on 0.8.0) was
+  sitting in `outcomes.jsonl` unread. `FILL_PRIOR[GHOST]` is 0.16 rather than 0.0, and a
+  listing three days old now sorts last — 0 fills in 102 whispers, 13% of every message
+  the app has ever suggested. Both in `listings.py`, both in FINDINGS.
+- The lesson from last time repeated itself exactly: **read `outcomes.jsonl` before
+  believing this file about what has been measured.**
 
 **What 0.7.0 changed, in one paragraph.** Two of 0.6.0's fixes were wrong rather than
 incomplete: the hotkey had still never fired (Qt is now out of the delivery path
@@ -61,19 +72,13 @@ after the fact without erasing the original ask; sessions and leagues are stampe
 whisper and the Trades tab reviews any of them; Results gained *Every trade*; columns
 reorder, resize and persist. Full list in [CHANGELOG.md](CHANGELOG.md).
 
-**The 147 fully-resolved whispers from the second session still stand** and still
-**overturn the project's second-biggest finding**: ghosts fill at 2.3% (n=131), not at 0%
-— including one at 10.94× — and they earned 71% of that session's divines on a fat tail.
-Plausible still wins per whisper sent (0.40 div vs 0.113), so the ranking stands, but
-`FILL_PRIOR[GHOST] = 0.0` is measurably wrong. Full tables in
+**The ghost correction survived being doubted, and got bigger.** At n=131 it read "ghosts
+fill at 2.3%, worth 0.28 of a plausible whisper". At **n=789** it reads: ghosts fill at
+**2.0%** (n=601) against plausible's 12.4% (n=178), and are worth **0.66** of a plausible
+whisper, not 0.28 — so both earlier readings *under*-rated them. The 2026-08-01 counteroffer
+scare is resolved against the game's own log (35 of 36 fills at the listed price), and
+`FILL_PRIOR[GHOST] = 0.0` is now fixed rather than merely known-wrong. Full tables in
 [docs/FINDINGS.md](docs/FINDINGS.md), *Negative results* 1.
-
-**— and 2026-08-01 put that correction itself in doubt.** The single ghost fill observed
-that day was a **counteroffer at 10× the listed price** that lost money while logging
-+38.00 divines of expected profit. If the 3.92× and 10.94× fills in the n=131 sample were
-counteroffers too, ghost value-per-whisper is overstated and may be negative. Neither the
-original claim nor its correction is safe to restate until `Client.txt` is checked for
-those specific attempts.
 
 **What the 2026-07-31 log analysis added, so it is not re-derived.** `Client.txt` was read
 end to end and joined against `outcomes.jsonl` — details in FINDINGS, the sections dated
@@ -170,19 +175,17 @@ which is why the original occurrence left no trace.
       Also still open: `Client.txt` can mark Offline automatically, since
       `: <char> is not online.` is already in it. See *Split NO_REPLY* below, which is now
       the log-reading half of the same three-way split.
-- [ ] **Did the ghost fills fill at the listed price, or at a counteroffer? Answerable
-      today, from `Client.txt`, with no field test.** On 2026-08-01 the one ghost fill was
-      a counteroffer at **10× the listed price**: the app offered 5 Faded Crisis Fragments
-      for 5 divine (CE 8.75), the seller answered `10 div` / `so 50 div total 5x 10`, and
-      the trade lost money against a real CE of ~9.4 while the log recorded
-      `expected_profit_divines: 38.0`. If the 3.92× and 10.94× fills behind the n=131 ghost
-      result were the same thing, **the headline correction of 0.7.0 is measuring seller
-      haggling, not fills**, and ghost value-per-whisper is overstated or negative. Join
-      those attempt ids to `@From` lines in `Client.txt` and read what the seller actually
-      quoted. Two consequences either way: a counteroffered trade must be **amendable in
-      price, not just quantity** (the existing amendment record already carries
-      `cost_divines`), and a ghost listing that has sat for hours is evidence the seller
-      will not honour it — which is a rankable signal, not just noise.
+- [ ] **What is left of the counteroffer question: make a row's price amendable.** The
+      measurement is **done and the worry is closed** (2026-08-02, FINDINGS *Ghost fills
+      are real fills*): all 36 fills were joined to `Client.txt`, and **35 went through at
+      the listed price**. Both fat-tail fills the 0.7.0 correction rested on — 3.92× and
+      10.94× — were unnegotiated, and two extreme gaps (42.91×, 14.09×) are corroborated by
+      independent listings on the same items in the same sweep. Do not re-open this.
+      What survives is the one consequence that was true either way: a counteroffered trade
+      must be **amendable in price, not just quantity** (1 fill in 36, and it lost money
+      while logging +38.00). The existing amendment record already carries `cost_divines`.
+      That work is the *Waiting on a reply* item in the UI section below — same field, same
+      change.
 - [ ] **A restart of *Find trades* still re-scans the same items immediately.** The other
       half of the duplicate-whisper problem; the *suppress a resolved listing* half shipped
       in 0.8.0 and covers a listing that was Traded, Already Sold, Offline or Refused. What
@@ -243,25 +246,34 @@ which is why the original occurrence left no trace.
       (there is no API for it; the user must type it). **The rates are confirmed flat
       (2026-08-01)** — 120/ex and 800/div whatever the quantity — so the gold bill is
       units-settled × rate, no rate table required. Blocked on nothing but the work now.
-- [ ] **Fit the ranking to the outcome log. Data is on disk, but this is now blocked on
-      the counteroffer question above** — the ghost number it turns on may be measuring
-      counteroffers rather than fills, and two of the three pieces below rest on it
-      (156 resolved whispers in `outcomes.jsonl`; tables in
-      [docs/FINDINGS.md](docs/FINDINGS.md), *Negative results* 1). Three separate pieces,
-      in order of how well the evidence supports them:
-      - *`FILL_PRIOR[GHOST] = 0.0` is measurably wrong* and is the one clear fix. Measured
-        ratio is ~0.11 on fill rate, ~0.28 on value per whisper. n=131, so this is the
-        best-powered number the project has. Pick which of the two the prior should
-        express — `fill_weight` currently reads as a probability but is used to discount
-        profit, which is the value-per-whisper question.
-      - *`max_gap_ratio = 1.50` survives.* The fill-rate cliff sits between 1.5× and 2×.
-        Leave it alone; the error was in what happens beyond it, not where it is.
-      - *`min_gap_ratio = 1.05` is still unmeasured* — 2 whispers below 1.10×. It comes
-        from our own price error and stays there until the pricing item lands.
-      Then let the user apply `suggested_gap_band` from the Results tab, which already
-      computes `value_per_attempt` — the right objective, and the one that reveals the
-      ghost result. **Do not fit `min_gap` and the pricing correction independently:** both
-      are the same measurement error wearing different hats.
+- [ ] **Fitting the ranking to the outcome log: three of four pieces are DONE
+      (2026-08-02).** Fitted at n=789, five times the sample the last attempt had; tables
+      in [docs/FINDINGS.md](docs/FINDINGS.md), *Negative results* 1. Shipped in
+      `listings.py`:
+      - *`FILL_PRIOR[GHOST]` is 0.16*, not 0.0. Ghosts fill at 2.0% (n=601) against
+        plausible's 12.4% (n=178). **The open question of which ratio the prior expresses
+        is answered: the fill-rate one.** `fill_weight` multiplies profit, so
+        `profit × weight` is already the divines-per-whisper estimate; feeding it the
+        value ratio (0.66) would count the fat tail twice. Consequence, deliberate: a ghost
+        worth more than ~6 plausibles now sorts above them.
+      - *`max_gap_ratio = 1.50` survives, and the cliff is now located precisely* — fills
+        run 9%–15% below 1.5× and 1%–3% above it. 1.50 sits on the edge. Leave it.
+      - *A listing ≥3 days old sorts below everything fresh* (`STALE_LISTING_S`). 0 fills
+        in 102 whispers; a cliff, not a decay curve. This was the "a listing that has sat
+        for hours is a rankable signal" hunch — it is real, but it is **days, not hours**.
+      **What is left:**
+      - *`min_gap_ratio = 1.05` is no longer unmeasured but is still not settled.* 56
+        whispers below 1.10× fill at 14%, as well as any bucket under the cliff — so
+        *fill behaviour* gives no reason to raise it. The reason to raise it is that at a
+        1.05 gap the whole edge is inside the reference price's ±6% error. **Do not read
+        the 14% as vindicating 1.05.** It stays blocked on the pricing item; both are the
+        same measurement error wearing different hats.
+      - Let the user apply `suggested_gap_band` from the Results tab, which already
+        computes `value_per_attempt` — the right objective, and the one that revealed the
+        ghost result in the first place.
+      - *`FILL_PRIOR[Band.THIN] = 0.5` is still a guess.* n=10, under `MIN_SAMPLES`, and
+        its raw 20% fill rate would imply a weight above 1.0, which is plainly two fills'
+        worth of noise.
 - [ ] **The whisper budget is the real constraint, and nothing models it.** 131 ghost
       whispers in 63 minutes is ~2/minute, and that is why chasing a 2.3% fill rate paid:
       the message is nearly free. So "is this worth whispering?" has no answer that doesn't
