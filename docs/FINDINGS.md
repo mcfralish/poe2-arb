@@ -537,6 +537,14 @@ attempts — 06:05:45Z ↔ `2026/07/31 23:05:47`.
   the key. `tests/test_app.py` pins the call order; `test_main_window.py` pins the split
   between constructing the window and claiming the key.
 
+  **The update *onto* the first fixed build can still race, and that is not a regression.**
+  The fix constrains the copy that is *leaving*, so it only helps once the leaving copy has
+  it. Upgrading from any build ≤0.8.0-artifact means the old code registers at construction
+  as before, and the arriving fixed copy may still find the key taken — it asks slightly
+  later now (after the install check rather than during construction), which narrows the
+  window but does not close it. Every update *after* that one is clean. If the hotkey is
+  refused on exactly one upgrade and never again, this is why; the retry is the backstop.
+
   **Two things this does not fix, deliberately.** A poe2-arb that crashed or hung with a
   live pump thread still holds the key for the next launch — that is what the 60-second
   retry is for. And the retry *would* have recovered this case on its own at ~06:33:20;
