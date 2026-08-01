@@ -19,12 +19,15 @@ PoE2 has **two currency economies that do not share prices.**
 | depth | millions of units | single digits |
 | who uses it | effectively everyone | effectively nobody |
 
-**The 1% spread is one measurement on one liquid item, and the thesis leans on it.** The
-whole edge is "buy on Bulk, resell into the CE", which assumes the resale lands near the
-reference price. On the two thin items actually traded, what the CE paid was ~26% below that
-reference (see "The reference price overstates thin items"). Whether that gap *is* spread is
-the open question, but either way **do not carry ~1% across to illiquid items** — it was
-never measured there, and the sweep selects for exactly the items it wasn't measured on.
+**The spread is now measured on more than one item, and it is tight.** Read 2026-08-01
+from both sides of the in-game book: **2.1%** on Faded Crisis Fragment, **2.25%** on Omen
+of Whittling, against **1.7%** on the Divine↔Exalted control. So the whole edge — "buy on
+Bulk, resell into the CE" — does survive contact with the book on items in the ~1M+
+`ValueTraded` range, and the ~26% shortfall measured on two real trades on 2026-07-30 is
+**not** spread. See "The reference price does not match what a sale realises", whose
+2026-08-01 subsection settles this and reassigns the cause to price movement. Still
+unmeasured, and the one place the old worry may survive: genuinely thin pairs around 100k
+`ValueTraded`, where nothing has been read off the book.
 
 **`POST /api/trade2/exchange/{league}` serves the abandoned one.** The pooled book is
 not exposed on it at all. Three structural proofs:
@@ -106,7 +109,13 @@ Everything else about this API was tested and is untrustworthy:
 `value_traded` is used for **ranking only** — the same unit for every item, so "which
 items trade" is answerable even though "how many divines" is not.
 
-### The reference price overstates thin items by ~26% — measured on two real losses
+### The reference price does not match what a sale realises — measured on two real losses, revised 2026-08-01
+
+> **Read the 2026-08-01 subsection at the end before acting on this one.** The ~26%
+> overstatement below is real and measured, but it did **not** reproduce two days later,
+> and the spread explanation offered for it has since been disproved directly. The heading
+> used to read "overstates thin items by ~26%"; it was renamed because that framing was
+> load-bearing in two other files and is now known to be too general.
 
 **Measured 2026-07-30, Runes of Aldur, on the first two trades ever completed through the
 app. Both lost money.** This is the most consequential finding in this file: the derivation
@@ -143,18 +152,83 @@ items actually being traded. A 1.2× gap on a thin item is not a 20% edge; it is
 noise, and the app presented two such trades as profitable. `MIN_PAIR_VALUE = 1000` is also
 far too low — Astrid's cleared it by 67× and was still 65% wrong.
 
-**Open, and it decides the fix:** the maintainer re-checked poe2scout against live on
-07-30 and found Whittling off by only ~10 ex, which cannot be reconciled with the 3,361
-observed at trade time unless the two checks read different sides of the book or the price
-genuinely moved 34% in a day. Until that is resolved, do not tune a haircut constant — the
-distinction between *spread* (haircut proceeds, scaled by liquidity), *which side was read
-in-game* (guidance, no code change) and *movement* (freshness) is unsettled.
+#### Resolved 2026-08-01: the book is tight, and the error is movement — not spread
+
+**The fork above is settled, and it is not the branch this section assumed.** The maintainer
+read both sides of the in-game Currency Exchange book while the app's own snapshot was
+pulled minutes later. In-game quotes are "I want : I have"; the first row of each pair is
+what you **pay** to buy, the second what you **receive** to sell.
+
+| item | in-game buy | in-game sell | **book spread** | app (poe2scout) | app vs sell | pair `ValueTraded` |
+|---|---|---|---|---|---|---|
+| Faded Crisis Fragment | 9.5 div | 9.3 div | **2.1%** | 8.754 div | **−5.9%** (low) | 1.60M |
+| Omen of Whittling | 10.33 div | 10.10 div | **2.25%** | 10.760 div | **+6.5%** (high) | 10.0M |
+| Divine ↔ Exalted *(control)* | 407 ex | 400 ex | **1.7%** | — | — | — |
+
+Three things follow, and they overturn point 2 above:
+
+1. **Spread is not the explanation.** The book is ~2% wide on these items — barely wider
+   than the liquid-currency control at 1.7%, and nowhere near 26%. A haircut scaled by
+   liquidity would be correcting for something that is not there. **Do not build it.**
+2. **The error is not systematic, and not one-directional.** Two items measured minutes
+   apart came out **−5.9% and +6.5%** — opposite signs. "The reference price overstates"
+   is the wrong shape for this; it is *noise about the mid*, roughly ±6% at this liquidity.
+3. **The 26% did not reproduce.** Omen of Whittling was +37% on 07-30 and is +6.5% today,
+   same item, same derivation, same parser. A level difference that vanishes in two days
+   is **movement**, not level. So the fix is **freshness** — show the price's age, and
+   distrust a stale one — which is the cheapest of the three branches this file was
+   holding open.
+
+#### The maintainer attributes the original losses to user error — partly supported
+
+Recorded 2026-08-01, in the maintainer's words: the RuinousLuck loss was "user error +
+ambiguous naming" — the `Buy / Each / Cost` columns misread — and the Omen of Whittling and
+Astrid's Creativity losses are chalked up to the same thing. Since the last day of use has
+produced **only successful trades**, the app's own arithmetic is not the suspect it was.
+
+**This is very likely right about the losses and does not account for the price table.**
+Keeping both on the record, because the distinction changes what gets built:
+
+- *It explains the losses.* Misreading a lot quantity ("5 for 5 div" read as "1 for 5 div")
+  changes what you believe you are paying per unit, which is exactly how a trade at a fair
+  price feels like a loss. Confirmed on RuinousLuck from `Client.txt`. **This is the
+  strongest argument for the column renames** in the UI section — they are not cosmetic.
+- *It does not explain the 07-30 numbers.* That table compares **two prices** — the app's
+  CE figure against an in-game CE reading — and a misread quantity moves neither. Nor can
+  reading the wrong side of the book: the book is ~2% wide, and the gaps were 37% and 65%.
+  Whatever produced 3,361 against 4,605 was a different price *level*, not a different
+  column and not a different side.
+- *So the cause of the price gap is still movement*, which is what the 2026-08-01 readings
+  independently support, and what the freshness work is aimed at. **Do not delete the
+  07-30 table on the strength of the attribution** — if it was a bad in-game reading rather
+  than a real 37% move, the thing that establishes that is the missing Astrid's measurement
+  below, not a recollection.
+
+**What this does *not* settle.** Both items measured are liquid: Omen of Whittling carries
+the highest `ValueTraded` in the sample at 10.0M. **Astrid's Creativity — the 110k item that
+was 65% wrong — was not re-measured**, and it is the only genuinely thin case the project
+has ever had. The tight-book result is established for ~1M+ pairs and **assumed, not
+measured, below that**. Get an Astrid's reading before concluding that thin items behave
+like liquid ones.
+
+**`min_gap_ratio = 1.05` is still wrong, for a new reason.** The old argument was that 5%
+is tight against a 26% bias. The measurement replaces it with a better one: the reference
+price carries **±6% of noise**, so a 1.05 threshold selects trades whose entire edge is
+smaller than the error bar on the number that found them. That is not a bias to subtract —
+it is a floor below which a gap means nothing. The conclusion survives; the reasoning
+behind it has changed completely, and the constant should be set from the noise, not from
+a haircut.
 
 ### Gold is a real constraint and the app does not model it
 
 **Measured 2026-07-30 in game:** the Currency Exchange charges roughly **120 gold per
 exalted** and **800 gold per divine** traded. The maintainer ran out of gold mid-session
 settling a high-value item in exalted.
+
+**Confirmed flat, 2026-08-01.** The open question was whether those rates held across price
+points or scaled with trade size; the maintainer reports they are **static** — 120/ex and
+800/div when liquidating, whatever the quantity. So the gold bill is a plain multiplication
+of units settled, and the recommendation in TODO needs no rate table, only the gold on hand.
 
 This **directly opposes** the denomination finding below. Exalted minimises the rounding
 floor, and it also multiplies the gold cost: settling ~3,000 exalted costs ~360,000 gold,
@@ -351,6 +425,98 @@ worth more than the individual fixes:
   the row tint says which trade a click acts on. Reported as noise: by the time the
   cursor is on the button that question is already answered. Buttons now report no row;
   the rest of the row, including the gaps between the buttons, still lights up.
+
+### Found in the fourth session of real use (2026-08-01), none of it fixed yet
+
+Measured from `outcomes.jsonl` (969 records, 4 sessions: `5731c10c7246`, `d8a2b67634ef`,
+`c7ae70bf0310`, `4340682082ea`) joined against `LatestClient.txt`. **The local-time offset
+on this machine was UTC−7** on this date, derived by correlating `@To` lines against logged
+attempts — 06:05:45Z ↔ `2026/07/31 23:05:47`.
+
+- **The hotkey still does nothing. Third fix, third failure.** Tested in 0.7.0 — the build
+  that took Qt out of the delivery path entirely — with the game focused *and* with the app
+  focused. No press has ever been observed in any release. The report does not say whether
+  the Settings **press counter** moved, and that is the single diagnostic 0.7.0 added for
+  exactly this situation: it separates "the key never reached us" from "the queue had
+  nothing to take". **Collect it before writing a fourth fix.** Three derivations from the
+  Win32 docs have now produced three non-working builds, so the next move is to read how a
+  shipped tool actually does it (Sidekick, Awakened PoE Trade) rather than deriving again.
+- **The hotkey was never bound at all, and three releases were spent fixing the wrong
+  half.** Root-caused 2026-08-01 from the Settings line the maintainer reported: with the
+  box ticked, a fresh binding and the settings saved, it still read *"Not listening. Tick
+  the box above and press OK to bind it."* That text is the `not hk.active` branch
+  (`settings_dialog.py:352`), and `active` is `self._pump is not None and self._pump.ok`
+  — so **`RegisterHotKey` returned 0**. No press could ever have arrived, and every fix
+  since 0.5.0 (the missing `ctypes.wintypes` import, then taking Qt out of the delivery
+  path) addressed what happens *after* a press. Both were real bugs; neither was this one.
+  **Why it stayed invisible for three releases:** on a false return the pump sets
+  `ok = False` and returns silently (`hotkey.py:176-183`) — it never calls `GetLastError`,
+  and `failed` is only emitted from the `except` branch, so a refused registration writes
+  nothing to the log and shows nothing on screen. *The lesson is about the diagnostic, not
+  the API:* 0.7.0 added a press counter to tell "the key never reached us" from "the queue
+  had nothing to take", and the real answer was a third thing neither branch could express.
+  A status line that reports success or silence cannot distinguish silence from refusal.
+  Registration must report **why** it failed. Most likely cause is another process already
+  owning the combination — the maintainer runs Sidekick — which `GetLastError` returns as
+  `ERROR_HOTKEY_ALREADY_REGISTERED` (1409) and which a second binding would not escape if
+  that process grabs a range.
+
+  **Confirmed the same day: it was Sidekick.** Quitting Sidekick and rebinding made the
+  hotkey fire — in the app *and* in game, the first time it has ever worked in any release.
+  Restarting Sidekick afterwards did **not** take it back, and the hotkey kept working.
+  Note the maintainer has **no `ctrl+shift+c` binding configured in Sidekick**, so this is
+  not a user-visible conflict anyone could have found by looking; Sidekick grabs the
+  combination regardless. Two consequences:
+  - **It is first-come-first-served, so this will regress.** Whoever calls `RegisterHotKey`
+    first owns the key until it exits. The working order — poe2-arb before Sidekick — is
+    the *opposite* of the normal one, because Sidekick usually launches with the game. A
+    user who never quits Sidekick will never see the hotkey work, and nothing on screen
+    will say why.
+  - **Fixing the silence matters more than fixing the conflict.** The registration itself
+    behaves exactly as documented; three releases were lost because a refusal was
+    indistinguishable from success on screen and in the log.
+- **A real fill was logged as `no_reply` — and it was the largest gap the project has
+  seen.** Rigwald's Ferocity, whispered 23:06:04 for 1 divine against a CE reference of
+  137.86 (`d218084e2ae6`). `@To Ciosss: ty` follows at 23:07:30 — 86 seconds later, so it
+  traded. The queue's five-minute auto-expiry wrote `no_reply` at 23:11:03, **three and a
+  half minutes after the trade had already completed**, and nothing asked afterwards. An
+  auto-expiry that fires while a fill is still in progress does not just lose a click, it
+  writes a false verdict into the file the fill rates are computed from. The log *format*
+  is fine — verdicts apply in file order, so a later correction wins, and `9adaaa859e10`
+  carries `no_reply` then `filled` from a real correction the same evening. The gap is the
+  UI: once a row auto-expires there is no way back to it.
+- **The one ghost that filled, filled at a counteroffer 10× the listed price.** The app
+  read RuinousLuck's listing as 5 Faded Crisis Fragments for 5 divine — 1 div each against
+  a CE reference of 8.75, ghost band, logged `expected_profit_divines: 38.0`. The seller's
+  reply was `10 div`, then `so 50 div total 5x 10`. Taken at 10 div each against a real CE
+  of ~9.4, it was a **small loss** on a record that claims +38. **This is a candidate
+  explanation for the entire ghost result**: if the 3.92× and 10.94× "fills" in the n=131
+  sample were also counteroffers at the real price rather than fills at the listed one,
+  then ghost value-per-whisper (0.113 div) is overstated and may be negative. `Client.txt`
+  carries both sides and can settle it. **Do not treat the ghost figures as settled, in
+  either direction, until that check is done** — and note this cuts against the 0.7.0
+  correction as sharply as the 0.7.0 correction cut against the original claim.
+- **The second false expiry that evening was a seller finishing a map — the case a pin
+  solves.** Same listing, `9adaaa859e10`: whispered 02:32:27, seller replied `map` then
+  `finish` at 02:33:23, auto-expired to `no_reply` at 02:37:25, **traded at ~02:43** and
+  hand-corrected to `filled` at 02:46. So the timeout fired six minutes before the trade,
+  on a row whose seller had already said in writing that they were coming. Two of the two
+  false expiries measured this session were live conversations, not silence: **an answered
+  whisper is exactly the row that should stop counting down.**
+- **The same stale listing was whispered five times across four sessions in 3½ hours.**
+  RuinousLuck's Faded Crisis Fragment listing at 23:05:47, 23:24:18, 23:39:21, 02:21:58 and
+  02:32:27; two of those were answered `RuinousLuck is not online`. Bulk listings do not
+  delist when the stock is gone or when the seller stops honouring the price, so
+  **re-finding a listing you have already resolved is the normal case, not an edge case**,
+  and the app keeps no memory of what it has already asked for. Restarting *Find trades*
+  re-whispers the same sellers immediately, which is also how the maintainer pauses the app.
+- **A Ready-to-whisper row cost 84 div against a 39 div bankroll** (screenshot, 0.7.0). Not
+  yet diagnosed; the bankroll spin box had been lowered during the session, so the first
+  suspect is that queued candidates are not re-checked when the bankroll changes.
+- **Column headers were misread by their own author.** `Buy 5 / Each 1 div / Cost 5 div /
+  Profit +38` was read back as "I bought 1 for 5 div". Three of the four words are doing a
+  job the reader has to be told; *Amount / Price per / Total* is what the maintainer reached
+  for unprompted, and it is the same vocabulary the in-game trade UI uses.
 
 ### What the game's own log can and cannot tell us — measured 2026-07-31
 

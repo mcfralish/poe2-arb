@@ -85,14 +85,22 @@ commands. **Anything referencing cycles, Bellman-Ford, skew, node selection or
 | **GGG trade2** (`client.py`) | Live listings: who sells what, at what price, online or not | Display taxonomy (see below) |
 
 poe2scout runs 0.4%–4.7% low against in-game spot checks **on liquid currency**, which is
-where `min_gap_ratio = 1.05` came from. **That figure does not generalise.** Measured
-2026-07-30 on the first two trades ever completed through the app — both losses — the same
-derivation ran **26%–27% high** on thin items (Omen of Whittling, Astrid's Creativity). The
-error is not a parsing bug: `rel/base` reproduces poe2scout's own published price to 1.006×,
-so the source itself sits above what a thin sale realises. Liquidity is the discriminator.
-**Treat the 1.05 threshold as known-wrong for anything but currency** until the fix in
-TODO.md lands; see [docs/FINDINGS.md](docs/FINDINGS.md), "The reference price overstates thin
-items".
+where `min_gap_ratio = 1.05` came from, and **that figure does not generalise.** Measured
+2026-07-30 on the first two trades ever completed — both losses — the same derivation ran
+**26%–27% high** (Omen of Whittling, Astrid's Creativity). It is not a parsing bug:
+`rel/base` reproduces poe2scout's own published price to 1.006×.
+
+**Revised 2026-08-01, and the revision matters more than the original.** Both sides of the
+in-game book were read against the app's own snapshot minutes later: the book is **~2%
+wide** (Faded Crisis Fragment, Omen of Whittling) against a 1.7% liquid control, and the
+app's error on those two was **−5.9% and +6.5% — opposite signs**. Omen of Whittling was
++37% on 07-30 and +6.5% today. So the reference price is **noisy (~±6%), not biased**, the
+**spread explanation is disproved**, and the cause is price *movement*. Consequences for
+anyone touching this: **do not build a liquidity-scaled haircut**, build freshness instead;
+`min_gap_ratio = 1.05` is still known-wrong but now because 5% is *inside the noise*, not
+because of a 26% bias. Genuinely thin pairs (~100k `ValueTraded`) remain unmeasured — both
+items above carry 1.6M and 10.0M. See [docs/FINDINGS.md](docs/FINDINGS.md), "The reference
+price does not match what a sale realises".
 
 ### The pipeline
 
