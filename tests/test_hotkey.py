@@ -172,10 +172,11 @@ def fake_win32(monkeypatch, *, registers: bool, error: int = 1409):
 def test_a_taken_combination_reports_which_one(qapp, monkeypatch):
     """The usual failure: another program already owns the keys.
 
-    Root-caused 2026-08-01 — Sidekick owns the combination and Windows hands a
-    hotkey to whoever asks first. Three releases could not see it because the
-    false return from `RegisterHotKey` was swallowed without calling
-    `GetLastError`.
+    Three releases could not see it because the false return from
+    `RegisterHotKey` was swallowed without calling `GetLastError`. *Which*
+    program holds the key is not knowable from here and the message must not
+    guess — an earlier draft named Sidekick on a confounded test and was
+    withdrawn the same day (FINDINGS, 2026-08-01).
     """
     fake_win32(monkeypatch, registers=False)
     seen = []
@@ -184,8 +185,12 @@ def test_a_taken_combination_reports_which_one(qapp, monkeypatch):
     assert hk.register("ctrl+alt+d", retry=False) is False
     joined = " ".join(seen)
     assert "another program already owns" in joined
-    assert "Sidekick" in joined
     assert "CTRL + ALT + D" in joined
+    # Names no program: Win32 has no "who owns this key?" query, so any specific
+    # culprit in this string is a guess that sends people to close something
+    # innocent. The actionable advice is "pick another combination".
+    assert "Sidekick" not in joined
+    assert "combination" in joined
 
 
 def test_a_successful_registration_reports_its_binding(qapp, monkeypatch):
@@ -453,8 +458,9 @@ def test_a_working_binding_is_not_refused(qapp, monkeypatch):
 def test_a_refused_key_is_retried_and_recovers(qapp, monkeypatch):
     """Ownership is first-come-first-served, so it comes back on its own.
 
-    The working order is poe2-arb before Sidekick, which is the opposite of the
-    normal one — Sidekick launches with the game, so a reboot loses the key.
+    A refusal is as often transient as permanent — whoever asked first keeps the
+    key only until it exits — which is why the retry matters more than the
+    pre-check.
     """
     fake_win32(monkeypatch, registers=False)
     hk = GlobalHotkey()

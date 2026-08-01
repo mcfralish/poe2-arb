@@ -27,7 +27,8 @@ saving it and retries in the background. Full list in [CHANGELOG.md](CHANGELOG.m
 
 1. **Verify 0.8.0 in game before building more of the list.** Three things in it can only
    be checked on Windows: whether the hotkey pre-check and the *Refused* line say
-   something true with Sidekick running, whether the icon buttons render, and whether
+   something true once a refusal can be reproduced at all — see the note below, the
+   Sidekick answer was withdrawn — whether the icon buttons render, and whether
    pinning is reachable mid-map. The hotkey especially — this project has shipped a broken
    Windows-only hotkey three times, and the fourth fix is again untestable here.
 2. **Did the ghost fills fill at the listed price, or at a counteroffer?** (*Next*) — the
@@ -117,12 +118,19 @@ Also worth confirming, because nothing but a human can check them.
 **New in 0.8.0, and none of it has run on Windows.** This is the list to work through
 first — see item 1 of *Start here*:
 
-- **The hotkey, with Sidekick running.** Settings should say *Refused* and name the
-  culprit rather than *"Not listening…"*; pressing OK on a taken binding should be blocked
-  with the reason in the dialog; and quitting Sidekick should make the key start working
-  **without reopening Settings**, which is the 60-second retry and the part no test here
-  means anything about. Then reboot with Sidekick in the startup order — that is the case
-  the retry exists for.
+- **The hotkey — and first, find a binding that actually gets refused.** Measured on
+  v0.7.0, 2026-08-01: with Sidekick running throughout and poe2-arb restarted *after* it,
+  registration succeeded and the hotkey works. So the "Sidekick owns it" answer is
+  withdrawn (FINDINGS) and **there is currently no known way to reproduce a refusal.**
+  The cheap experiment first: **bind `ctrl+shift+c` specifically, with Sidekick running**
+  — the combination from the original failure. If that is refused, the cause was the
+  combination; if it is not, the original refusal was transient and a stale poe2-arb
+  process is the leading candidate. *Either answer is worth having*, and 0.8.0's
+  `GetLastError` reporting is what makes it readable at all.
+  Once a refusing binding is found: Settings should say *Refused* with the reason rather
+  than *"Not listening…"*; pressing OK on it should be blocked; and freeing the key should
+  make the hotkey start working **without reopening Settings**, which is the 60-second
+  retry and the part no test here means anything about.
 - **The icon buttons render**, in the game's own font environment. They are dingbats
   rather than emoji precisely because emoji fall back to identical empty boxes, but that
   was verified on Linux only.
@@ -182,14 +190,14 @@ which is why the original occurrence left no trace.
       called for — `GetLastError` on a false return, a *Refused* state in Settings, a trial
       registration before the setting saves, and a 60-second retry so a key lost to startup
       order comes back on its own. Reasoning and the three traps are in
-      [docs/FINDINGS.md](docs/FINDINGS.md), 2026-08-01. **None of it has run on Windows.**
-      What to check, with Sidekick running so the refusal actually happens:
-      - Settings says *Refused* and names Sidekick, rather than *"Not listening…"*.
-      - Pressing OK on a taken binding is blocked, with the reason in the dialog.
-      - Quitting Sidekick makes the key start working **without reopening Settings** —
-        that is the retry, and it is the part with no test that means anything.
-      - It survives a reboot with Sidekick in the startup order, which is the case the
-        retry exists for.
+      [docs/FINDINGS.md](docs/FINDINGS.md), 2026-08-01. **None of it has run on Windows,
+      and the cause it was built for is no longer known.** The "Sidekick owns the
+      combination" answer was withdrawn hours after it was written — see the verification
+      list in *What the next field test must measure*, which now starts by trying to
+      reproduce a refusal at all.
+      **This does not weaken the work**, and is the argument for it: the diagnosis was
+      wrong because a refused registration reported nothing, and `GetLastError` on the
+      false return is the only thing that will settle it. Ship the diagnostic, then use it.
       *Overlay research remains optional, not blocking.* Focus was never implicated.
 - [ ] **The reference price question is UNBLOCKED — the fork resolved to *movement*, and
       the spread branch is disproved.** Measured 2026-08-01 off both sides of the in-game

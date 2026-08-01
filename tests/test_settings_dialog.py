@@ -209,7 +209,7 @@ class TestAlwaysOnTop:
 # --- the hotkey has three states, not two ------------------------------------
 # Diagnosed 2026-08-01: a key Windows had *refused* rendered as "Not listening",
 # which is identical to what an unbound key says. That ambiguity is why the real
-# cause — Sidekick owning the combination — survived three releases.
+# cause survived three releases, and a wrong answer to it survived half a day.
 
 
 class _FakeHotkey:

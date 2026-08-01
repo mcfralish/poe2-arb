@@ -50,14 +50,14 @@ reports is computed from that file.
 
 ### Added
 
-- **The hotkey says when Windows refuses it.** Root cause found: `RegisterHotKey` was
-  being turned down because **another program already owned the combination** — Sidekick
-  claims one even with nothing in its own settings — and three releases could not see it
-  because the refusal was thrown away. Settings now shows a third state, *Refused*, with
-  the reason; a binding is **tested before it saves**, so you find out in the dialog
-  rather than after a trade goes past; and a key that was refused is retried in the
-  background, so it starts working on its own when the other program closes. Ownership is
-  first-come-first-served, so launching this app before your overlay is what keeps it.
+- **The hotkey says when Windows refuses it.** The thing three releases could not see:
+  `RegisterHotKey` was being turned down, and the refusal was thrown away — so a key
+  another program had taken looked exactly like a key you hadn't set. Settings now shows a
+  third state, *Refused*, with the reason; a binding is **tested before it saves**, so you
+  find out in the dialog rather than after a trade goes past; and a refused key is retried
+  in the background, so it starts working on its own once whatever held it lets go.
+  Hotkeys are first-come-first-served, so if yours ever stops working, a different
+  combination — or restarting this app — is the fix.
 
 ## [0.7.0] — 2026-07-31
 

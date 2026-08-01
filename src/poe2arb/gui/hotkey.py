@@ -31,12 +31,15 @@ and runs its own `GetMessage` loop — the message never has to reach Qt's event
 dispatcher to be seen. The thread is a `QThread` purely so its `pressed` signal
 crosses back to the GUI thread through Qt's own queued-connection machinery.
 
-**And the delivery path was never the bug.** Root-caused 2026-08-01: none of the
+**And the delivery path was never the bug.** Diagnosed 2026-08-01: none of the
 three fixes above mattered, because `RegisterHotKey` was *returning 0* the whole
-time — **Sidekick owns `ctrl+shift+c`**, and Windows hands a hotkey to whoever
-asks first. Quitting Sidekick and rebinding made the key fire for the first time
-in any release. Three releases could not see this because the false return was
-swallowed silently, so this module now:
+time, and Windows hands a hotkey to whoever asks first. **Why it was refused is
+still unknown** — the first answer, "Sidekick owns the combination", came from a
+test that quit Sidekick *and* rebound the key, and was withdrawn the same day
+when the app registered fine with Sidekick running throughout. The live
+candidates are the specific combination being taken by something, or a stale
+poe2-arb process still holding it; see FINDINGS. Three releases could not see any
+of this because the false return was swallowed silently, so this module now:
 
 - calls `GetLastError` on a refusal and reports it, giving Settings a third
   state — *refused* — that the old "listening / not listening" line could not
@@ -45,9 +48,9 @@ swallowed silently, so this module now:
   **before** it is saved. It runs on the pump thread, because `RegisterHotKey`
   is thread-affine and a key registered from the GUI thread posts WM_HOTKEY
   where nothing is listening — which is one line away from the original bug;
-- retries on a timer, because ownership is first-come-first-served and Sidekick
-  launches with the game. A reboot is enough to lose the key silently, so a
-  pre-check is necessary and *not* sufficient.
+- retries on a timer, because ownership is first-come-first-served and whoever
+  asks first keeps it until it exits. That makes a refusal a *transient* state
+  as often as a permanent one, so a pre-check is necessary and *not* sufficient.
 """
 
 from __future__ import annotations
@@ -128,16 +131,18 @@ class HotkeyError(ValueError):
 def describe_error(code: int) -> str:
     """A Windows error from `RegisterHotKey`, in words a player can act on.
 
-    The wording names the likely culprit deliberately. The maintainer has **no
-    `ctrl+shift+c` binding in Sidekick's own config**, so no amount of looking
-    through settings would have found it (2026-08-01) — the app has to say it.
+    **Deliberately does not name a program.** An earlier draft blamed Sidekick,
+    on a one-shot test that changed two variables at once and was withdrawn the
+    same day — see FINDINGS, 2026-08-01. Naming a specific culprit on that
+    evidence sends people to close something innocent, and the honest advice
+    ("try a different combination") is the one that works whoever is holding it.
     """
     if code == ERROR_HOTKEY_ALREADY_REGISTERED:
         return (
             "another program already owns this combination, so Windows refused "
-            "it. Trade overlays are the usual culprit — Sidekick claims one even "
-            "when its own settings show no binding. Close it and rebind, or pick "
-            "a different key."
+            "it. Overlays and trade tools claim hotkeys without always showing "
+            "them in their own settings, so the quickest fix is a different "
+            "combination — a rarely-used one with two modifiers."
         )
     return f"Windows refused to register it (error {code})."
 
@@ -179,14 +184,15 @@ HOTKEY_ID = 0xA7B1  # arbitrary, only needs to be unique within this process
 PROBE_ID = 0xA7B2
 
 # `RegisterHotKey` sets this when another process already owns the combination.
-# The one refusal worth naming: it is what Sidekick produces, and "already taken"
-# is a fixable problem where a bare error number is not.
+# The one refusal worth naming: "already taken" is a fixable problem where a bare
+# error number is not. Which program holds it is not knowable from here — Win32
+# offers no "who owns this key?" query — so the message must not guess.
 ERROR_HOTKEY_ALREADY_REGISTERED = 1409
 
 # How often to try again for a key that was refused. Ownership is
-# first-come-first-served and Sidekick starts with the game, so the common way
-# to lose the hotkey is a reboot — and the common way to get it back is for the
-# other program to close. Neither generates an event we can wait on, so this
+# first-come-first-served, so the common way to lose the hotkey is a startup
+# order that put someone else ahead of us — and the common way to get it back is
+# for that program to close. Neither generates an event we can wait on, so this
 # polls. A minute is far below the cost of noticing by hand and far above the
 # cost of one syscall.
 RETRY_INTERVAL_MS = 60_000

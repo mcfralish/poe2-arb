@@ -467,20 +467,47 @@ attempts — 06:05:45Z ↔ `2026/07/31 23:05:47`.
   `ERROR_HOTKEY_ALREADY_REGISTERED` (1409) and which a second binding would not escape if
   that process grabs a range.
 
-  **Confirmed the same day: it was Sidekick.** Quitting Sidekick and rebinding made the
-  hotkey fire — in the app *and* in game, the first time it has ever worked in any release.
-  Restarting Sidekick afterwards did **not** take it back, and the hotkey kept working.
-  Note the maintainer has **no `ctrl+shift+c` binding configured in Sidekick**, so this is
-  not a user-visible conflict anyone could have found by looking; Sidekick grabs the
-  combination regardless. Two consequences:
-  - **It is first-come-first-served, so this will regress.** Whoever calls `RegisterHotKey`
-    first owns the key until it exits. The working order — poe2-arb before Sidekick — is
-    the *opposite* of the normal one, because Sidekick usually launches with the game. A
-    user who never quits Sidekick will never see the hotkey work, and nothing on screen
-    will say why.
-  - **Fixing the silence matters more than fixing the conflict.** The registration itself
-    behaves exactly as documented; three releases were lost because a refusal was
-    indistinguishable from success on screen and in the log.
+  ~~**Confirmed the same day: it was Sidekick.**~~ **Withdrawn 2026-08-01 (later the same
+  day). The Sidekick attribution was a confound and is not supported.** What was recorded
+  originally: "quitting Sidekick **and rebinding** made the hotkey fire — in the app *and*
+  in game, the first time it has ever worked in any release. Restarting Sidekick afterwards
+  did not take it back." The error is visible in that sentence — **two variables were
+  changed and the fix was credited to one of them.** Rebinding is the other, and it
+  explains the result on its own if the problem was the *combination* rather than the
+  *program*.
+
+  **The test that isolates it, on v0.7.0 from Releases:** poe2-arb quit, game quit,
+  **Sidekick running throughout**, game restarted, then poe2-arb restarted — so Sidekick
+  called `RegisterHotKey` first, by a wide margin, which is precisely the order predicted
+  to fail. **It registered fine and the hotkey works.** Sidekick is therefore not holding
+  the binding now in use, and the "first-come-first-served, so this will regress"
+  prediction is falsified for that binding.
+
+  **What survives, and it is the part that matters.** `RegisterHotKey` *was* returning 0 —
+  that is derived from the `not hk.active` branch and is not in question. What is unknown
+  again is **why**. Two live hypotheses, and no evidence yet separating them:
+  - *The specific combination was taken*, by Sidekick or by anything else, and rebinding
+    is what fixed it. Consistent with everything observed.
+  - *A stale poe2-arb process still held the key.* `RegisterHotKey(NULL, …)` is owned by
+    the thread, released when the process exits — an earlier instance that had not fully
+    exited, or a pump thread that outlived its window, would refuse the next instance with
+    1409 and would have nothing to do with Sidekick at all. Note the app has shipped a
+    `terminate()` fallback in `_HotkeyPump.stop` for exactly the case where the thread
+    will not go quietly.
+
+  **One cheap experiment settles it:** with Sidekick running, bind `ctrl+shift+c`
+  specifically — the combination from the original failure — and see whether it is refused.
+  If it is, the cause is that combination. If it is not, the original refusal was
+  transient, and a stale process is the leading candidate.
+
+  - **Do not tell the user it is Sidekick.** The shipped wording said so and has been
+    softened to name overlays as *a* common cause, because naming a specific program on
+    this evidence would send people to close something innocent.
+  - **Fixing the silence matters more than fixing the conflict**, and this episode is the
+    argument for it rather than against it. Three releases were lost because a refusal was
+    indistinguishable from success; a fourth conclusion was then drawn from a confounded
+    one-shot test and lasted half a day. `GetLastError` on the false return is what would
+    have answered this immediately, and is what will answer it next time.
 
   **What 0.8.0 built, and three traps in it.** The pump now calls `GetLastError` on a
   false return and reports it; Settings gained *Refused* as a third state, because
