@@ -44,17 +44,30 @@ log = logging.getLogger(__name__)
 class Outcome(Enum):
     """What came of a whisper.
 
-    `SOLD` and `NO_REPLY` are deliberately distinct even though both mean "no
-    trade". A seller who answers to say it's gone was reachable and the listing
-    was stale; silence may mean either. Collapsing them would hide which of
-    those two problems freshness filtering actually solves.
+    `SOLD` and the silent verdicts are deliberately distinct even though both
+    mean "no trade". A seller who answers to say it's gone was reachable and the
+    listing was stale; silence may mean either. Collapsing them would hide which
+    of those two problems freshness filtering actually solves.
+
+    **`NO_REPLY` is a legacy value and is never written any more.** Up to 0.7.0
+    it was both what the five-minute timer wrote and what the user pressed, and
+    those are different facts: the timer knows only that the deadline passed —
+    which on 2026-08-01 it wrote three and a half minutes *after* a trade had
+    completed — while the user pressing a button knows *why* there was no trade.
+    So the timer now writes `EXPIRED` and the buttons are `AFK` and `OFFLINE`,
+    the two reasons the maintainer ever actually pressed it. The member stays
+    because `outcomes.jsonl` returns `no_reply` records forever; same constraint
+    as `bands.symbol_for_name`.
     """
 
     PENDING = "pending"      # whisper copied, nothing reported back yet
     FILLED = "filled"        # trade completed
     SOLD = "sold"            # seller replied: already gone
-    NO_REPLY = "no_reply"    # no response
+    NO_REPLY = "no_reply"    # legacy: written by <=0.7.0, never written now
     DECLINED = "declined"    # seller replied and refused the listed price
+    EXPIRED = "expired"      # the timer gave up; nothing is claimed about why
+    AFK = "afk"              # GGG's auto-reply came back, or they were away
+    OFFLINE = "offline"      # the game said the character is not online
 
     @property
     def is_resolved(self) -> bool:
@@ -63,6 +76,53 @@ class Outcome(Enum):
     @property
     def is_success(self) -> bool:
         return self is Outcome.FILLED
+
+    @property
+    def is_silence(self) -> bool:
+        """No answer came back, whatever the app decided to call it.
+
+        The three-way split is for measuring *why* a whisper goes unanswered;
+        anything asking "did they answer at all" wants this, and must keep
+        matching `NO_REPLY` for records written before the split.
+        """
+        return self in (
+            Outcome.NO_REPLY, Outcome.EXPIRED, Outcome.AFK, Outcome.OFFLINE
+        )
+
+
+# What each verdict is called on screen. One map, because the Opportunities,
+# Results and Trends tabs all name the same verdicts and had drifted into two
+# private copies of this dict already. Title Case throughout, matching the rest
+# of the user-facing text — the enum's own lowercase values are what goes in the
+# log and must not be shown.
+LABELS = {
+    Outcome.PENDING: "Waiting",
+    Outcome.FILLED: "Traded",
+    Outcome.SOLD: "Already Sold",
+    Outcome.NO_REPLY: "No Reply",
+    Outcome.DECLINED: "Refused",
+    Outcome.EXPIRED: "Expired",
+    Outcome.AFK: "AFK",
+    Outcome.OFFLINE: "Offline",
+}
+
+# Why each is written, for the button and the cell that carries it.
+TIPS = {
+    Outcome.FILLED: "The trade went through.",
+    Outcome.SOLD: "They replied to say it's gone.",
+    Outcome.DECLINED: "They replied but wouldn't honour the listed price.",
+    Outcome.NO_REPLY: "Recorded before 0.8.0, when the timeout and 'they never "
+                      "answered' were the same verdict.",
+    Outcome.EXPIRED: "Nobody said what happened before the timer ran out. Not a "
+                     "claim that the seller stayed silent — pin a row to stop "
+                     "its clock.",
+    Outcome.AFK: "They were away — the game's auto-reply came back, or nothing did.",
+    Outcome.OFFLINE: "The game said that character isn't online.",
+}
+
+
+def label_for(outcome: Outcome) -> str:
+    return LABELS.get(outcome, outcome.value)
 
 
 @dataclass(frozen=True)

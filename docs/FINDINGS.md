@@ -426,7 +426,13 @@ worth more than the individual fixes:
   cursor is on the button that question is already answered. Buttons now report no row;
   the rest of the row, including the gaps between the buttons, still lights up.
 
-### Found in the fourth session of real use (2026-08-01), none of it fixed yet
+### Found in the fourth session of real use (2026-08-01)
+
+**Half of this is fixed in 0.8.0** — the false expiries, the repeated whispers, the
+silent hotkey refusal, the column names and the truncated headings. The evidence below is
+kept in full regardless of what was built from it, and what is *not* yet fixed is called
+out at the end of each entry. What 0.8.0 decided while fixing them is in
+*Deliberate decisions*, below.
 
 Measured from `outcomes.jsonl` (969 records, 4 sessions: `5731c10c7246`, `d8a2b67634ef`,
 `c7ae70bf0310`, `4340682082ea`) joined against `LatestClient.txt`. **The local-time offset
@@ -475,6 +481,26 @@ attempts — 06:05:45Z ↔ `2026/07/31 23:05:47`.
   - **Fixing the silence matters more than fixing the conflict.** The registration itself
     behaves exactly as documented; three releases were lost because a refusal was
     indistinguishable from success on screen and in the log.
+
+  **What 0.8.0 built, and three traps in it.** The pump now calls `GetLastError` on a
+  false return and reports it; Settings gained *Refused* as a third state, because
+  "listening / not listening" is exactly the vocabulary that could not express this.
+  `GlobalHotkey.probe` trial-registers a binding before Settings saves it, and
+  `_try_again` retries a refused one every 60s so a key lost to startup order comes back
+  when the other program closes. The traps, in the order they bite:
+  1. **Probing the key we already hold reports it as taken** — by us. `probe` answers
+     "free" for the live binding rather than testing it, or every working hotkey fails
+     its own pre-check.
+  2. **The pre-check is a race and cannot be a guarantee.** Another program can claim the
+     key between the answer and the save, so `register` still has to report failure. The
+     probe buys a better message, nothing more.
+  3. **The trial must run on the pump thread.** `RegisterHotKey` is thread-affine, so a
+     key registered from the GUI thread posts `WM_HOTKEY` where nothing is listening —
+     which is one line away from the bug this whole item is about. `probe` posts `WM_NULL`
+     to wake the pump's blocked `GetMessage` and waits on an event for the answer.
+
+  Still unverified on Windows: everything above is Windows-only and untestable here, which
+  is the exact shape of code that shipped broken twice. The tests fake the Win32 layer.
 - **A real fill was logged as `no_reply` — and it was the largest gap the project has
   seen.** Rigwald's Ferocity, whispered 23:06:04 for 1 divine against a CE reference of
   137.86 (`d218084e2ae6`). `@To Ciosss: ty` follows at 23:07:30 — 86 seconds later, so it
@@ -796,9 +822,33 @@ Also worth not rediscovering:
   then silently gained five minutes — and the seconds it spent flashing came out of the
   listed time the user had configured. `expires_at` is floored at the alert window so a
   short TTL cannot retire a trade whose own toast is still up.
-- **An unanswered whisper self-marks as NO_REPLY.** Silence is the majority outcome;
-  leaving rows pending forever would bias the log toward whatever the user came back and
-  clicked. Timeout 0 answers every one by hand.
+- **An unanswered whisper self-marks as `Outcome.EXPIRED`** — *not* `NO_REPLY`, since
+  0.8.0. Leaving rows pending forever would bias the log toward whatever the user came
+  back and clicked, but the timer knows only that its deadline passed: on 2026-08-01 it
+  wrote `no_reply` three and a half minutes *after* a trade completed, and **both** false
+  expiries that evening were sellers who had answered. Timeout 0 answers every one by hand.
+- **`NO_REPLY` stays in the enum and is never written again.** `outcomes.jsonl` returns
+  records under it forever, so the value has to keep resolving — the same constraint as
+  `bands.symbol_for_name`. It was retired as a *button* because by hand it meant one of
+  two different things, which is now **AFK** and **Offline**; those two plus **Expired**
+  are the three-way split the game log independently derives (76% silent / 22% AFK / the
+  rest replies). Anything asking "did they answer at all" must use `Outcome.is_silence`,
+  which covers all four, rather than testing members by name.
+- **A pinned row never expires, and unpinning restarts nothing.** Pinning is what the user
+  does when a seller speaks, so a pinned row sorts above everything else in Waiting on a
+  reply and holds a highlight of its own — deliberately *not* a band colour, because it is
+  state rather than risk. `expires_at` is left untouched throughout, so a row released past
+  its deadline resolves on the next tick: the deadline was real, the pin only held it, and
+  restarting the clock would make a row immortal by pin-and-unpin. Pin state is per-session
+  UI and is deliberately **absent from `outcomes.jsonl`** — it says what the user is doing
+  now, not what happened to the trade.
+- **Only some verdicts suppress the listing for the session** (`SETTLED_OUTCOMES`):
+  FILLED, SOLD, OFFLINE and DECLINED. `EXPIRED` and `AFK` deliberately do **not** — an
+  away seller comes back, and a deadline passing says nothing about the listing at all.
+  The suppression exists because a Bulk listing does not delist when its stock goes, so
+  every later sweep re-finds it; `forget_resolved` drops the row that would otherwise
+  deduplicate it, which is why the key is remembered separately. Keyed on `Candidate.key`
+  (seller + item + ratio), because the queue row's id is regenerated each sweep.
 - **Every action is one click on the row itself**, so the tables carry no selection — a
   highlight would imply a second step that doesn't exist. This constrains the redraw:
   countdowns tick every second, and rebuilding a row would destroy the button under the
@@ -894,6 +944,34 @@ Also worth not rediscovering:
   hands out each later resize in proportion. The action column is exempt from shrinking:
   a row of buttons does not get smaller when squeezed, it gets clipped, and an action you
   cannot reach is worse than one you have to scroll to.
+- **Each column's floor is its own heading, not one shared number** (0.8.0). At the narrow
+  end of the window a single `MIN_WIDTH = 28` let `Profit` truncate to "rofit" and
+  `Expires` to "xpire", which is a header lying about which column you are reading. Below
+  the sum of the floors the table scrolls sideways instead, and the window's minimum width
+  was raised to 960 to make that rare — measured with `ColumnLayout.minimum_row_width()`:
+  *Waiting on a reply* wants 916 and the Trades table 896. Item and Seller get a flat 120
+  regardless of their four- and six-letter headings, because their contents are names.
+  Three things this uncovered, all measured by screenshot and all easy to reintroduce:
+  - **`resizeColumnsToContents` measures the cells and ignores the heading.** "Buy" came
+    back at 30px against a 49px title, so the floors have to be applied *after* it or the
+    first paint is already truncated.
+  - **It does not measure a cell widget at all**, so an action column's width is a guess —
+    314px for a row of buttons whose `sizeHint` is 226. That 88px of nothing came straight
+    off the columns that do hold something, because the action column is exempt from the
+    squeeze. `_fit_protected` asks the widget instead.
+  - **Growth must hand out the space the row does not fill, not the space the window
+    gained.** A row can already be wider than the window — the squeeze stops at the floors,
+    and the first sizing runs against a pre-show viewport narrower than the real one.
+    Adding the window's delta on top of that *compounds* the overflow: measured, a 638px
+    sizing that had settled at 897 grew to 1235 in a 976px window, and what fell off the
+    end was the action buttons.
+- **The row action buttons are dingbats, not emoji** (0.8.0). 👍 / 👎 / 📌 were what was
+  asked for and they are the wrong bet in a shipped exe: they need a colour emoji font,
+  and where one is missing *every* button renders as the same empty box — verified by
+  screenshot, which is also how the replacements (✔ ✖ ⚑ ⚐ ❐ ✎ ☾ ⊘ ✕) were checked to draw
+  in a plain text font. The wording survives as the tooltip and as the button's `action`
+  property, which is what `click_action` and the tests match on. Proper PoE2-styled icon
+  assets remain the right answer and are still open.
 - **A session is defined by the queue draining, not by a clock.** `session.py`: it starts
   on *Find trades* and ends only when nothing is running *and* nothing is outstanding, so
   pressing the toggle again mid-session continues it. Between sweeps the queue is

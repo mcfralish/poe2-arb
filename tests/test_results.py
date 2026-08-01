@@ -156,12 +156,17 @@ class TestEveryWhisper:
 
     def test_a_pending_attempt_reads_as_waiting(self, tab):
         t = tab([attempt(1)])
-        assert t.attempts.item(0, 6).text() == "waiting"
+        assert t.attempts.item(0, 6).text() == "Waiting"
 
     def test_verdicts_are_shown_in_plain_words(self, tab):
-        rows = [attempt(1), verdict(1, Outcome.NO_REPLY)]
+        rows = [attempt(1), verdict(1, Outcome.EXPIRED)]
         t = tab(rows)
-        assert t.attempts.item(0, 6).text() == "no reply"
+        assert t.attempts.item(0, 6).text() == "Expired"
+
+    def test_records_written_before_the_verdict_was_split_still_read(self, tab):
+        """`no_reply` is never written now and is returned by the log forever."""
+        t = tab([attempt(1), verdict(1, Outcome.NO_REPLY)])
+        assert t.attempts.item(0, 6).text() == "No Reply"
 
     def test_newest_first(self, tab):
         """The thing you just did is the thing you're looking for."""
@@ -207,7 +212,7 @@ def test_every_trade_lists_only_the_ones_that_filled(tab):
     assert t.attempts.rowCount() == 4
     assert t.trades.rowCount() == 2
     results = {t.trades.item(r, 6).text() for r in range(t.trades.rowCount())}
-    assert results == {"traded"}
+    assert results == {"Traded"}
 
 
 def test_every_trade_is_empty_without_a_fill(tab):

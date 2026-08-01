@@ -204,3 +204,85 @@ class TestAlwaysOnTop:
         dialog.always_on_top.setChecked(True)
         dialog.restore_defaults()
         assert dialog.always_on_top.isChecked() is False
+
+
+# --- the hotkey has three states, not two ------------------------------------
+# Diagnosed 2026-08-01: a key Windows had *refused* rendered as "Not listening",
+# which is identical to what an unbound key says. That ambiguity is why the real
+# cause — Sidekick owning the combination — survived three releases.
+
+
+class _FakeHotkey:
+    """Enough of `GlobalHotkey` for the state line and the OK gate."""
+
+    supported = True
+
+    def __init__(self, *, active=False, refused=None, reason="", probe=""):
+        self.active = active
+        self.refused = refused
+        self.refusal_reason = reason
+        self.presses = 0
+        self._probe = probe
+        self.probed: list[str] = []
+
+    def probe(self, binding):
+        self.probed.append(binding)
+        return self._probe
+
+    class _Sig:
+        @staticmethod
+        def connect(_):
+            pass
+
+    pressed = _Sig()
+
+
+def test_a_refused_binding_says_so_and_not_just_not_listening(qapp):
+    hk = _FakeHotkey(refused="ctrl+shift+c", reason="another program already owns it.")
+    d = SettingsDialog(Config(), hotkey=hk)
+    text = d.hotkey_state.text()
+    assert "Refused" in text
+    assert "CTRL + SHIFT + C" in text
+    assert "another program already owns it." in text
+    assert "Not listening" not in text
+
+
+def test_an_unbound_key_still_reads_as_not_listening(qapp):
+    d = SettingsDialog(Config(), hotkey=_FakeHotkey())
+    assert "Not listening" in d.hotkey_state.text()
+
+
+def test_a_live_key_reads_as_listening(qapp):
+    d = SettingsDialog(Config(), hotkey=_FakeHotkey(active=True))
+    assert "Listening" in d.hotkey_state.text()
+
+
+def test_a_binding_windows_would_refuse_blocks_the_save(qapp):
+    """The maintainer's call: find out before the setting saves clean."""
+    from PySide6.QtWidgets import QDialogButtonBox
+
+    hk = _FakeHotkey(probe="another program already owns this combination")
+    d = SettingsDialog(Config(), hotkey=hk)
+    d.hotkey_enabled.setChecked(True)
+    d._revalidate()
+    ok = d.buttons.button(QDialogButtonBox.StandardButton.Ok)
+    assert not ok.isEnabled()
+    assert hk.probed
+
+
+def test_a_free_binding_is_saveable(qapp):
+    from PySide6.QtWidgets import QDialogButtonBox
+
+    d = SettingsDialog(Config(), hotkey=_FakeHotkey())
+    d.hotkey_enabled.setChecked(True)
+    d._revalidate()
+    assert d.buttons.button(QDialogButtonBox.StandardButton.Ok).isEnabled()
+
+
+def test_the_pre_check_is_skipped_when_the_hotkey_is_off(qapp):
+    """No point testing a key that is not going to be bound."""
+    hk = _FakeHotkey(probe="taken")
+    d = SettingsDialog(Config(), hotkey=hk)
+    d.hotkey_enabled.setChecked(False)
+    d._revalidate()
+    assert hk.probed == []

@@ -109,8 +109,14 @@ class MainWindow(QMainWindow):
         # Wide enough for the Market tab bar to show all 15 tabs without
         # scrolling, and no wider — the columns size to their content, so extra
         # width buys nothing but dead space.
-        self.resize(900, 620)
-        self.setMinimumSize(700, 400)
+        self.resize(1000, 620)
+        # The minimum comes from the tables, not from taste: every column now
+        # refuses to shrink below its own heading (`ColumnLayout.min_width`),
+        # so below the widest row's floor the queue scrolls sideways instead of
+        # truncating `Profit` into "rofit". Measured with
+        # `minimum_row_width()` — Waiting on a reply wants 916 and the Trades
+        # table 896, plus the scrollbar and the layout margins around them.
+        self.setMinimumSize(960, 400)
         self.setWindowIcon(make_app_icon())
 
         # Startup notices collected before the log widget exists.
@@ -276,6 +282,7 @@ class MainWindow(QMainWindow):
         self.queue_panel.dismiss_requested.connect(self._queue_dismiss)
         self.queue_panel.recopy_requested.connect(self._queue_recopy)
         self.queue_panel.revise_requested.connect(self._queue_revise)
+        self.queue_panel.pin_requested.connect(self._queue_pin)
         self.lookup = QuickLookup()
         self.ops_split = QSplitter(Qt.Orientation.Vertical)
         self.ops_split.addWidget(self.queue_panel)
@@ -738,7 +745,7 @@ class MainWindow(QMainWindow):
         for t in tick.expired:
             log.debug("trade offer expired: %s", t.candidate.item_name)
         for t in tick.auto_resolved:
-            self._record_auto_no_reply(t)
+            self._record_auto_expiry(t)
         if tick.auto_resolved:
             self.trade_queue.forget_resolved()
         self.queue_panel.refresh(self.trade_queue)
@@ -754,12 +761,16 @@ class MainWindow(QMainWindow):
             self._log("session ended — the queue is empty and nothing is running")
             self.sweep.set_live_session(None)
 
-    def _record_auto_no_reply(self, trade) -> None:
-        """Write a timed-out whisper to the outcome log as NO_REPLY.
+    def _record_auto_expiry(self, trade) -> None:
+        """Write a timed-out whisper to the outcome log as EXPIRED.
 
         The queue has already changed the trade's state; this is only the
         persistence half, kept here because the queue has no business knowing
         where the log lives.
+
+        The verdict is `EXPIRED` rather than `NO_REPLY` because that is all the
+        timer knows — see `trade_queue`. A row written here can still be
+        corrected: verdicts apply in file order, so a later record wins.
         """
         from ..outcomes import record_outcome
 
@@ -767,8 +778,25 @@ class MainWindow(QMainWindow):
             assert self.cfg.outcomes_path is not None
             record_outcome(self.cfg.outcomes_path, trade.attempt_id, trade.outcome)
         self.sweep.note_outcome(trade.candidate, trade.outcome)
-        self._log(f"{trade.candidate.item_name}: no reply (timed out)")
+        self._log(
+            f"{trade.candidate.item_name}: expired — nobody said what happened "
+            "before the timer ran out"
+        )
         self.results.reload()
+
+    def _queue_pin(self, trade_id: str, pinned: bool) -> None:
+        """Hold a whispered row off the clock, or let it back on.
+
+        Nothing is written to the outcome log: pinning is a statement about what
+        the user is doing right now, not about the trade.
+        """
+        trade = self.trade_queue.pin(trade_id, pinned)
+        if trade is not None:
+            self._log(
+                f"{trade.candidate.item_name}: "
+                + ("pinned — it won't expire on its own" if pinned else "unpinned")
+            )
+        self.queue_panel.refresh(self.trade_queue)
 
     def _announce_offer(self, trade) -> None:
         """One toast per offer, and only while no other offer is live.
@@ -844,8 +872,8 @@ class MainWindow(QMainWindow):
             retention_days=self.cfg.history_retention_days,
         )
         c = taken.candidate
-        # The Trades tab is told too, so its "Ones I messaged" and "Ones I
-        # bought" filters cover whispers taken from the queue. Almost every
+        # The Trades tab is told too, so its "Attempts" and "Trades"
+        # filters cover whispers taken from the queue. Almost every
         # whisper comes from here rather than from that table, so without this
         # both filters read as permanently empty.
         self.sweep.note_attempt(c, taken.attempt_id)
@@ -930,7 +958,8 @@ class MainWindow(QMainWindow):
         )
 
     def _queue_outcome(self, trade_id: str, outcome) -> None:
-        from ..outcomes import record_outcome
+        from ..outcomes import label_for, record_outcome
+        from ..trade_queue import SETTLED_OUTCOMES
 
         trade = self.trade_queue.get(trade_id)
         if trade is None:
@@ -942,7 +971,13 @@ class MainWindow(QMainWindow):
             assert self.cfg.outcomes_path is not None
             record_outcome(self.cfg.outcomes_path, resolved.attempt_id, outcome)
         self.sweep.note_outcome(resolved.candidate, outcome)
-        self._log(f"{resolved.candidate.item_name}: {outcome.value}")
+        note = label_for(outcome).lower()
+        if outcome in SETTLED_OUTCOMES:
+            # Worth saying out loud: a Bulk listing doesn't delist when the
+            # stock goes, so without this the next sweep re-finds it and the
+            # same seller gets whispered again.
+            note += " — this listing won't be offered again this session"
+        self._log(f"{resolved.candidate.item_name}: {note}")
         self.results.reload()
         self.trade_queue.forget_resolved()
         self.queue_panel.refresh(self.trade_queue)
@@ -963,22 +998,27 @@ class MainWindow(QMainWindow):
 
         Failure is reported on the Trades tab and in the log rather than raised:
         a hotkey that another program already owns is a normal thing to hit, and
-        the tab works fine without it.
+        the tab works fine without it. It is also *recoverable* — ownership is
+        first-come-first-served, so `GlobalHotkey` keeps retrying and says so
+        through `recovered`, which is why the hint is set from one place.
         """
         self._hotkey = GlobalHotkey(self)
         self._hotkey.pressed.connect(self._hotkey_pressed)
         self._hotkey.error.connect(lambda msg: self._log(f"hotkey: {msg}"))
+        self._hotkey.recovered.connect(self._hotkey_bound)
         if not self.cfg.trade_hotkey_enabled or not self.cfg.trade_hotkey:
             return
         if not self._hotkey.supported:
             self._log("hotkey: only available on Windows")
             return
         if self._hotkey.register(self.cfg.trade_hotkey):
-            self._log(
-                f"hotkey {format_hotkey(self.cfg.trade_hotkey)} copies the next trade"
-            )
-            self.sweep.set_hotkey_hint(self.cfg.trade_hotkey)
-            self.queue_panel.set_hotkey_hint(self.cfg.trade_hotkey)
+            self._hotkey_bound(self.cfg.trade_hotkey)
+
+    def _hotkey_bound(self, binding: str) -> None:
+        """The key is live — tell the panels which one it is."""
+        self._log(f"hotkey {format_hotkey(binding)} copies the next trade")
+        self.sweep.set_hotkey_hint(binding)
+        self.queue_panel.set_hotkey_hint(binding)
 
     def _recheck(self, candidate) -> None:
         """Confirm a listing still exists, just before the whisper is copied."""
@@ -1173,11 +1213,10 @@ class MainWindow(QMainWindow):
         self.queue_panel.set_hotkey_hint("")
         self.sweep.set_hotkey_hint("")
         if self.cfg.trade_hotkey_enabled and self.cfg.trade_hotkey:
+            # A refusal is not the end of it: `register` keeps retrying, and
+            # `recovered` runs the same handler when the key comes back.
             if self._hotkey.register(self.cfg.trade_hotkey):
-                self.queue_panel.set_hotkey_hint(self.cfg.trade_hotkey)
-                self._log(
-                    f"hotkey {format_hotkey(self.cfg.trade_hotkey)} copies the next trade"
-                )
+                self._hotkey_bound(self.cfg.trade_hotkey)
         else:
             self._log("hotkey disabled")
         self.queue_panel.refresh(self.trade_queue)

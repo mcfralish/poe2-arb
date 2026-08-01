@@ -30,6 +30,24 @@ WM_HOTKEY to *the thread that registered it*, so the thread registers the key
 and runs its own `GetMessage` loop — the message never has to reach Qt's event
 dispatcher to be seen. The thread is a `QThread` purely so its `pressed` signal
 crosses back to the GUI thread through Qt's own queued-connection machinery.
+
+**And the delivery path was never the bug.** Root-caused 2026-08-01: none of the
+three fixes above mattered, because `RegisterHotKey` was *returning 0* the whole
+time — **Sidekick owns `ctrl+shift+c`**, and Windows hands a hotkey to whoever
+asks first. Quitting Sidekick and rebinding made the key fire for the first time
+in any release. Three releases could not see this because the false return was
+swallowed silently, so this module now:
+
+- calls `GetLastError` on a refusal and reports it, giving Settings a third
+  state — *refused* — that the old "listening / not listening" line could not
+  express;
+- offers `probe()`, a trial register-then-unregister so a binding can be tested
+  **before** it is saved. It runs on the pump thread, because `RegisterHotKey`
+  is thread-affine and a key registered from the GUI thread posts WM_HOTKEY
+  where nothing is listening — which is one line away from the original bug;
+- retries on a timer, because ownership is first-come-first-served and Sidekick
+  launches with the game. A reboot is enough to lose the key silently, so a
+  pre-check is necessary and *not* sufficient.
 """
 
 from __future__ import annotations
@@ -39,7 +57,7 @@ import logging
 import sys
 import threading
 
-from PySide6.QtCore import QObject, QThread, Signal
+from PySide6.QtCore import QObject, QThread, QTimer, Signal
 
 log = logging.getLogger(__name__)
 
@@ -107,6 +125,23 @@ class HotkeyError(ValueError):
     pass
 
 
+def describe_error(code: int) -> str:
+    """A Windows error from `RegisterHotKey`, in words a player can act on.
+
+    The wording names the likely culprit deliberately. The maintainer has **no
+    `ctrl+shift+c` binding in Sidekick's own config**, so no amount of looking
+    through settings would have found it (2026-08-01) — the app has to say it.
+    """
+    if code == ERROR_HOTKEY_ALREADY_REGISTERED:
+        return (
+            "another program already owns this combination, so Windows refused "
+            "it. Trade overlays are the usual culprit — Sidekick claims one even "
+            "when its own settings show no binding. Close it and rebind, or pick "
+            "a different key."
+        )
+    return f"Windows refused to register it (error {code})."
+
+
 def parse_hotkey(text: str) -> tuple[int, int]:
     """"ctrl+alt+d" -> (modifiers, virtual-key). Raises HotkeyError if unusable.
 
@@ -138,6 +173,23 @@ def format_hotkey(text: str) -> str:
 
 
 HOTKEY_ID = 0xA7B1  # arbitrary, only needs to be unique within this process
+# A separate id for the pre-check, so a trial can never collide with the live
+# registration by identity — the collision that matters is over the *key*, and
+# that one is handled by unregistering ourselves first. See `GlobalHotkey.probe`.
+PROBE_ID = 0xA7B2
+
+# `RegisterHotKey` sets this when another process already owns the combination.
+# The one refusal worth naming: it is what Sidekick produces, and "already taken"
+# is a fixable problem where a bare error number is not.
+ERROR_HOTKEY_ALREADY_REGISTERED = 1409
+
+# How often to try again for a key that was refused. Ownership is
+# first-come-first-served and Sidekick starts with the game, so the common way
+# to lose the hotkey is a reboot — and the common way to get it back is for the
+# other program to close. Neither generates an event we can wait on, so this
+# polls. A minute is far below the cost of noticing by hand and far above the
+# cost of one syscall.
+RETRY_INTERVAL_MS = 60_000
 
 
 class _HotkeyPump(QThread):
@@ -158,6 +210,16 @@ class _HotkeyPump(QThread):
         self._vk = vk
         self._thread_id = 0
         self.ok = False
+        # What Windows said when it refused. 0 means "not refused"; 1409 means
+        # another program owns the combination, which is the case that has a
+        # remedy. Kept so Settings can say which of those happened.
+        self.last_error = 0
+        # A binding to trial-register on this thread, set by `probe` before the
+        # loop starts. `RegisterHotKey` is thread-affine, so the test has to
+        # happen here or it tests the wrong thread's key table.
+        self._probe: tuple[int, int] | None = None
+        self.probe_error: int | None = None
+        self.probed = threading.Event()
         # Registration happens on the pump thread but `register` reports success
         # synchronously, so the caller waits for this.
         self.ready = threading.Event()
@@ -173,6 +235,11 @@ class _HotkeyPump(QThread):
         self._thread_id = kernel32.GetCurrentThreadId()
         try:
             self.ok = bool(user32.RegisterHotKey(None, HOTKEY_ID, self._mods, self._vk))
+            if not self.ok:
+                # The line whose absence cost three releases. A bare `return`
+                # here is why "not listening" was the only thing the app could
+                # ever say about a key another program had taken.
+                self.last_error = kernel32.GetLastError()
         except Exception as e:  # noqa: BLE001 — a dead hotkey must not stop the app
             log.warning("could not register hotkey", exc_info=True)
             self.failed.emit(str(e))
@@ -180,10 +247,17 @@ class _HotkeyPump(QThread):
             return
         self.ready.set()
         if not self.ok:
+            log.warning(
+                "RegisterHotKey refused (GetLastError=%d: %s)",
+                self.last_error, describe_error(self.last_error),
+            )
+            self.failed.emit(describe_error(self.last_error))
             return
         msg = MSG()
         try:
             while True:
+                if self._probe is not None:
+                    self._run_probe(user32, kernel32)
                 # 0 is WM_QUIT, -1 an error; either way the loop is over.
                 got = user32.GetMessageW(ctypes.byref(msg), None, 0, 0)
                 if got in (0, -1):
@@ -196,6 +270,41 @@ class _HotkeyPump(QThread):
             self.failed.emit("the hotkey stopped listening — rebind it in Settings")
         finally:
             user32.UnregisterHotKey(None, HOTKEY_ID)
+
+    def _run_probe(self, user32, kernel32) -> None:  # pragma: no cover - Windows only
+        """Trial-register the pending binding, then give it straight back."""
+        mods, vk = self._probe
+        self._probe = None
+        try:
+            if user32.RegisterHotKey(None, PROBE_ID, mods, vk):
+                user32.UnregisterHotKey(None, PROBE_ID)
+                self.probe_error = 0
+            else:
+                self.probe_error = kernel32.GetLastError()
+        except Exception:  # noqa: BLE001 — a failed test must not kill the pump
+            log.warning("hotkey probe failed", exc_info=True)
+            self.probe_error = None
+        finally:
+            self.probed.set()
+
+    def probe(self, mods: int, vk: int, timeout: float = 2.0) -> int | None:
+        """Ask the pump thread whether `mods`+`vk` can be registered.
+
+        Returns 0 if it can, a Windows error code if it cannot, and None if the
+        pump never answered. Queued rather than called directly: the answer is
+        only meaningful on the thread that would own the key.
+        """
+        self.probe_error = None
+        self.probed.clear()
+        self._probe = (mods, vk)
+        # Wake `GetMessage`, which is otherwise blocked until the key is pressed.
+        if self._thread_id:
+            ctypes.windll.user32.PostThreadMessageW(  # type: ignore[attr-defined]
+                self._thread_id, 0x0000, 0, 0        # WM_NULL
+            )
+        if not self.probed.wait(timeout):
+            return None
+        return self.probe_error
 
     def stop(self) -> None:  # pragma: no cover - Windows only
         if self._thread_id:
@@ -219,6 +328,9 @@ class GlobalHotkey(QObject):
 
     pressed = Signal()
     error = Signal(str)
+    # The binding came back. Emitted by the retry, so the UI can stop saying
+    # the key is dead without the user having to open Settings to find out.
+    recovered = Signal(str)
 
     HOTKEY_ID = HOTKEY_ID
 
@@ -226,6 +338,12 @@ class GlobalHotkey(QObject):
         super().__init__(parent)
         self._binding: str | None = None
         self._pump: _HotkeyPump | None = None
+        # What was asked for but refused, and why. Distinct from "nothing is
+        # bound": a refused key is a live problem with a remedy, and the app
+        # used to render both as "Not listening…".
+        self._refused: str | None = None
+        self._refused_error = 0
+        self._retry: QTimer | None = None
 
     @property
     def supported(self) -> bool:
@@ -234,6 +352,15 @@ class GlobalHotkey(QObject):
     @property
     def active(self) -> bool:
         return self._pump is not None and self._pump.ok
+
+    @property
+    def refused(self) -> str | None:
+        """The binding Windows would not give us, or None."""
+        return self._refused
+
+    @property
+    def refusal_reason(self) -> str:
+        return describe_error(self._refused_error) if self._refused else ""
 
     @property
     def binding(self) -> str | None:
@@ -248,8 +375,16 @@ class GlobalHotkey(QObject):
         """
         return self._pump.presses if self._pump is not None else 0
 
-    def register(self, text: str) -> bool:
-        """Bind `text`. Returns True if the hotkey is now live."""
+    def register(self, text: str, *, retry: bool = True) -> bool:
+        """Bind `text`. Returns True if the hotkey is now live.
+
+        A refusal is remembered rather than forgotten: `refused` holds the
+        binding, `refusal_reason` says why, and unless `retry` is off the
+        registration is attempted again on a timer. Ownership is
+        first-come-first-served, so a key lost to startup order comes back on
+        its own when the other program closes — the user should not have to
+        know that reopening Settings is what fixes it.
+        """
         self.unregister()
         if not self.supported:
             return False
@@ -264,19 +399,97 @@ class GlobalHotkey(QObject):
         pump.start()
         # Bounded: a pump that never reports back is a broken one, and blocking
         # the GUI thread on it would hang the window rather than the hotkey.
-        if not pump.ready.wait(5.0) or not pump.ok:
+        answered = pump.ready.wait(5.0)
+        if not answered or not pump.ok:
+            self._refused = text
+            self._refused_error = pump.last_error if answered else 0
             pump.stop()
+            # `failed` has already carried the detail out of the pump; this says
+            # which binding it was about.
             self.error.emit(
-                f"{format_hotkey(text)} is already taken by another program — pick another."
+                f"{format_hotkey(text)} is not listening — {self.refusal_reason}"
             )
+            if retry:
+                self._schedule_retry()
             return False
         self._pump = pump
         self._binding = text
+        self._refused = None
+        self._refused_error = 0
+        self._stop_retry()
         log.info("global hotkey registered: %s", format_hotkey(text))
         return True
+
+    def probe(self, text: str) -> str:
+        """Test `text` without keeping it. "" if it is free, else why not.
+
+        Three traps, all of them load-bearing:
+
+        (a) **A key we already hold must not be reported as taken** — it is
+            taken, by us. Testing the live binding would fail every hotkey that
+            is currently working, so that case answers "free" up front.
+        (b) It is a **race** — another program can claim the key between this
+            answer and the save — so `register` still has to report failure.
+            This buys a better message, not a guarantee.
+        (c) The trial runs **on the pump thread**, because `RegisterHotKey` is
+            thread-affine. Testing it from the GUI thread would answer a
+            different question from the one that matters, which is one line
+            away from the bug this whole thing is about.
+        """
+        if not self.supported:
+            return ""
+        try:
+            mods, vk = parse_hotkey(text)
+        except HotkeyError as e:
+            return str(e)
+        if self._binding == text:
+            return ""     # already ours and working; nothing to find out
+        pump = self._pump
+        if pump is None or not pump.ok:
+            # Nothing of ours is holding a key, so a throwaway pump can answer.
+            # Registered and released on its own thread, exactly like the real
+            # one — see (c).
+            trial = _HotkeyPump(mods, vk, self)
+            trial.start()
+            answered = trial.ready.wait(5.0)
+            code = 0 if (answered and trial.ok) else (trial.last_error if answered else 0)
+            trial.stop()
+            return "" if code == 0 else describe_error(code)
+        code = pump.probe(mods, vk)
+        if code is None:
+            return ""     # the pump never answered; don't block a save on that
+        return "" if code == 0 else describe_error(code)
 
     def unregister(self) -> None:
         pump, self._pump = self._pump, None
         self._binding = None
+        self._stop_retry()
         if pump is not None:
             pump.stop()
+
+    # --- getting a refused key back ----------------------------------------
+
+    def _schedule_retry(self) -> None:
+        if self._retry is None:
+            self._retry = QTimer(self)
+            self._retry.setInterval(RETRY_INTERVAL_MS)
+            self._retry.timeout.connect(self._try_again)
+        self._retry.start()
+
+    def _stop_retry(self) -> None:
+        if self._retry is not None:
+            self._retry.stop()
+
+    def _try_again(self) -> None:
+        """Have another go at a refused binding, quietly."""
+        text = self._refused
+        if text is None or self.active:
+            self._stop_retry()
+            return
+        # `retry=False` so a failure re-arms nothing: the timer is already
+        # running and re-entering `register` would restart it each tick.
+        if self.register(text, retry=False):
+            log.info("global hotkey recovered: %s", format_hotkey(text))
+            self.recovered.emit(text)
+        else:
+            self._schedule_retry()

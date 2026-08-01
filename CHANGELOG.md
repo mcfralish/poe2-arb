@@ -6,6 +6,59 @@ says what changed for you and, where it matters, why.
 Versions follow `MAJOR.MINOR.PATCH`. Until 1.0 the minor number moves for
 anything user-visible.
 
+## [0.8.0] — 2026-08-01
+
+The first half of the fourth session's defect list. The headline is that **the app was
+writing down trades that happened as trades that didn't** — and every fill rate it
+reports is computed from that file.
+
+> **Prices are still optimistic on rarely-traded items**, and the reason changed: the
+> in-game book turns out to be tight, so the error is the reference price *moving*, not a
+> spread. It runs about ±6% either way rather than consistently high. Liquid currency is
+> fine; thin items are still not, and the *uncertain* rating still says so.
+
+### Fixed
+
+- **A trade that went through was being recorded as "no reply", three and a half minutes
+  after it completed.** The five-minute timer wrote a verdict over the top of the biggest
+  trade this app has found. Two changes: the timer now writes **Expired**, which claims
+  only that nobody said what happened, and a row can be **pinned** so it never expires at
+  all. Pin one the moment a seller answers — it jumps to the top of *Waiting on a reply*,
+  holds its own highlight, and stops counting down.
+- **The same stale listing was being whispered over and over.** Measured across the
+  fourth session: one listing went out **five times in three and a half hours**, twice to
+  a seller the game had already said was offline and once to a seller it had already been
+  bought from. A Bulk listing doesn't disappear when the stock does, so anything marked
+  Traded, Already Sold, Offline or Refused is now suppressed for the rest of the session.
+- **Column headings truncated into different words** at narrow window widths — `Profit`
+  read as "rofit", `Expires` as "xpire". No column will now shrink below its own heading,
+  and Item and Seller get room for a real name. The window's minimum width went up to
+  match what the tables actually need.
+
+### Changed
+
+- **The verdict buttons say what you mean.** *No Reply* is gone: by hand it meant either
+  **AFK** or **Offline**, and those are now the two buttons. The timeout's **Expired** is
+  a third, separate thing. Old records still read back correctly and still say "No Reply".
+- **`Buy` / `Each` / `Cost` are now `Amount` / `Price per` / `Total`**, in the queue and
+  in the Trades tab. The old headings were misread by the person who wrote them: "Buy 5 ·
+  Each 1 div · Cost 5 div" reads back as "I bought 1 for 5 div", and a losing trade got
+  explained as a bug in the profit column because of it.
+- **The Trades tab's filters are renamed** to *All Results*, *Attempts* and *Trades*.
+- **The row buttons are icons rather than words**, with the full wording on hover. Seven
+  actions as words was wider than the rest of the table.
+
+### Added
+
+- **The hotkey says when Windows refuses it.** Root cause found: `RegisterHotKey` was
+  being turned down because **another program already owned the combination** — Sidekick
+  claims one even with nothing in its own settings — and three releases could not see it
+  because the refusal was thrown away. Settings now shows a third state, *Refused*, with
+  the reason; a binding is **tested before it saves**, so you find out in the dialog
+  rather than after a trade goes past; and a key that was refused is retried in the
+  background, so it starts working on its own when the other program closes. Ownership is
+  first-come-first-served, so launching this app before your overlay is what keeps it.
+
 ## [0.7.0] — 2026-07-31
 
 A third session of real use, and the defect list it produced. Two things in 0.6.0 turned

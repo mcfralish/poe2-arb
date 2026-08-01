@@ -6,31 +6,42 @@ deleted rather than ticked, so this file stays worth reading start to finish.
 
 ## State of play
 
-**Shipped:** v0.7.0 (2026-07-31). **Four field tests behind it.** The fourth ran on
-2026-08-01 across four sessions and 969 log records; its defect list is below and **none of
-it is built** — the session was intake only. Evidence for all of it is in
-[docs/FINDINGS.md](docs/FINDINGS.md), *Found in the fourth session of real use*.
+**Shipped:** v0.7.0 (2026-07-31). **v0.8.0 is written and untagged** on `field-test-4`:
+the outcome-log integrity half of the fourth session's defect list, plus the hotkey
+diagnostic and the column work. Nothing in it has been run on Windows or in game.
+
+**Four field tests behind the project.** The fourth ran on 2026-08-01 across four sessions
+and 969 log records. Evidence for all of it is in [docs/FINDINGS.md](docs/FINDINGS.md),
+*Found in the fourth session of real use*.
+
+**What 0.8.0 built, so it is not rebuilt.** The auto-expiry writes `Outcome.EXPIRED`
+instead of `no_reply` and the manual buttons are now **AFK** / **Offline**; a waiting row
+can be **pinned** off the clock; a listing resolved as Traded / Already Sold / Offline /
+Refused is suppressed for the session; the money columns are *Amount / Price per / Total*
+and the Trades filters *All Results / Attempts / Trades*; every column refuses to shrink
+below its own heading and the row actions are icons; and the hotkey reports a refused
+`RegisterHotKey` with `GetLastError`, shows *Refused* in Settings, tests a binding before
+saving it and retries in the background. Full list in [CHANGELOG.md](CHANGELOG.md).
 
 **Start here next session.** In order of what unblocks what:
 
-1. **A real fill is being logged as `no_reply`** (*Next*) — the five-minute auto-expiry
-   wrote a false verdict three and a half minutes *after* the trade completed, on the
-   biggest gap the project has ever hit. It corrupts the file every fill rate is computed
-   from, so every measurement below inherits it. Fix this before fitting anything.
+1. **Verify 0.8.0 in game before building more of the list.** Three things in it can only
+   be checked on Windows: whether the hotkey pre-check and the *Refused* line say
+   something true with Sidekick running, whether the icon buttons render, and whether
+   pinning is reachable mid-map. The hotkey especially — this project has shipped a broken
+   Windows-only hotkey three times, and the fourth fix is again untestable here.
 2. **Did the ghost fills fill at the listed price, or at a counteroffer?** (*Next*) — the
    one ghost fill observed on 2026-08-01 was a counteroffer at **10× the listed price** and
    lost money on a record claiming +38 div. If the n=131 sample's fills were the same, the
    ghost result is overstated and possibly negative. `Client.txt` can answer it without a
-   field test. **This now blocks the ranking item**, which was previously unblocked.
-3. **The hotkey works, and the fix left to build is the diagnostic** (*Next*) — root-caused
-   and confirmed 2026-08-01: `RegisterHotKey` was being refused because **Sidekick owns the
-   combination**, and it fired for the first time ever once Sidekick was quit. It is
-   first-come-first-served, so it regresses the moment Sidekick starts first. Report the
-   refusal and retry; do not touch the delivery path.
-4. **Pricing is unblocked and one branch of it is dead** (*Next*) — the book is tight
+   field test. **This still blocks the ranking item.**
+3. **Pricing is unblocked and one branch of it is dead** (*Next*) — the book is tight
    (~2%), so the liquidity haircut must not be built; the error is movement, so build
    freshness. One un-measured cell left: a genuinely thin item.
-5. **The Send button** (*Next*) — route **decided: keystrokes**. Unblocked, ordinary work.
+4. **The Send button** (*Next*) — route **decided: keystrokes**. Unblocked, ordinary work.
+5. **Editing a past record from the Trades tab** (*UI*) — the other half of the auto-expiry
+   fix. Pinning stops good rows expiring in future; nothing yet reaches back to the
+   Rigwald's Ferocity record that was already written wrong.
 
 **What 0.7.0 changed, in one paragraph.** Two of 0.6.0's fixes were wrong rather than
 incomplete: the hotkey had still never fired (Qt is now out of the delivery path
@@ -67,10 +78,15 @@ the book that a desktop client cannot reach.
 *What the next field test must measure* below still blocks the **pricing** item — that
 one needs a human in game and cannot be recovered from any log.
 
-> **The app is not trustworthy for live trading on thin items.** It overstates resale by
-> ~26% on anything that isn't liquid currency, and it doesn't know gold exists. Both are
-> quantified in [docs/FINDINGS.md](docs/FINDINGS.md). The UI says so in the *uncertain* band
-> tooltip and in Quick Lookup; the arithmetic underneath is still wrong.
+> **The app is not trustworthy for live trading on thin items** — but the reason changed on
+> 2026-08-01 and the old wording here was wrong. It is **not** a ~26% overstatement: read
+> against both sides of the in-game book, the error was **−5.9% and +6.5% on two items
+> minutes apart**, so the reference price is **noisy at roughly ±6%, not biased**, and the
+> cause is the price *moving* rather than a spread. It still doesn't know gold exists. Both
+> are quantified in [docs/FINDINGS.md](docs/FINDINGS.md). The *uncertain* band tooltip and
+> Quick Lookup still say "runs high", which is now over-specific and one-directional —
+> fixing that wording is part of the pricing item. Genuinely thin pairs (~100k
+> `ValueTraded`) remain unmeasured.
 
 **The shape of the app.** Toolbar: *Find trades* (a toggle — sweeps, waits, sweeps again)
 and *Settings*. Tabs: *Opportunities* (the queue, plus bankroll, settlement, long-shots and
@@ -96,16 +112,32 @@ The method, for reuse: in-game quotes read **"I want : I have"**, so the first r
 pair is what you pay to **buy** and the second is what you **receive** to sell. Take the
 app's number within a minute of the game's — the whole point is that they move.
 
-Also worth confirming, because v0.7.0 changed them and nothing but a human can check:
+Also worth confirming, because nothing but a human can check them.
 
-- ~~The Settings press counter, for the hotkey.~~ **Answered 2026-08-01 and no longer
-  needs a field test.** The line read *"Not listening…"* with the box ticked and the
-  binding saved, which root-causes it to a refused `RegisterHotKey` — a desk problem now,
-  not an in-game one. See the hotkey item in *Next*.
-- **Partial asks get answered.** Listings bigger than the bankroll are now whispered for
-  the affordable fraction. Worth knowing whether the reply rate on those is materially
-  worse than on whole-lot asks — it is a new class of whisper and the log can measure it,
-  but only once some have been sent.
+**New in 0.8.0, and none of it has run on Windows.** This is the list to work through
+first — see item 1 of *Start here*:
+
+- **The hotkey, with Sidekick running.** Settings should say *Refused* and name the
+  culprit rather than *"Not listening…"*; pressing OK on a taken binding should be blocked
+  with the reason in the dialog; and quitting Sidekick should make the key start working
+  **without reopening Settings**, which is the 60-second retry and the part no test here
+  means anything about. Then reboot with Sidekick in the startup order — that is the case
+  the retry exists for.
+- **The icon buttons render**, in the game's own font environment. They are dingbats
+  rather than emoji precisely because emoji fall back to identical empty boxes, but that
+  was verified on Linux only.
+- **Pinning is reachable mid-map** — the flag button is 30px, and the whole point of the
+  row is that it is used while playing.
+- **Expired versus AFK versus Offline is a distinction worth making by hand.** If the
+  three buttons feel like more work than the one they replaced, that is worth knowing
+  before the log fills up with a split nobody uses.
+
+**Older, still unconfirmed:**
+
+- **Partial asks get answered.** Listings bigger than the bankroll are whispered for the
+  affordable fraction. Worth knowing whether the reply rate on those is materially worse
+  than on whole-lot asks — it is a new class of whisper and the log can measure it, but
+  only once some have been sent.
 - Always-on-top floats over the game in borderless windowed.
 
 **If the install error recurs:** `%LOCALAPPDATA%\poe2-arb\poe2-arb.log`, grep for
@@ -114,28 +146,17 @@ which is why the original occurrence left no trace.
 
 ## Next
 
-- [ ] **Auto-expiry writes false verdicts into the outcome log, and it did it to the
-      biggest trade the project has made.** Measured 2026-08-01: Rigwald's Ferocity, 1
-      divine against a CE reference of 137.86, whispered 23:06:04, traded 23:07:30 (`ty` in
-      `Client.txt`), auto-marked `no_reply` at 23:11:03 — **three and a half minutes after
-      the trade completed**. Every fill rate in the project is computed from this file, so
-      this is not a display bug. Three things to decide, and they are separable:
-      - *An expired row must stay reachable.* The log already handles it — verdicts apply
-        in file order, so a later record wins, and `9adaaa859e10` carries `no_reply` then
-        `filled` from a real correction. The UI offers no route back. Editing the result
-        from the Trades tab (see the UI section) is the same fix and probably the whole fix.
-      - *Retire `NO_REPLY` as a button.* **Decided 2026-08-01 with the maintainer**, who
-        never presses it meaning "silence": the timeout writes **Expired**, and the manual
-        buttons become **AFK** and **Offline**, which is the only reason it gets pressed by
-        hand. That is the same three-way split the *Split NO_REPLY* item below derives from
-        the game log (76% silent / 22% AFK / the rest replies), arrived at independently
-        from the button the user actually wanted — and `Client.txt` can mark Offline
-        automatically, since `: <char> is not online.` is already there.
-        **`outcomes.jsonl` keeps returning `no_reply` records forever**, so the enum gains
-        members rather than renaming one, and every reader resolves the old value — the
-        same constraint as `bands.symbol_for_name`.
-      - *Whether five minutes is right* — but see the pin item below, which is the better
-        answer. Both false expiries measured this session were **answered** whispers.
+- [ ] **The auto-expiry no longer writes `no_reply`, but the rows it already got wrong are
+      still wrong.** Built in 0.8.0: the timeout writes `Outcome.EXPIRED`, the manual
+      buttons are **AFK** and **Offline**, and a pinned row never expires. **What is left
+      is the route back** — an expired row is reachable in the *file* (verdicts apply in
+      order, so a later record wins, and `9adaaa859e10` carries `no_reply` then `filled`
+      from a real correction) and unreachable in the *UI*. Editing the result from the
+      Trades tab, in the UI section below, is that fix. Until it lands, the Rigwald's
+      Ferocity record — the biggest trade the project has made — still reads `no_reply`.
+      Also still open: `Client.txt` can mark Offline automatically, since
+      `: <char> is not online.` is already in it. See *Split NO_REPLY* below, which is now
+      the log-reading half of the same three-way split.
 - [ ] **Did the ghost fills fill at the listed price, or at a counteroffer? Answerable
       today, from `Client.txt`, with no field test.** On 2026-08-01 the one ghost fill was
       a counteroffer at **10× the listed price**: the app offered 5 Faded Crisis Fragments
@@ -149,68 +170,27 @@ which is why the original occurrence left no trace.
       price, not just quantity** (the existing amendment record already carries
       `cost_divines`), and a ghost listing that has sat for hours is evidence the seller
       will not honour it — which is a rankable signal, not just noise.
-- [ ] **Pin a row so it stops counting down.** Requested 2026-08-01, and the log had
-      already produced the case twice that evening: **both false expiries were sellers who
-      had answered.** One replied `map` / `finish`, was expired six minutes before the
-      trade, and was hand-corrected afterwards; the other was mid-trade when the timer
-      fired. A pinned row **sorts to the top, holds a distinct highlight** (not the band
-      colour — this is state, not risk) and never auto-expires. It is the honest fix for
-      "is five minutes right?": the answer is that a seller who has spoken is no longer on
-      a clock. Cheap and worth doing before any timeout tuning. Pin state is per-session UI
-      and does not belong in `outcomes.jsonl`.
-- [ ] **Stop re-whispering listings already resolved this session, and give the sweep a
-      real pause.** Measured 2026-08-01: the same stale listing went out **five times
-      across four sessions in 3½ hours**, twice to a seller the game answered `is not
-      online` for, and once to a seller already traded with — because a Bulk listing does
-      not delist when the stock is gone. Two requests, and they are one design:
-      - *Suppress a listing marked Traded or Already sold* for the rest of the session.
-        Key on the listing, not the row: seller account + item + ratio, since the id is
-        regenerated each sweep.
-      - *A restart of Find trades must not re-scan the same items immediately.* The
-        maintainer uses the toggle as a pause when replies pile up, and gets a fresh round
-        of duplicate whispers for it. Either resume the sweep where it stopped, or build an
-        explicit **Pause** that holds the queue without ending the session. Note
-        `session.py` already treats a toggle mid-session as *continue*, so the session
-        boundary is not the thing that needs changing.
-- [ ] **The hotkey is never bound — `RegisterHotKey` is returning 0. Diagnosed 2026-08-01;
-      the previous three fixes were all in the wrong half of the path.** Settings reports
-      *"Not listening…"* with the box ticked and a fresh binding saved, which is the
-      `not hk.active` branch, which means `_pump.ok is False`. Full reasoning in
-      [docs/FINDINGS.md](docs/FINDINGS.md), 2026-08-01. **Do not write another delivery-path
-      fix.** In order:
-      - *Make the failure speak.* On a false return, call `GetLastError`, log it, and emit
-        `error` — `hotkey.py:176-183` currently returns silently, which is why three
-        releases could not see this. Surface it in Settings as its own status: *refused*
-        is a third state the line cannot currently express, and shipping only this much
-        would already have saved two releases.
-      - *The cause is confirmed: **Sidekick owns the combination**.* Quitting Sidekick and
-        rebinding made the hotkey fire, in the app and in game — **the first time it has
-        ever worked in any release** (2026-08-01). Restarting Sidekick afterwards did not
-        take it back. Note the maintainer has **no `ctrl+shift+c` binding in Sidekick's own
-        config**, so no amount of looking would have found this.
-      - *Test the binding **before** saving it — the maintainer's call, 2026-08-01, and the
-        primary fix.* There is no Win32 "who owns this key?" query, so the test is a trial
-        `RegisterHotKey` followed immediately by `UnregisterHotKey`: if it is refused, tell
-        the user in the dialog and do not let the setting save clean. Three traps:
-        (a) **unregister our own binding first**, or the trial collides with the app's live
-        hotkey and reports every existing binding as taken; (b) it is a **race** — another
-        program can take the key between the check and the save — so the real registration
-        must still report failure, the pre-check is a better message and not a guarantee;
-        (c) run the trial **on the pump thread**, since `RegisterHotKey` is thread-affine
-        and a key registered from the GUI thread posts `WM_HOTKEY` somewhere nothing is
-        listening. That third one is close to the bug this whole item is about.
-      - *It is first-come-first-served, so it will regress and the fix must assume that.*
-        The working order is poe2-arb before Sidekick, which is the opposite of the normal
-        one — Sidekick launches with the game, so a reboot is enough to lose it silently.
-        So the pre-check is necessary but **not sufficient**: also retry registration on a
-        timer or when the window is next shown, so a hotkey lost to startup order comes
-        back on its own, and offer to pick a free combination.
-      - *Overlay research is now optional, not blocking.* Focus was never implicated, so
-        the maintainer's overlay question stands on its own merits rather than as a hotkey
-        workaround. Keep it as research: always-on-top borderless already works, and a
-        click-through DirectX overlay is a different program.
-      The Settings press counter is **not** the diagnostic that mattered — a key that was
-      never registered cannot count presses. Its successor is a *refused* state.
+- [ ] **A restart of *Find trades* still re-scans the same items immediately.** The other
+      half of the duplicate-whisper problem; the *suppress a resolved listing* half shipped
+      in 0.8.0 and covers a listing that was Traded, Already Sold, Offline or Refused. What
+      is left: the maintainer uses the toggle as a pause when replies pile up, and gets a
+      fresh sweep of the same items for it. Either resume the sweep where it stopped, or
+      build an explicit **Pause** that holds the queue without ending the session. Note
+      `session.py` already treats a toggle mid-session as *continue*, so the session
+      boundary is not the thing that needs changing.
+- [ ] **The hotkey fix is written and unverified.** 0.8.0 does everything the diagnosis
+      called for — `GetLastError` on a false return, a *Refused* state in Settings, a trial
+      registration before the setting saves, and a 60-second retry so a key lost to startup
+      order comes back on its own. Reasoning and the three traps are in
+      [docs/FINDINGS.md](docs/FINDINGS.md), 2026-08-01. **None of it has run on Windows.**
+      What to check, with Sidekick running so the refusal actually happens:
+      - Settings says *Refused* and names Sidekick, rather than *"Not listening…"*.
+      - Pressing OK on a taken binding is blocked, with the reason in the dialog.
+      - Quitting Sidekick makes the key start working **without reopening Settings** —
+        that is the retry, and it is the part with no test that means anything.
+      - It survives a reboot with Sidekick in the startup order, which is the case the
+        retry exists for.
+      *Overlay research remains optional, not blocking.* Focus was never implicated.
 - [ ] **The reference price question is UNBLOCKED — the fork resolved to *movement*, and
       the spread branch is disproved.** Measured 2026-08-01 off both sides of the in-game
       book against the app's own snapshot minutes later; table in
@@ -359,7 +339,9 @@ which is why the original occurrence left no trace.
 The maintainer's list from the fourth session, grouped by surface. Small individually;
 several are the same change made in two places, and the two renames below collide, so read
 the whole section before starting. Screenshots of the minimum-width and bankroll problems
-were supplied in the intake conversation and are not in the repo.
+were supplied in the intake conversation and are not in the repo. **The column headings and
+the row buttons were done in 0.8.0**, which also raised the window's minimum width to 960
+— below that the queue tables now scroll sideways rather than truncating a heading.
 
 **Two tabs are being renamed past each other.** *Trades* (`sweep_panel.py`) becomes
 **Results**, and today's *Results* (`results.py`) becomes **Trends**. So "Results" means a
@@ -370,18 +352,14 @@ session will read them backwards. *Trades* also moves to **second** tab position
 
 ### Global
 
-- [ ] **Title Case every piece of user-facing text** — "no reply" → "No Reply", and the
-  same through buttons, headers, dropdown entries and status lines. **Does not extend to
-  the band vocabulary**: *worth trying* / *uncertain* / *too good to be true* are sentence
-  fragments used inline, and the `PLAUSIBLE`/`THIN`/`GHOST` enum stays untouched (CLAUDE.md,
+- [ ] **Title Case every piece of user-facing text** — the same through buttons, headers,
+  dropdown entries and status lines. **Partly done in 0.8.0**: the verdict vocabulary
+  (`outcomes.LABELS`), the queue and Trades column headings, the row action names and the
+  Trades filter options. What is left is everything else — section labels, status-bar
+  lines, Settings rows, the Market and Results tabs. **Does not extend to the band
+  vocabulary**: *worth trying* / *uncertain* / *too good to be true* are sentence fragments
+  used inline, and the `PLAUSIBLE`/`THIN`/`GHOST` enum stays untouched (CLAUDE.md,
   *Internal band names and user-facing words are deliberately different*).
-- [ ] **Per-column minimum widths, so headers stop truncating at narrow window widths.**
-  Today they scrunch to `Profit`→`rofit`, `Expires`→`xpire`. Each column's floor should be
-  its own header text plus padding; **Item and Seller need generously more than that**, for
-  long item names and long seller names. Raise the window's minimum width if the sum
-  demands it. This is `table_items.ColumnLayout` — note it already exempts the action
-  column from shrinking for the same class of reason, so this is an extension of an
-  existing rule, not a new mechanism.
 
 ### Opportunities
 
@@ -401,15 +379,12 @@ session will read them backwards. *Trades* also moves to **second** tab position
 
 ### Both queue sections
 
-- [ ] **Rename the columns.** `Buy` → **Amount**, `Each` → **Price per**, `Cost` →
-  **Total**. The headers were misread by their own author on 2026-08-01 (`Buy 5 / Each 1
-  div / Cost 5 div` read back as "I bought 1 for 5 div"), which is how a lost trade got
-  explained as a profit-column bug. Both header tuples are in `queue_panel.py`.
-- [ ] **Icon buttons instead of words**, smaller, styled as close to PoE2 as possible, with
-  the full wording kept as the hover tooltip: Accept 👍, Decline 👎, Copy Again the
-  two-pages glyph, Traded a check, No Reply a dash, Already Sold a cross. Sizing matters
-  beyond taste — the row of word-buttons is why the action column can't shrink and why
-  *Already sold* is clipped at narrow widths in the screenshots.
+- [ ] **The action buttons are icons but not PoE2-styled.** Done in 0.8.0: glyph buttons at
+  a fixed 30px with the full wording on hover, which is what made a seven-action row fit.
+  **Not done: the styling.** They are stock Qt buttons carrying dingbats
+  (✔ ✖ ⚑ ⚐ ❐ ✎ ☾ ⊘ ✕), chosen because emoji need a colour font and render as identical
+  empty boxes without one — see [docs/FINDINGS.md](docs/FINDINGS.md), *Operational*. Doing
+  this properly means bundled icon assets, not a different character.
 
 ### Waiting on a reply
 
@@ -422,10 +397,6 @@ session will read them backwards. *Trades* also moves to **second** tab position
 
 - [ ] **Rename the tab to Results and move it to second position** (see the collision note
   above). *Market* becomes third.
-- [ ] **Rename the columns**: `Listed` → **Price per**, `Buy` → **Amount**, `Cost` →
-  **Total** — the same vocabulary as the queue, in `sweep_panel.py`.
-- [ ] **Rename the filter options**: *Everything found* → **All Results**, *Ones I
-  messaged* → **Attempts**, *Ones I bought* → **Trades**.
 - [ ] **"This session" is neither this session nor all of it.** Rename to **Current
   Session** and offer it *only while a session is in progress*. The likely cause is in the
   name: `SESSION_LIVE` means "what the last sweep found" (its own tooltip says so), which

@@ -34,7 +34,7 @@ from PySide6.QtWidgets import (
 
 from ..outcomes import (
     MIN_SAMPLES,
-    Outcome,
+    label_for,
     read_attempts,
     suggested_gap_band,
     summarise,
@@ -80,14 +80,10 @@ ATTEMPT_COLUMNS = [
     ("Profit", "Expected, or actual once you reported a figure."),
 ]
 
-# Outcomes that count as the trade having happened, for the row colouring.
-_RESULT_LABEL = {
-    Outcome.PENDING: "waiting",
-    Outcome.FILLED: "traded",
-    Outcome.SOLD: "already sold",
-    Outcome.NO_REPLY: "no reply",
-    Outcome.DECLINED: "declined",
-}
+# Verdict wording comes from `outcomes.label_for`, not from a copy here: this
+# tab and the Trades tab had the same dict twice and it is exactly the drift
+# CLAUDE.md warns about. It also has to keep naming `no_reply`, which the log
+# still returns from before the verdict was split three ways.
 
 
 class ResultsTab(QWidget):
@@ -277,7 +273,7 @@ class ResultsTab(QWidget):
                 NumericItem(f"{a.gap:.2f}x", a.gap),
                 _band_cell(a.band),
                 TextItem(a.character or a.account),
-                TextItem(_RESULT_LABEL.get(a.outcome, a.outcome.value)),
+                TextItem(label_for(a.outcome)),
                 NumericItem(f"{profit:+.2f}", profit),
             ]
             for col, cell in enumerate(cells):

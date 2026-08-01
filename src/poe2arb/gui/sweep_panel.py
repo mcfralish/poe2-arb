@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (
 
 from ..format import currency_label
 from ..listings import Band, rank_candidates, whisper_text
-from ..outcomes import Outcome, leagues, read_attempts, sessions
+from ..outcomes import TIPS, Outcome, label_for, leagues, read_attempts, sessions
 from .bands import (
     BAND_LABEL,
     BAND_TIP,
@@ -62,15 +62,15 @@ COLUMNS = [
     ),
     ("Item", "What you'd be buying."),
     (
-        "Listed",
-        "Price per item in divines, whatever currency the seller wants. "
+        "Price per",
+        "Price of one item in divines, whatever currency the seller wants. "
         "Converted so rows stay comparable.",
     ),
     ("Pay with", "The currency the seller wants — you can only pay in this."),
     ("Exchange", "What one is worth on the in-game Currency Exchange."),
     ("Gap", "How far under Exchange value the listing is. 1.20x means 20% under."),
-    ("Buy", "How many to ask for — the most that stock and your bankroll allow."),
-    ("Cost", "Divines you'd spend."),
+    ("Amount", "How many to ask for — the most that stock and your bankroll allow."),
+    ("Total", "Divines you'd spend."),
     (
         "Profit",
         "Divines you'd clear, after rounding down to a whole unit of whatever "
@@ -101,9 +101,9 @@ SHOW_WHISPERED = "whispered"
 SHOW_BOUGHT = "bought"
 
 SHOW_MODES = (
-    (SHOW_ALL, "Everything found", "Every listing the last pass turned up."),
-    (SHOW_WHISPERED, "Ones I messaged", "Listings whose whisper you copied."),
-    (SHOW_BOUGHT, "Ones I bought", "Listings you recorded as an actual trade."),
+    (SHOW_ALL, "All Results", "Every listing the last pass turned up."),
+    (SHOW_WHISPERED, "Attempts", "Listings whose whisper you copied."),
+    (SHOW_BOUGHT, "Trades", "Listings you recorded as an actual trade."),
 )
 
 # What the session picker is pointed at. LIVE is the sweep in front of you;
@@ -125,15 +125,9 @@ _ATTEMPT_ROLE = Qt.ItemDataRole.UserRole + 1
 
 # What the Settle in column says on a history row: the verdict, since the
 # settlement currency was never recorded per attempt and what happened is the
-# more useful thing to have there.
-_RESULT_LABEL = {
-    Outcome.PENDING: "waiting",
-    Outcome.FILLED: "traded",
-    Outcome.SOLD: "already sold",
-    Outcome.NO_REPLY: "no reply",
-    Outcome.DECLINED: "declined",
-}
-
+# more useful thing to have there. The wording comes from `outcomes.label_for`,
+# which the Results tab reads too — this module and that one carried the same
+# dict twice until 0.8.0.
 
 
 
@@ -160,9 +154,9 @@ class SweepPanel(QWidget):
         self._outcomes: dict[tuple, Outcome] = {}
         # Candidates kept alive past the sweep that found them, because they
         # were whispered. A listing you *bought* is by definition absent from
-        # the next sweep, so without this "Ones I bought" empties itself the
+        # the next sweep, so without this "Trades" empties itself the
         # moment the purchase succeeds — the exact case it exists to answer.
-        # Held out of "Everything found", which means what it says.
+        # Held out of "All Results", which means what it says.
         self._carried: dict[tuple, object] = {}
         # What sales are priced in. Shown per row because it decides the Profit
         # figure, and because after a session you need to know which currency a
@@ -221,7 +215,7 @@ class SweepPanel(QWidget):
             )
         self.show_mode.setToolTip(
             "Which of these to list.\n\n"
-            "Everything found is what the last pass saw. The other two narrow it "
+            "All Results is what the last pass saw. The other two narrow it "
             "to what you did about it, which is how you check afterwards what a "
             "trade you actually made was valued at."
         )
@@ -288,14 +282,19 @@ class SweepPanel(QWidget):
         # disabled until a whisper has actually been copied — there is nothing
         # to report a verdict on before that.
         self._outcome_btns: dict[Outcome, QPushButton] = {}
-        for outcome, label, tip in (
-            (Outcome.FILLED, "Traded", "The trade went through."),
-            (Outcome.SOLD, "Already sold", "They replied that it's gone."),
-            (Outcome.NO_REPLY, "No reply", "No response."),
-            (Outcome.DECLINED, "Refused", "They replied but wouldn't honour the price."),
+        # The same four verdicts the Opportunities queue offers, from the same
+        # source. No Reply is gone from both: the timer writes Expired on its
+        # own, and by hand the two things ever actually meant were AFK and
+        # Offline.
+        for outcome in (
+            Outcome.FILLED, Outcome.SOLD, Outcome.AFK, Outcome.OFFLINE,
+            Outcome.DECLINED,
         ):
-            btn = QPushButton(label)
-            btn.setToolTip(tip + "  Recorded so the ranking can learn which listings fill.")
+            btn = QPushButton(label_for(outcome))
+            btn.setToolTip(
+                TIPS[outcome]
+                + "  Recorded so the ranking can learn which listings fill."
+            )
             btn.setEnabled(False)
             btn.clicked.connect(lambda _=False, o=outcome: self._report(o))
             bottom.addWidget(btn)
@@ -495,7 +494,7 @@ class SweepPanel(QWidget):
             # The verdict, where the live table shows the settlement currency.
             # On a past session what happened is the column worth having, and
             # the settlement currency is not recorded per attempt.
-            verdict = TextItem(_RESULT_LABEL.get(a.outcome, a.outcome.value))
+            verdict = TextItem(label_for(a.outcome))
             verdict.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.table.setItem(row, SETTLE_COLUMN, verdict)
             stamp = a.ts.astimezone()
@@ -549,8 +548,8 @@ class SweepPanel(QWidget):
         }
         self._candidates = fresh + list(self._carried.values())
         # `_attempt_ids` and `_outcomes` deliberately survive a sweep. They used
-        # to be cleared here, which emptied "Ones I messaged" and "Ones I
-        # bought" every ten minutes — so by the time a session was worth
+        # to be cleared here, which emptied "Attempts" and "Trades"
+        # every ten minutes — so by the time a session was worth
         # reviewing, both filters were blank (reported from the field
         # 2026-07-31). They are keyed on candidate identity, not on row, so a
         # re-found listing carries its own history back onto the new table; keys
@@ -680,8 +679,8 @@ class SweepPanel(QWidget):
     def _hide_attempt(self, a, mode, hide_ghosts, needle) -> bool:
         """The same filters against a logged whisper.
 
-        "Ones I messaged" matches everything here — the log only holds whispers
-        that were sent — so the mode that does any work is "Ones I bought".
+        "Attempts" matches everything here — the log only holds whispers
+        that were sent — so the mode that does any work is "Trades".
         """
         if hide_ghosts and a.band == Band.GHOST.value:
             return True
@@ -697,7 +696,7 @@ class SweepPanel(QWidget):
             return candidate.key in self._attempt_ids
         if mode == SHOW_BOUGHT:
             return self._outcomes.get(candidate.key) is Outcome.FILLED
-        # "Everything found" is the last pass, not the last pass plus history.
+        # "All Results" is the last pass, not the last pass plus history.
         return candidate.key not in self._carried
 
     def _note_empty_filter(self, mode: str, shown: int) -> None:
@@ -756,18 +755,15 @@ class SweepPanel(QWidget):
         attempt_id = self._attempt_ids.get(c.key)
         if attempt_id is None:
             return
-        # Kept here as well as in the outcome log, so the "Ones I bought" filter
+        # Kept here as well as in the outcome log, so the "Trades" filter
         # can work without re-reading the file.
         self._outcomes[c.key] = outcome
         self._apply_filter()
         self.outcome_reported.emit(attempt_id, outcome)
-        verdict = {
-            Outcome.FILLED: "Recorded as traded",
-            Outcome.SOLD: "Recorded as already sold",
-            Outcome.NO_REPLY: "Recorded as no reply",
-            Outcome.DECLINED: "Recorded as refused",
-        }[outcome]
-        self.set_status(f"{verdict} — {c.item_name} from {c.listing.character or c.listing.account}.")
+        self.set_status(
+            f"Recorded as {label_for(outcome)} — {c.item_name} from "
+            f"{c.listing.character or c.listing.account}."
+        )
 
     def note_attempt(self, candidate, attempt_id: str) -> None:
         """Remember which log row a copied whisper produced.

@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Interpreter is the project venv — the system Python has no dependencies installed:
 
 ```sh
-~/.venvs/poe2-arb/bin/python -m pytest -q          # full suite (~6s, 600+ tests)
+~/.venvs/poe2-arb/bin/python -m pytest -q          # full suite (~6s, 770+ tests)
 ~/.venvs/poe2-arb/bin/python -m pytest tests/test_listings.py -q
 ~/.venvs/poe2-arb/bin/python -m pytest tests/test_listings.py::TestBands::test_ghost -q
 ```
@@ -22,10 +22,14 @@ python tools/dump_org_trees.py --only Runes   # regenerate OrgTrees reference fi
 
 **Verifying GUI work without a display** — set `QT_QPA_PLATFORM=offscreen`, construct the
 widget, `app.processEvents()`, then `widget.grab().save(path)` and read the image. This has
-caught ten real bugs the test suite did not, including a startup `NameError`, stale cell
-widgets painting over other rows, a whisper quoting the wrong currency,
+caught thirteen real bugs the test suite did not, including a startup `NameError`, stale
+cell widgets painting over other rows, a whisper quoting the wrong currency,
 `MarketPanel.set_exclusions` never syncing the table's ticks, and — in 0.7.0, with a green
-suite — half the Trades columns falling off the right-hand edge of the window. Use it
+suite — half the Trades columns falling off the right-hand edge of the window. In 0.8.0,
+again with a green suite, it caught all three of: an action column sized to a guess rather
+than to its buttons, column growth compounding an overflow instead of absorbing it, and
+every emoji button rendering as the same empty box. **A screenshot is the only thing that
+sees any of these** — none of them raise, and none of them change a widget's API. Use it
 rather than assuming a widget renders correctly because it constructs.
 
 Traps when driving panels from a script: `MarketPanel` needs `set_universe(...)` **and**
@@ -41,11 +45,17 @@ clamping it.
 header offers reorderable, resizable and growing-with-the-window two at a time and never
 all three, so `ColumnLayout` keeps the sections `Interactive` and does the growth itself:
 size to contents once, squeeze that to fit the window, then hand out each later resize in
-proportion. Two things it gets right that are easy to undo — the resize filter is on the
+proportion. Four things it gets right that are easy to undo — the resize filter is on the
 **viewport** and reads `event.size()` (a filter runs before the widget handles the event,
-so the viewport's own width is still the old one), and the action column is exempt from
-shrinking, because a row of buttons squeezed does not get smaller, it gets clipped. Order
-and widths persist through `saveState` in `ui-state.json`.
+so the viewport's own width is still the old one); the action column is exempt from
+shrinking, because a row of buttons squeezed does not get smaller, it gets clipped;
+**every column's floor is its own heading text** (`min_width`), because one shared floor
+truncated `Profit` into "rofit"; and **growth hands out the space the row does not fill,
+not the space the window gained** — a row can already be wider than the window, and adding
+the window's delta on top of that compounds the overflow instead of fixing it.
+`resizeColumnsToContents` measures neither headings nor cell widgets, so both are corrected
+after it runs. Order and widths persist through `saveState` in `ui-state.json`, and the
+window's 960px minimum comes from `minimum_row_width()` rather than from taste.
 
 Releases are tag-driven: push `vX.Y.Z` and `.github/workflows/release.yml` runs the tests,
 builds the Windows exe with PyInstaller, and cuts release notes from `CHANGELOG.md`. The
@@ -184,6 +194,27 @@ drifted into three private copies of the currency suffix table.
 language — while the UI says *worth trying* / *uncertain* / *too good to be true*. Do not
 "fix" the mismatch by renaming the enum: `outcomes.jsonl` stores the enum value, and
 `bands.symbol_for_name` has to keep resolving records written months ago.
+
+**`Outcome` gains members; it never renames them, for the same reason.**
+`Outcome.NO_REPLY` is written by nothing since 0.8.0 and must keep resolving forever. It
+was retired because it meant two different things depending on who wrote it: the timer
+now writes `EXPIRED` (all it knows is that its deadline passed) and the user presses
+**AFK** or **Offline**. Test "did they answer at all" with `Outcome.is_silence`, which
+covers all four, rather than by naming members. User-facing wording for every verdict is
+`outcomes.LABELS` / `label_for` — one map, because Opportunities, Trades and Results each
+had their own copy and it is precisely the drift this file warns about elsewhere.
+
+**A pinned row never expires, and unpinning does not restart its clock.** Pinning is the
+answer to "is five minutes long enough?" — a seller who has spoken is not on a clock at
+all. `expires_at` is untouched throughout, so a row released past its deadline resolves on
+the next tick; anything else would make a row immortal by pin-and-unpin. Pin state is
+per-session UI and is deliberately absent from `outcomes.jsonl`.
+
+**A resolved listing is suppressed for the session** (`trade_queue.SETTLED_OUTCOMES`:
+FILLED, SOLD, OFFLINE, DECLINED). A Bulk listing does not delist when its stock goes, so
+every later sweep re-finds it, and `forget_resolved` drops the row that would otherwise
+deduplicate it. `EXPIRED` and `AFK` are deliberately *not* in that set — an away seller
+comes back, and a deadline passing says nothing about the listing.
 
 ### Four taxonomies that disagree
 

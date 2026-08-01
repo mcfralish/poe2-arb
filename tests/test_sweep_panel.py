@@ -484,7 +484,7 @@ def test_an_empty_filter_explains_itself(qapp):
 
 
 def test_a_whispered_listing_survives_the_next_sweep(qapp):
-    """Otherwise "Ones I bought" empties itself the moment a purchase succeeds.
+    """Otherwise "Trades" empties itself the moment a purchase succeeds.
 
     A listing you bought is by definition gone from the next sweep, and the
     verdicts were being cleared alongside it — so both history filters were
@@ -505,7 +505,7 @@ def test_a_whispered_listing_survives_the_next_sweep(qapp):
     _select_mode(p, SHOW_BOUGHT)
     qapp.processEvents()
     assert visible_rows(p) == 1
-    # ...but "Everything found" still means what it says.
+    # ...but "All Results" still means what it says.
     _select_mode(p, SHOW_ALL)
     qapp.processEvents()
     assert visible_rows(p) == 1
@@ -613,7 +613,7 @@ def test_a_past_session_lists_its_whispers_from_the_log(qapp, tmp_path):
     assert p.table.rowCount() == 1
     assert p.table.item(0, SELLER_COLUMN).text() == "Seller0"
     # The Settle in column carries the verdict on a past session.
-    assert p.table.item(0, 9).text() == "traded"
+    assert p.table.item(0, 9).text() == "Traded"
     # Nothing to copy: the listing is long gone.
     assert p.selected_candidate() is None
 

@@ -136,8 +136,8 @@ def test_decline_drops_the_trade_in_a_single_click(qapp):
 
 @pytest.mark.parametrize(
     "label,outcome",
-    [("Traded", Outcome.FILLED), ("No reply", Outcome.NO_REPLY),
-     ("Already sold", Outcome.SOLD)],
+    [("Traded", Outcome.FILLED), ("AFK", Outcome.AFK),
+     ("Offline", Outcome.OFFLINE), ("Already Sold", Outcome.SOLD)],
 )
 def test_each_verdict_is_a_single_click(qapp, label, outcome):
     seen = []
@@ -150,13 +150,15 @@ def test_each_verdict_is_a_single_click(qapp, label, outcome):
     assert seen == [(taken.id, outcome)]
 
 
-def test_only_the_three_verdicts_asked_for_are_offered(qapp):
+def test_only_the_verdicts_asked_for_are_offered(qapp):
+    """No Reply is retired: the timer writes Expired, people press AFK/Offline."""
     p, q = loaded(qapp, cand())
     q.take_offered(T0)
     p.refresh(q, T0)
     qapp.processEvents()
     assert not p.click_action(p.awaiting, 0, "Refused")
-    for label in ("Traded", "No reply", "Already sold"):
+    assert not p.click_action(p.awaiting, 0, "No Reply")
+    for label in ("Traded", "AFK", "Offline", "Already Sold"):
         assert p.click_action(p.awaiting, 0, label)
 
 
@@ -330,7 +332,10 @@ class TestRowHover:
             READY_ACTION_COLUMN if table is panel.ready else AWAITING_ACTION_COLUMN
         )
         widget = table.cellWidget(row, column)
-        return next(b for b in widget.findChildren(QPushButton) if b.text() == label)
+        return next(
+            b for b in widget.findChildren(QPushButton)
+            if b.property("action") == label
+        )
 
     def test_hovering_accept_leaves_the_row_alone(self, qapp):
         p, q = loaded(qapp, cand(char="A"), cand(char="B"))
@@ -347,7 +352,7 @@ class TestRowHover:
         q.take_offered(T0)
         p.refresh(q, T0)
         qapp.processEvents()
-        for label in ("Traded", "No reply", "Already sold"):
+        for label in ("Traded", "AFK", "Offline", "Already Sold"):
             p.awaiting.set_hover_row(0)
             _enter(self._button(p, p.awaiting, 0, label))
             assert p.awaiting.hover_row == -1, label
@@ -371,7 +376,7 @@ def test_copy_again_asks_for_the_same_trade(qapp):
     qapp.processEvents()
     seen = []
     p.recopy_requested.connect(seen.append)
-    assert p.click_action(p.awaiting, 0, "Copy again")
+    assert p.click_action(p.awaiting, 0, "Copy Again")
     assert seen == [taken.id]
 
 
@@ -440,3 +445,48 @@ class TestQuantityDialog:
         qapp.processEvents()
         assert "3 for 33 Divine Orbs" in d.summary.text() or "3 for" in d.summary.text()
         assert "profit" in d.summary.text()
+
+
+# --- pinning a row off the clock --------------------------------------------
+
+def test_pin_is_one_click_on_the_row(qapp):
+    seen = []
+    p, q = loaded(qapp, cand())
+    taken = q.take_offered(T0)
+    p.refresh(q, T0)
+    qapp.processEvents()
+    p.pin_requested.connect(lambda i, on: seen.append((i, on)))
+    assert p.click_action(p.awaiting, 0, "Pin")
+    assert seen == [(taken.id, True)]
+
+
+def test_a_pinned_row_offers_unpin_and_stops_counting_down(qapp):
+    p, q = loaded(qapp, cand())
+    taken = q.take_offered(T0)
+    p.refresh(q, T0)
+    qapp.processEvents()
+    assert p.awaiting.item(0, AWAITING_TIMER_COLUMN).text() == "5m"
+
+    q.pin(taken.id)
+    p.refresh(q, T0 + timedelta(seconds=290))
+    qapp.processEvents()
+    assert p.awaiting.item(0, AWAITING_TIMER_COLUMN).text() == "held"
+    assert not p.click_action(p.awaiting, 0, "Pin")
+
+    seen = []
+    p.pin_requested.connect(lambda i, on: seen.append((i, on)))
+    assert p.click_action(p.awaiting, 0, "Unpin")
+    assert seen == [(taken.id, False)]
+
+
+def test_pinning_redraws_the_row(qapp):
+    """Pin state changes the button and the cell, so identity alone is not enough."""
+    p, q = loaded(qapp, cand())
+    taken = q.take_offered(T0)
+    p.refresh(q, T0)
+    qapp.processEvents()
+    before = p.awaiting.cellWidget(0, AWAITING_ACTION_COLUMN)
+    q.pin(taken.id)
+    p.refresh(q, T0)
+    qapp.processEvents()
+    assert p.awaiting.cellWidget(0, AWAITING_ACTION_COLUMN) is not before

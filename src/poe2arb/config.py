@@ -138,8 +138,10 @@ class Config:
     # catch mid-pack is still perfectly good five minutes later.
     available_ttl_s: float = 300.0
     # How long a whispered trade waits for a verdict before recording itself as
-    # "no reply" — which is almost always what happened. 0 disables it, at the
-    # cost of a list that grows until every row is answered by hand.
+    # Expired — which claims only that the deadline passed, not that the seller
+    # stayed silent; a row the user pins is held off this clock entirely.
+    # 0 disables it, at the cost of a list that grows until every row is
+    # answered by hand.
     awaiting_timeout_s: float = 600.0
 
     # The currency prices are displayed in. Internal maths stays in divines;

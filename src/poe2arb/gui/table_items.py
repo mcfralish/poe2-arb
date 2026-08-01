@@ -181,15 +181,30 @@ class ColumnLayout(QObject):
     the table keeps a reference so the filter outlives the call.
     """
 
+    # The floor for a column with no heading — a marker or an action column.
     MIN_WIDTH = 28
+    # Space around a heading: the cell's own margins, plus room for the sort
+    # indicator on a sortable table, which Qt draws inside the section.
+    HEADER_PADDING = 26
+    # Columns holding a name someone has to read rather than a number. A header
+    # width is the wrong floor for these — "Item" is four characters and its
+    # contents run to "Zarokh's Reliquary Key: Against the Darkness".
+    ROOMY_HEADERS = ("Item", "Seller")
+    ROOMY_MIN = 120
 
-    def __init__(self, table: QTableWidget, protected: tuple[int, ...] = ()):
+    def __init__(
+        self,
+        table: QTableWidget,
+        protected: tuple[int, ...] = (),
+        roomy: tuple[str, ...] = ROOMY_HEADERS,
+    ):
         super().__init__(table)
         self.table = table
         # Columns exempt from the initial squeeze — in practice the one holding
         # a row's action buttons, which have a real width and are useless
         # clipped. Everything else gives way to fit the window instead.
         self._protected = set(protected)
+        self._roomy = set(roomy)
         self._last_width = 0
         self._sized = False
         header = table.horizontalHeader()
@@ -207,6 +222,41 @@ class ColumnLayout(QObject):
 
     # -- sizing
 
+    def min_width(self, column: int) -> int:
+        """How narrow this column may get: its own heading, plus padding.
+
+        One floor for every column was measured too low in the fourth field
+        test — at the narrow end of the window `Profit` read as "rofit" and
+        `Expires` as "xpire", which is a header lying about which column you
+        are looking at. A column that cannot show its own name is not a column,
+        so the floor is per-column and comes from the text in the header.
+
+        This is the same rule the action column already had for a different
+        reason: a control that has been squeezed is not smaller, it is clipped.
+        """
+        item = self.table.horizontalHeaderItem(column)
+        text = item.text() if item is not None else ""
+        if not text:
+            return self.MIN_WIDTH
+        metrics = self.table.horizontalHeader().fontMetrics()
+        floor = metrics.horizontalAdvance(text) + self.HEADER_PADDING
+        if text in self._roomy:
+            floor = max(floor, self.ROOMY_MIN)
+        return floor
+
+    def minimum_row_width(self) -> int:
+        """The narrowest the whole row can be drawn without lying.
+
+        What the window's own minimum width has to clear, plus whatever the
+        chrome around the table costs.
+        """
+        header = self.table.horizontalHeader()
+        return sum(
+            max(self.min_width(i), header.sectionSize(i) if i in self._protected else 0)
+            for i in range(header.count())
+            if not header.isSectionHidden(i)
+        )
+
     def size_to_contents(self) -> None:
         """Fit every column to what is in it, then to the window. Once.
 
@@ -223,9 +273,41 @@ class ColumnLayout(QObject):
             return
         self._sized = True
         self.table.resizeColumnsToContents()
+        # `resizeColumnsToContents` sizes to the *cells* and will happily leave
+        # a column narrower than its own heading — "Buy" came back at 30px
+        # against a 49px title. Raising each to its floor here keeps the
+        # invariant the squeeze and the growth both assume: a section is never
+        # below `min_width`.
+        header = self.table.horizontalHeader()
+        for i in range(header.count()):
+            floor = self.min_width(i)
+            if header.sectionSize(i) < floor:
+                header.resizeSection(i, floor)
+        self._fit_protected()
         width = self.table.viewport().width()
         self._last_width = width
         self._squeeze(width)
+
+    def _fit_protected(self) -> None:
+        """Size an action column to the buttons actually in it.
+
+        `resizeColumnsToContents` measures *items*, and an action column holds a
+        cell widget and no item, so the width it comes back with is a guess —
+        measured 314px for a row of buttons that asks for 226. The column is
+        exempt from the squeeze, so that 88px of nothing came straight off the
+        columns that do hold something, and the row overflowed the window
+        anyway. Asking the widget how wide it is costs one call and is the
+        number the exemption was always meant to protect.
+        """
+        header = self.table.horizontalHeader()
+        for i in self._protected:
+            widths = [
+                w.sizeHint().width()
+                for row in range(self.table.rowCount())
+                if (w := self.table.cellWidget(row, i)) is not None
+            ]
+            if widths:
+                header.resizeSection(i, max(max(widths), self.min_width(i)))
 
     def _squeeze(self, width: int) -> None:
         """Shrink the unprotected columns proportionally until the row fits."""
@@ -237,15 +319,17 @@ class ColumnLayout(QObject):
             return
         givers = [i for i in visible if i not in self._protected]
         available = sum(
-            max(0, header.sectionSize(i) - self.MIN_WIDTH) for i in givers
+            max(0, header.sectionSize(i) - self.min_width(i)) for i in givers
         )
         if available <= 0:
             return
         take = min(excess, available)
         for i in givers:
-            slack = max(0, header.sectionSize(i) - self.MIN_WIDTH)
+            floor = self.min_width(i)
+            slack = max(0, header.sectionSize(i) - floor)
             header.resizeSection(
-                i, header.sectionSize(i) - round(take * slack / available)
+                i,
+                max(floor, header.sectionSize(i) - round(take * slack / available)),
             )
 
     def eventFilter(self, watched, event) -> bool:  # noqa: N802 (Qt naming)
@@ -263,14 +347,24 @@ class ColumnLayout(QObject):
         if not self._sized or width <= 0:
             self._last_width = max(self._last_width, width)
             return
-        delta = width - self._last_width
-        self._last_width = width
-        if delta == 0:
-            return
+        was, self._last_width = self._last_width, width
         header = self.table.horizontalHeader()
         visible = [
             i for i in range(header.count()) if not header.isSectionHidden(i)
         ]
+        occupied = sum(header.sectionSize(i) for i in visible)
+        # Hand out the space the row does not already fill, not the space the
+        # *window* gained. A row can be wider than the window — the squeeze
+        # stops at the per-column floors, and the first sizing runs against a
+        # pre-show viewport that is narrower than the real one. Adding the
+        # window's delta on top of that overflow compounds it: measured on the
+        # Waiting table, a 638px sizing that had settled at 897 grew to 1235 in
+        # a 976px window, and what fell off the end was the action buttons.
+        delta = width - max(was, occupied)
+        if delta < 0 and width >= was:
+            delta = 0     # still too wide for the window, but no worse than before
+        if delta == 0:
+            return
         # A protected column shares in the growth but never in the shrinking.
         # Its content is a row of buttons at a fixed size, so taking width off
         # it does not make it smaller — it clips the last button off the end,
@@ -280,17 +374,19 @@ class ColumnLayout(QObject):
         total = sum(header.sectionSize(i) for i in visible)
         if total <= 0:
             return
-        # Shrinking is allowed to run the columns down to MIN_WIDTH and no
-        # further; past that the table scrolls horizontally, which is better
-        # than columns too narrow to read.
+        # Shrinking is allowed to run each column down to its own heading width
+        # and no further; past that the table scrolls horizontally, which is
+        # better than a header that has been truncated into a different word.
         spent = 0
         for i in visible[:-1]:
             share = round(delta * header.sectionSize(i) / total)
-            header.resizeSection(i, max(self.MIN_WIDTH, header.sectionSize(i) + share))
+            header.resizeSection(
+                i, max(self.min_width(i), header.sectionSize(i) + share)
+            )
             spent += share
         last = visible[-1]
         header.resizeSection(
-            last, max(self.MIN_WIDTH, header.sectionSize(last) + delta - spent)
+            last, max(self.min_width(last), header.sectionSize(last) + delta - spent)
         )
 
     # -- persistence
@@ -321,10 +417,17 @@ class ColumnLayout(QObject):
 
 
 def flexible_columns(
-    table: QTableWidget, protected: tuple[int, ...] = ()
+    table: QTableWidget,
+    protected: tuple[int, ...] = (),
+    roomy: tuple[str, ...] = ColumnLayout.ROOMY_HEADERS,
 ) -> ColumnLayout:
-    """Give `table` reorderable, resizable, proportionally growing columns."""
-    layout = ColumnLayout(table, protected)
+    """Give `table` reorderable, resizable, proportionally growing columns.
+
+    Call this **after** `setHorizontalHeaderLabels`: the per-column minimum is
+    read off the heading text, and a table with no headings yet would floor
+    every column at `MIN_WIDTH`.
+    """
+    layout = ColumnLayout(table, protected, roomy)
     table._column_layout = layout  # keeps the filter alive with the table
     return layout
 

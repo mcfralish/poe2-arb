@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -11,6 +12,7 @@ from poe2arb.outcomes import (
     MIN_SAMPLES,
     Attempt,
     Outcome,
+    label_for,
     leagues,
     read_attempts,
     record_amendment,
@@ -273,3 +275,44 @@ def test_leagues_lists_what_the_log_has_seen(log_path):
     record_attempt(log_path, candidate(char="A"), league="Dawn")
     record_attempt(log_path, candidate(char="B"), league="Abyssal")
     assert set(leagues(read_attempts(log_path))) == {"Dawn", "Abyssal"}
+
+
+# --- the verdict vocabulary -------------------------------------------------
+# NO_REPLY was retired as a *button* in 0.8.0 and split three ways. It stays in
+# the enum because `outcomes.jsonl` returns records written under it forever —
+# the same constraint that keeps `bands.symbol_for_name` resolving old bands.
+
+
+def test_a_no_reply_record_still_reads_back(log_path):
+    attempt_id = record_attempt(log_path, candidate())
+    log_path.write_text(
+        log_path.read_text()
+        + json.dumps({"kind": "outcome", "id": attempt_id,
+                      "ts": NOW.isoformat(), "outcome": "no_reply"}) + "\n"
+    )
+    [got] = read_attempts(log_path)
+    assert got.outcome is Outcome.NO_REPLY
+    assert label_for(got.outcome) == "No Reply"
+
+
+@pytest.mark.parametrize(
+    "outcome", [Outcome.EXPIRED, Outcome.AFK, Outcome.OFFLINE]
+)
+def test_the_new_verdicts_round_trip(log_path, outcome):
+    attempt_id = record_attempt(log_path, candidate())
+    record_outcome(log_path, attempt_id, outcome)
+    [got] = read_attempts(log_path)
+    assert got.outcome is outcome
+    assert got.outcome.is_resolved and not got.outcome.is_success
+
+
+def test_every_verdict_has_a_word_for_it():
+    """A missing label would put a raw enum value in the table."""
+    assert all(label_for(o) and not label_for(o).islower() for o in Outcome)
+
+
+def test_silence_covers_the_old_value_too():
+    """Anything asking "did they answer" must keep matching pre-split records."""
+    assert {o for o in Outcome if o.is_silence} == {
+        Outcome.NO_REPLY, Outcome.EXPIRED, Outcome.AFK, Outcome.OFFLINE
+    }
