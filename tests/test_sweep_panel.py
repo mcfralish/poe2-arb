@@ -886,3 +886,17 @@ def test_the_verdict_editor_is_not_clipped_by_a_narrow_column(qapp, tmp_path):
     option.rect = QRect(0, 0, 20, 24)          # far narrower than the drop-down
     delegate.updateEditorGeometry(editor, option, index)
     assert editor.width() >= editor.sizeHint().width()
+
+
+def test_changing_the_settlement_currency_does_not_paint_over_a_verdict(qapp, tmp_path):
+    """That column is Settle in on a live row and Result on a history one."""
+    p, _ = _history_panel(qapp, tmp_path)
+    assert p.table.item(0, SETTLE_COLUMN).text() == "Expired"
+    p.set_settlement_currency("exalted")
+    qapp.processEvents()
+    assert p.table.item(0, SETTLE_COLUMN).text() == "Expired"
+    # Still remembered, and applied the moment the live sweep is shown again.
+    p.set_result(result_from([listing("omen", 11.0)]))
+    p.session.setCurrentIndex(p.session.findData("live"))
+    qapp.processEvents()
+    assert p.table.item(0, SETTLE_COLUMN).text() == "ex"

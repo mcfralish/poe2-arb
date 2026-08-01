@@ -1056,10 +1056,18 @@ class SweepPanel(QWidget):
         Only redraws the column, not the table: the profit figures come from the
         sweep and are recomputed there, so re-populating here would be both
         wasteful and a chance for the two to disagree.
+
+        **Only while the table is showing the live sweep.** That column carries
+        the verdict on a history row, and this used to paint "ex" over it —
+        changing the settlement dropdown while reviewing a past session
+        overwrote every Result in the table. The value is still remembered, so
+        switching back to the live sweep shows the new one.
         """
         if currency == self._settlement:
             return
         self._settlement = currency
+        if self.session.currentData() != SESSION_LIVE:
+            return
         label = _pay_label(currency)
         for row in range(self.table.rowCount()):
             cell = self.table.item(row, SETTLE_COLUMN)
