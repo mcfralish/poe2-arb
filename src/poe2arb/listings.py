@@ -4,7 +4,7 @@ The trade is: buy an underpriced listing by whisper on the Bulk Item Exchange,
 sell into the in-game Currency Exchange. Two field tests (docs/FINDINGS.md,
 "Negative results") shape everything here:
 
-1. **Deep discounts fill rarely, not never.** Fitted 2026-08-02 from 789 logged
+1. **Deep discounts fill rarely, not never.** Fitted 2026-08-01 from 789 logged
    whispers, after two under-sampled readings said first that they never fill
    (n=14) and then that they are worth about a quarter of a plausible whisper
    (n=156). Measured: plausible 12.4% (n=178), ghost **2.0%** (n=601), and the
@@ -469,7 +469,7 @@ def build_candidates(
 # How much of a band's profit to believe when ranking. Relative weights, not
 # probabilities — do not quote them as fill rates.
 #
-# **Fitted 2026-08-02 from 789 logged whispers**, replacing three round numbers
+# **Fitted 2026-08-01 from 789 logged whispers**, replacing three round numbers
 # that came from 14. Ghosts fill at 2.0% (n=601) against plausible's 12.4%
 # (n=178): a ratio of **0.16**, which is what GHOST now carries.
 #
@@ -495,7 +495,7 @@ FILL_PRIOR = {
 
 # A listing this old has never once been traded: 0 fills in 102 whispers, and
 # the oldest listing that ever filled was 62.9 hours (2.62 days). Measured
-# 2026-08-02 over all 789 logged attempts; P(0 fills in 102) at the 4.56% base
+# 2026-08-01 over all 789 logged attempts; P(0 fills in 102) at the 4.56% base
 # rate is ~0.008, and it holds in both large bands separately, so it is age
 # rather than gap. Full table in docs/FINDINGS.md, "A listing older than ~3 days
 # has never filled".

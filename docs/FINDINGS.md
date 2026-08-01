@@ -258,7 +258,7 @@ eight versions scanning ten currency items, which is close to exactly the wrong 
 
 **1. Deep discounts fill rarely, not never — and they still earned most of the money.**
 
-**Superseded twice. Current reading is 2026-08-02 at n=789**, five times the sample the
+**Superseded twice. Current reading is 2026-08-01 at n=789**, five times the sample the
 last revision had. The two earlier readings are kept because the size of each correction is
 the point:
 
@@ -369,7 +369,7 @@ no measurement was taken, and was written up that way here before anyone opened 
 **The log is the record; the operator's recollection is not.** Read it before concluding
 that a session produced no data.
 
-### Ghost fills are real fills, not counteroffers — measured 2026-08-02, n=36 fills
+### Ghost fills are real fills, not counteroffers — measured 2026-08-01, n=36 fills
 
 **The question, and why it mattered.** On 2026-08-01 the one ghost fill observed by hand
 was a **counteroffer at 10× the listed price** that lost money while logging +38.00 divines
@@ -411,7 +411,7 @@ So the fat tail is a **real property of the Bulk Item Exchange**, not an artefac
 reference price. The counteroffer risk is real but rare (1 in 36) and is a reason to make a
 row's **price** amendable, not a reason to distrust the band.
 
-### A listing older than ~3 days has never filled — measured 2026-08-02, n=789
+### A listing older than ~3 days has never filled — measured 2026-08-01, n=789
 
 Fill rate against `listing_age_s` at the moment of the whisper, all resolved attempts:
 
@@ -488,7 +488,7 @@ worth more than the individual fixes:
   the user said otherwise. Against the measured fill rates — 21% plausible, 2.3% ghost,
   so 79%+ of whispers never touch the bankroll — the guard withheld far more real trades
   than it prevented double-spends. Reverted on the maintainer's call. *The n=789 refit
-  (2026-08-02) makes the case stronger, not weaker: 12.4% and 2.0%, so 95% of whispers
+  (2026-08-01) makes the case stronger, not weaker: 12.4% and 2.0%, so 95% of whispers
   never touch it.* **The general
   lesson:** a correctness argument that ignores the base rate can be locally sound and
   still net negative. Sizing every candidate against the whole bankroll is the accurate
@@ -696,7 +696,7 @@ attempts — 06:05:45Z ↔ `2026/07/31 23:05:47`.
   of ~9.4, it was a **small loss** on a record that claims +38. It was raised here as a
   candidate explanation for the entire ghost result — if the 3.92× and 10.94× fills were
   also counteroffers, ghost value-per-whisper would be overstated or negative.
-  **Checked 2026-08-02 and it is not the explanation: 35 of 36 fills were at the listed
+  **Checked 2026-08-01 and it is not the explanation: 35 of 36 fills were at the listed
   price, this one included as the sole exception.** See *Ghost fills are real fills, not
   counteroffers* above. What survives is the narrow version: a counteroffer happens about
   1 fill in 36, and the app has no way to record one, so **a row must be amendable in
@@ -1104,6 +1104,20 @@ Also worth not rediscovering:
   freshness filtering actually solves.
 - **A failed re-check counts as "go ahead".** Unknown is not evidence of absence; don't
   talk the user out of a real trade because a request failed.
+- **`FILL_PRIOR` holds the *fill-rate* ratio (ghost 0.16), not the value-per-whisper ratio
+  (0.66) — and this looks like a transcription error.** Both numbers are measured, both are
+  in *Negative results* 1, and the smaller one is the one in the code. It is deliberate:
+  `fill_weight` **multiplies profit**, so `profit × weight` is already an estimate of
+  divines per whisper. Feeding it the value ratio would apply the fat tail twice, since a
+  ghost's value per whisper is high *because* its profit is large. Decided 2026-08-01,
+  resolving a question TODO.md had carried open since 0.7.0.
+- **Nothing is hidden from the queue by default — not ghosts, not stale listings.** Both
+  are demoted by a measured weight. A hidden row cannot be falsified, and that is exactly
+  how `FILL_PRIOR[GHOST] = 0.0` survived four field tests while being wrong. A *user*
+  filter is fine and one is planned for stale rows; it must ship off by default.
+- **Staleness is a cliff, not a curve.** Gate at `STALE_LISTING_S`; do not build a
+  continuous freshness discount. Below three days, age barely predicts anything
+  (6.4% → 3.1% → 7.4%, non-monotonic), so any decay curve would be fitting noise.
 
 ### Operational
 

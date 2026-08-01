@@ -140,7 +140,7 @@ afterwards, and league names rotate.
 Four results from field tests are load-bearing in `listings.py` and must not be re-derived
 (full evidence in [docs/FINDINGS.md](docs/FINDINGS.md), "Negative results"):
 
-1. **Deep discounts fill rarely — not never.** *Fitted 2026-08-02 at n=789, superseding a
+1. **Deep discounts fill rarely — not never.** *Fitted 2026-08-01 at n=789, superseding a
    correction at n=156 which superseded "they do not fill at all" from n=14.* Measured
    from `outcomes.jsonl`: plausible **12.4%** (n=178), ghost **2.0%** (n=601). Both earlier
    readings under-rated ghosts; ghost is worth **0.66** of a plausible whisper in divines,
@@ -149,7 +149,7 @@ Four results from field tests are load-bearing in `listings.py` and must not be 
    estimate and the value ratio would count the fat tail twice. Consequence, and it is
    deliberate: a big enough ghost now outranks a plausible. Do not re-assert that big gaps
    never fill, do not restore the 0.0, and do not hide them.
-   **The counteroffer worry is closed** (2026-08-02): 35 of 36 fills went through at the
+   **The counteroffer worry is closed** (2026-08-01): 35 of 36 fills went through at the
    listed price, checked against `Client.txt`, including both fat-tail fills the
    correction rested on.
 
@@ -280,7 +280,7 @@ not 30.
 - **Nothing is ever hidden from the queue** — not ghosts, not stale listings. Both are
   *demoted*, by a measured weight rather than a rule. Hiding either would make the ranking
   unfalsifiable, which is exactly how `FILL_PRIOR[GHOST] = 0.0` survived four field tests.
-  ("Ghosts rank last" was the rule until 2026-08-02 and is no longer true: a big enough
+  ("Ghosts rank last" was the rule until 2026-08-01 and is no longer true: a big enough
   ghost outranks a plausible, because at a 2.0% fill rate it should.)
 
 [docs/FINDINGS.md](docs/FINDINGS.md), "Deliberate decisions — do not 'fix' these", is the

@@ -31,7 +31,7 @@ BAND_LEGEND = {
 }
 
 # Every number here is measured and dated, because all three of these tooltips
-# were wrong at once before 2026-08-02 — one said ghosts had never been answered
+# were wrong at once before 2026-08-01 — one said ghosts had never been answered
 # when 12 had, and one said the price estimate ran 25% high when it runs ~6%
 # either way. A tooltip is where a stale finding is least likely to be noticed
 # and most likely to be believed. Sources: docs/FINDINGS.md, "Negative results"
