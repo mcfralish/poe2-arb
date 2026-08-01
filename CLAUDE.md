@@ -257,7 +257,13 @@ silently drop the earlier figure, because the size of the correction is itself i
 **Read `outcomes.jsonl` before writing up a field test.** Every whisper and every verdict
 is logged automatically, with band, gap, cost and expected profit — on Windows at
 `%LOCALAPPDATA%\poe2-arb\outcomes.jsonl`, from WSL at
-`/mnt/c/Users/<user>/AppData/Local/poe2-arb/`. Join the `kind: "attempt"` and
+`/mnt/c/Users/<user>/AppData/Local/poe2-arb/`. **The game's own log is readable too** and
+answers things ours cannot: `…/steamapps/common/Path of Exile 2/logs/Client.txt` (194 MB,
+append-only; `LatestClient.txt` is the current session). It carries our `@To` whispers
+verbatim, every `@From`, `Trade accepted.`/`Trade cancelled.`, `: <char> is not online.`
+and `has joined the area` — joined against `outcomes.jsonl` on 2026-07-31 it produced most
+of that day's findings. Its timestamps are **local, not UTC**; derive the offset by
+correlating `@To` lines against logged attempts rather than trusting the machine's zone. Join the `kind: "attempt"` and
 `kind: "outcome"` records on `id`. A session described in conversation as "made about 20
 divines" sounds like an anecdote and is actually 147 fully-resolved whispers; that exact
 mistake was made on 2026-07-31 and put "no fill-rate data was recorded" into this file over

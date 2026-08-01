@@ -6,38 +6,47 @@ deleted rather than ticked, so this file stays worth reading start to finish.
 
 ## State of play
 
-**Shipped:** v0.5.0 (2026-07-30) — the first field test and what it exposed. Two real
-trades, both losses.
+**Shipped:** v0.7.0 (2026-07-31). Three field tests behind it; the last two sessions were
+profitable, and 0.7.0 is mostly the defect list the third one produced.
 
-**v0.6.0 and v0.7.0 are on `main`, unreleased.** 0.6.0 came out of the second field test
-(2026-07-31), the first profitable session — about 20 divines cleared. 0.7.0 came out of
-the session after it, and **two of 0.6.0's fixes turned out to be wrong rather than
-incomplete**:
+**Start here next session.** In order of what unblocks what:
 
-- *The hotkey had still never fired.* 0.6.0 fixed a real missing import; the key was then
-  tested in game **and** with the app focused, and did nothing either way. Qt is now out
-  of the delivery path entirely — the hotkey owns a thread that registers the key and
-  pumps its own messages. **Still unconfirmed in the field**, which is why Settings now
-  shows a press counter: pressing the key with Settings open says so on screen.
-- *The bankroll holdback was reverted.* Withholding money promised to an outstanding
-  whisper is only correct if whispers usually fill; 79%+ never do, so it suppressed more
-  real trades than double-spends it prevented.
+1. **Confirm the hotkey finally fires** — third attempt, Windows-only, no test can cover
+   it, and it is the cheapest check on the list. Bind it, tick the box, press OK, reopen
+   Settings and press the key: the line under the field says whether it fired. That
+   separates "the key never reached us" from "the queue had nothing to take", which the
+   two previous attempts could not.
+2. **The Send button / hotkey** (*Next*, first item) — agreed for this patch, researched,
+   with a route decision waiting on the maintainer: sanctioned keystrokes versus the
+   trade site's own endpoint and a session cookie. The table in that item is the whole
+   argument; nothing else needs re-deriving.
+3. **Fit the ranking to the outcome log** — still unblocked, still the best-powered data
+   the project has (n=131 on the ghost result).
 
-0.7.0 also: listings are ratios rather than bundles, so a 100-divine listing is now
-buyable on a 20-divine bankroll; opportunities queue as they are found rather than all at
-once; quantities are correctable after the fact and the correction is logged without
-erasing the ask; sessions and leagues are stamped on every whisper and the Trades tab can
-review any of them; Results gained *Every trade*; and both tables' columns can be
-reordered, resized and remembered. Full list in [CHANGELOG.md](CHANGELOG.md); the durable
-half in [docs/FINDINGS.md](docs/FINDINGS.md).
+**What 0.7.0 changed, in one paragraph.** Two of 0.6.0's fixes were wrong rather than
+incomplete: the hotkey had still never fired (Qt is now out of the delivery path
+entirely), and the bankroll holdback is reverted because 79%+ of whispers go unanswered so
+it suppressed more real trades than double-spends it prevented. Plus: listings are ratios
+rather than bundles, so a 100-divine listing is buyable on a 20-divine bankroll;
+opportunities queue as they are found rather than all at once; quantities are correctable
+after the fact without erasing the original ask; sessions and leagues are stamped on every
+whisper and the Trades tab reviews any of them; Results gained *Every trade*; columns
+reorder, resize and persist. Full list in [CHANGELOG.md](CHANGELOG.md).
 
 **The 147 fully-resolved whispers from the second session still stand** and still
 **overturn the project's second-biggest finding**: ghosts fill at 2.3% (n=131), not at 0%
 — including one at 10.94× — and they earned 71% of that session's divines on a fat tail.
 Plausible still wins per whisper sent (0.40 div vs 0.113), so the ranking stands, but
 `FILL_PRIOR[GHOST] = 0.0` is measurably wrong. Full tables in
-[docs/FINDINGS.md](docs/FINDINGS.md), *Negative results* 1. **This unblocks "Fit the
-ranking to the outcome log" in *Next*, which no longer needs another field test to start.**
+[docs/FINDINGS.md](docs/FINDINGS.md), *Negative results* 1.
+
+**What the 2026-07-31 log analysis added, so it is not re-derived.** `Client.txt` was read
+end to end and joined against `outcomes.jsonl` — details in FINDINGS, the sections dated
+2026-07-31. The short version: auto-marking *fills* is not worth building (all 11 were
+already hand-marked correctly), splitting *NO_REPLY* is (76% silent / 22% AFK / the rest
+replies and stale listings), GGG's API called 11 of 40 AFK sellers present, there is no
+party roster in the log, and GGG publishes a Currency Exchange API carrying both sides of
+the book that a desktop client cannot reach.
 
 *What the next field test must measure* below still blocks the **pricing** item — that
 one needs a human in game and cannot be recovered from any log.
