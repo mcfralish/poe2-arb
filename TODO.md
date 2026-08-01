@@ -481,6 +481,9 @@ session will read them backwards. *Trades* also moves to **second** tab position
   Four `uses:` lines in `.github/workflows/release.yml` — checkout and setup-python appear
   once each in both the `test` and `build-windows-exe` jobs; `softprops/action-gh-release@v2`
   was not flagged. Warning only today, so the release still builds; it becomes a broken
-  release the day the forcing stops, and the only way to find out is to tag. Worth doing
-  on a quiet day rather than discovering it mid-release.
+  release the day the forcing stops. **The "only way to find out is to tag" argument no
+  longer holds** — 0.8.0 added `workflow_dispatch` to the same workflow, so the bump can
+  be made and proved on a manual run against a branch, with no tag and no release. That
+  makes this cheap rather than risky, and it should be done before the next tag rather
+  than discovered during one.
 - [ ] Packaging beyond one exe — PyPI for the CLI, Scoop/winget manifests.

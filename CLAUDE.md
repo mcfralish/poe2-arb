@@ -62,6 +62,16 @@ builds the Windows exe with PyInstaller, and cuts release notes from `CHANGELOG.
 build **fails** if the tag has no matching changelog section, so write the entry first.
 `__init__.py:__version__` and `pyproject.toml:version` must agree with the tag.
 
+**To get a testable exe without publishing one, run that workflow manually**
+(Actions → Build & Release → Run workflow, against any branch). Same tests, same
+PyInstaller build; it stops before the release step and leaves the exe as a build
+artifact on the run. Added because this project is verified by playing the game — the
+hotkey, the glyph rendering and the tray all behave differently on Windows — and until
+0.8.0 the only way to get a build was to publish it to users, which is how a broken
+hotkey shipped three times. **`workflow_dispatch` is only offered if the workflow file
+is on the default branch**, so a change to the trigger has to reach `main` before it can
+be used, whatever branch you then build.
+
 The `dev` extra installs **PySide6**, which looks redundant next to `gui` and is not: 13
 of the 30 test modules open with `pytest.importorskip("PySide6")`, so without it the
 release gate silently skipped 313 of 682 tests while staying green (found 2026-07-31).

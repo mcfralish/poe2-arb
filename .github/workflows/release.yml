@@ -1,8 +1,20 @@
 name: Build & Release
 
+# Two ways in, and they differ only at the last step.
+#
+# **A tag** cuts a public release: tests, exe, release notes from the changelog,
+# published to GitHub Releases.
+#
+# **A manual run** (Actions → this workflow → Run workflow, on any branch) does
+# everything except publish, and leaves the exe as a build artifact on the run.
+# That exists because this project is verified by playing the game: the hotkey,
+# the icon glyphs and the tray all behave differently on Windows, and three
+# releases shipped a broken hotkey because the only way to get a testable exe
+# was to publish one to users first. A field test should not require a release.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -33,7 +45,10 @@ jobs:
         run: python -c "import PySide6; print('PySide6', PySide6.__version__)"
       # Fails the release before anything is built if the tag has no changelog
       # entry — a shipped build whose notes nobody wrote is what this prevents.
+      # Tags only: on a manual run GITHUB_REF_NAME is a branch name, which will
+      # never have a changelog section, and a test build needs no release notes.
       - name: Check the changelog covers this tag
+        if: startsWith(github.ref, 'refs/tags/')
         run: python packaging/changelog_section.py "${GITHUB_REF_NAME}" /dev/null
 
   build-windows-exe:
@@ -58,9 +73,24 @@ jobs:
           packaging/gui_entry.py
       - name: Smoke test exe imports
         run: dist/poe2-arb.exe --smoke-test
+
+      # A manual run stops here: the exe hangs off the workflow run, downloadable
+      # by anyone who can see the repo, and nothing is published. Named with the
+      # ref so a folder of downloads from successive field tests is still legible.
+      - name: Upload the exe as a build artifact
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: poe2-arb-${{ github.ref_name }}-${{ github.sha }}
+          path: dist/poe2-arb.exe
+          # Test builds are disposable; the tagged ones are the record.
+          retention-days: 14
+
       - name: Build release notes from the changelog
+        if: startsWith(github.ref, 'refs/tags/')
         run: python packaging/changelog_section.py "${env:GITHUB_REF_NAME}" RELEASE_NOTES.md
       - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: dist/poe2-arb.exe
