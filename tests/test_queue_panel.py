@@ -401,11 +401,11 @@ def test_adjust_asks_for_the_quantity_actually_traded(qapp, monkeypatch):
     qapp.processEvents()
     assert taken.candidate.plan.units == 18.0
 
-    monkeypatch.setattr(qp.QuantityDialog, "ask", staticmethod(lambda *_a: 3.0))
+    monkeypatch.setattr(qp.AdjustDialog, "ask", staticmethod(lambda *_a: (3.0, 33.0)))
     seen = []
-    p.revise_requested.connect(lambda tid, units: seen.append((tid, units)))
+    p.revise_requested.connect(lambda *a: seen.append(a))
     assert p.click_action(p.awaiting, 0, "Adjust…")
-    assert seen == [(taken.id, 3.0)]
+    assert seen == [(taken.id, 3.0, 33.0)]
 
 
 def test_adjust_cancelled_changes_nothing(qapp, monkeypatch):
@@ -415,18 +415,18 @@ def test_adjust_cancelled_changes_nothing(qapp, monkeypatch):
     q.take_offered(T0)
     p.refresh(q, T0)
     qapp.processEvents()
-    monkeypatch.setattr(qp.QuantityDialog, "ask", staticmethod(lambda *_a: None))
+    monkeypatch.setattr(qp.AdjustDialog, "ask", staticmethod(lambda *_a: None))
     seen = []
     p.revise_requested.connect(lambda *a: seen.append(a))
     p.click_action(p.awaiting, 0, "Adjust…")
     assert seen == []
 
 
-class TestQuantityDialog:
+class TestAdjustDialog:
     def _dialog(self, qapp, **kw):
-        from poe2arb.gui.queue_panel import QuantityDialog
+        from poe2arb.gui.queue_panel import AdjustDialog
 
-        return QuantityDialog(None, cand(**kw))
+        return AdjustDialog(None, cand(**kw))
 
     def test_it_cannot_ask_for_more_than_was_offered(self, qapp):
         d = self._dialog(qapp, pay=11.0, stock=18.0)
@@ -445,6 +445,32 @@ class TestQuantityDialog:
         qapp.processEvents()
         assert "3 for 33 Divine Orbs" in d.summary.text() or "3 for" in d.summary.text()
         assert "profit" in d.summary.text()
+
+    def test_the_total_follows_the_quantity_until_it_is_touched(self, qapp):
+        """"They only had three" does not change what three cost each."""
+        d = self._dialog(qapp, pay=11.0, stock=18.0)
+        assert d.total.value() == 198.0     # 18 at 11 each
+        d.units.setValue(3.0)
+        qapp.processEvents()
+        assert d.total.value() == 33.0
+
+    def test_a_counteroffered_price_survives_a_quantity_change(self, qapp):
+        """Once the user has named a price, nothing may quietly overwrite it."""
+        d = self._dialog(qapp, pay=11.0, stock=18.0)
+        d.total.setValue(150.0)
+        d.units.setValue(9.0)
+        qapp.processEvents()
+        assert d.total.value() == 150.0
+        assert d.chosen_units() == 9.0
+
+    def test_a_counteroffer_can_make_the_trade_a_loss_and_says_so(self, qapp):
+        """The field case: +38.00 logged on a trade that lost money."""
+        d = self._dialog(qapp, pay=11.0, stock=18.0)
+        d.total.setValue(100000.0)
+        qapp.processEvents()
+        assert d.revised().profit_divines < 0
+        assert "lost money" in d.summary.text()
+        assert "+-" not in d.summary.text()
 
 
 # --- pinning a row off the clock --------------------------------------------

@@ -506,6 +506,33 @@ def test_revise_corrects_the_quantity_without_losing_the_trades_identity():
     assert q.revise(trade.id, 3.0) is None
 
 
+def test_revise_records_a_counteroffered_price():
+    """1 fill in 36 was negotiated, and it logged a profit it did not earn."""
+    q = queue()
+    q.submit([cand(char="A", pay=11.0, stock=18.0)], T0)
+    trade = q.tick(T0).newly_offered
+    q.take(trade.id, T0)
+    before = trade.key
+
+    revised = q.revise(trade.id, 18.0, 250.0)
+    assert revised is not None
+    assert revised.candidate.plan.units == 18.0        # quantity untouched
+    assert revised.candidate.pay_total == 250.0
+    assert revised.key == before
+    assert q.revise(trade.id, 18.0, 250.0) is None
+
+
+def test_revise_applies_the_quantity_before_the_price():
+    """Shrinking re-prices at the listed rate; a price given overrides that."""
+    q = queue()
+    q.submit([cand(char="A", pay=11.0, stock=18.0)], T0)
+    trade = q.tick(T0).newly_offered
+    q.take(trade.id, T0)
+    revised = q.revise(trade.id, 3.0, 40.0)
+    assert revised.candidate.plan.units == 3.0
+    assert revised.candidate.pay_total == 40.0         # not the listed 33
+
+
 # --- pinning ---------------------------------------------------------------
 # Requested 2026-08-01. The log had already produced the case twice that
 # evening: both false expiries were sellers who had *answered*, one of them

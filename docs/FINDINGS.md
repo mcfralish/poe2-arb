@@ -1119,6 +1119,39 @@ Also worth not rediscovering:
   continuous freshness discount. Below three days, age barely predicts anything
   (6.4% → 3.1% → 7.4%, non-monotonic), so any decay curve would be fitting noise.
 
+### Correcting a trade after the fact — decided 2026-08-01
+
+- **An amendment never rewrites `gap` or `unit_price_divines` in the log, and this is not
+  an oversight.** A price correction writes `cost_divines`, `pay_units` and
+  `expected_profit_divines` and nothing else. The gap is the feature every fill rate in the
+  project is fitted against, and the one that predicts a fill is **the gap we whispered at**
+  — not the one that was negotiated afterwards. The realised gap is still recoverable from
+  `cost_divines ÷ units`, so nothing is lost by keeping the whispered one. `listings.repriced`
+  *does* move `Candidate.unit_price_divines`, because a row on screen showing a negotiated
+  total beside an advertised gap is a row disagreeing with itself; the two are deliberately
+  different, and the log is the one that must not move.
+- **Profit is allowed to be negative, and every display of it must say so.** Nothing out of
+  `plan_trade` ever loses money — it refuses a losing quantity — so every profit figure in
+  the app was written `f"+{value:.2f}"`, which renders `+-2.80`. An amended trade *can* lose
+  money; that is the case this feature exists for. `format.fmt_profit` owns the sign now.
+  Do not reintroduce a hand-written `+`.
+- **`sale_unit_divines` and `settle_currency` are recorded per attempt from 0.8.0.** They
+  were not, and could not be recovered, so a correction to a *quantity* had no way to
+  re-apply the rounding floor that decided the original profit. Records written before this
+  fall back to a whole divine in `outcomes.plan_correction` — the pessimistic reading, and
+  the same default `plan_trade` takes.
+- **The Trades tab edits in place; the Opportunities queue uses a dialog.** Not an
+  inconsistency: the queue tables rebuild on a one-second timer for the countdowns, which
+  destroys an open editor mid-keystroke, and they are used with a map on screen. The Trades
+  tab reads from the log, redraws only on a user action, and is where a row is corrected
+  hours later. Editing there is confined to **history rows** — a live sweep row is a
+  listing nobody has acted on, there is nothing to correct about it, and the same
+  double-click has to keep copying its whisper.
+- **A verdict change goes through `record_outcome`, not through the amendment record.**
+  Verdicts already fold in order and a later record already wins — `9adaaa859e10` carries
+  `no_reply` then `filled` from a real correction made by hand. Nothing new was needed in
+  the file format; what was missing was a route to it from the UI.
+
 ### Operational
 
 - **`request_interval_s` must stay above 10s.** At exactly 10s a 300s window catches 31

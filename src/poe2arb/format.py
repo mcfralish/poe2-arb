@@ -99,6 +99,21 @@ def fmt_amount(value: float, currency: str) -> str:
     return f"{fmt_qty(value)} {currency_label(currency)}"
 
 
+def fmt_profit(value: float, decimals: int = 2) -> str:
+    """Divines cleared, with the sign always shown.
+
+    Every profit figure in the app used to be written `f"+{value:.2f}"`, which
+    was safe only while profit could not be negative — `plan_trade` refuses a
+    losing quantity. It can be negative now: a trade amended to a counteroffered
+    price can turn out to have lost money, which is the whole reason the price
+    became editable. `"+-1.20"` is exactly the sort of thing a hand-written
+    format produces, so this owns the sign.
+    """
+    if value is None or not math.isfinite(value):
+        return "—"
+    return f"{value:+,.{decimals}f}"
+
+
 def fmt_skew(seconds: float | None) -> str:
     """How far apart a loop's edges were observed, as a duration.
 

@@ -27,6 +27,7 @@ mixes two different economies.
 from __future__ import annotations
 
 import json
+import math
 import os
 import logging
 import statistics
@@ -159,12 +160,24 @@ class Attempt:
     # in. None on records written before 0.7.0.
     session_id: str | None = None
     league: str | None = None
-    # True once the quantity has been corrected after the fact — the seller had
-    # fewer than they advertised, or the buyer could only afford part of it.
+    # What the resale was costed against: the divine worth of one unit of the
+    # settlement currency, and its name. Written from 0.8.0 on and None before
+    # it — the settlement currency used to be recoverable from nothing, so an
+    # amendment to a past trade could not re-apply the rounding floor that
+    # decided its profit. See `plan_correction`.
+    sale_unit_divines: float | None = None
+    settle_currency: str | None = None
+    # True once the trade has been corrected after the fact — the seller had
+    # fewer than they advertised, the buyer could only afford part of it, or the
+    # price was counteroffered.
     amended: bool = False
     # What was originally asked for, kept when `amended`. A correction that
-    # erased the ask would hide how often sellers list stock they don't have.
+    # erased the ask would hide how often sellers list stock they don't have —
+    # or, for the price, how often one is negotiated (1 fill in 36, measured
+    # 2026-08-01).
     asked_units: float | None = None
+    asked_pay_units: float | None = None
+    asked_cost_divines: float | None = None
 
 
 # --- retention -------------------------------------------------------------
@@ -279,6 +292,12 @@ def record_attempt(
         "pay_units": candidate.pay_total,
         "cost_divines": candidate.plan.cost_divines,
         "expected_profit_divines": candidate.profit_divines,
+        # Recorded so a later correction can re-apply the same rounding floor.
+        # Proceeds round down to a whole unit of the settlement currency, and
+        # without this an amended quantity could only be re-costed by guessing
+        # at the denomination that decided the original figure.
+        "sale_unit_divines": candidate.plan.sale_unit_divines,
+        "settle_currency": candidate.settle_currency,
         "listing_age_s": listing.age_s(),
         "afk": listing.afk,
         "outcome": Outcome.PENDING.value,
@@ -290,28 +309,146 @@ def record_attempt(
 def record_amendment(
     path: Path, attempt_id: str, candidate, *, retention_days: float = 0.0
 ) -> None:
-    """Correct an attempt's quantity to what was actually traded.
+    """Correct an attempt to the trade that actually happened.
 
     Appended, never edited over the top: the difference between what was asked
     for and what was available is itself a measurement — the field test found
     sellers advertising two Omens and holding one — and an amendment that
     overwrote the ask would destroy it. `read_attempts` folds these on and keeps
-    the original in `asked_units`.
+    the originals in `asked_units`, `asked_pay_units` and `asked_cost_divines`.
+
+    Takes a live candidate, so it is for a trade still in the queue.
+    `record_correction` writes the same record for a row that only exists in the
+    log, where the listing behind it is long gone.
     """
-    _append(
+    record_correction(
         path,
-        {
-            "kind": "amend",
-            "id": attempt_id,
-            "ts": datetime.now(timezone.utc).isoformat(),
-            "lots": candidate.plan.lots,
-            "units": candidate.plan.units,
-            "pay_units": candidate.pay_total,
-            "cost_divines": candidate.plan.cost_divines,
-            "expected_profit_divines": candidate.profit_divines,
-        },
-        retention_days,
+        attempt_id,
+        lots=candidate.plan.lots,
+        units=candidate.plan.units,
+        pay_units=candidate.pay_total,
+        cost_divines=candidate.plan.cost_divines,
+        expected_profit_divines=candidate.profit_divines,
+        retention_days=retention_days,
     )
+
+
+def record_correction(
+    path: Path,
+    attempt_id: str,
+    *,
+    lots: int | None = None,
+    units: float | None = None,
+    pay_units: float | None = None,
+    cost_divines: float | None = None,
+    expected_profit_divines: float | None = None,
+    retention_days: float = 0.0,
+) -> None:
+    """Amend a logged attempt by value rather than from a candidate.
+
+    The route back to a trade whose listing no longer exists — which is every
+    trade older than the sweep that found it, including the biggest one the
+    project has made. Fields left None are omitted from the record and therefore
+    left alone by `read_attempts`, so a price correction does not have to invent
+    a quantity to go with it.
+    """
+    row = {
+        "kind": "amend",
+        "id": attempt_id,
+        "ts": datetime.now(timezone.utc).isoformat(),
+    }
+    for key, value in (
+        ("lots", lots),
+        ("units", units),
+        ("pay_units", pay_units),
+        ("cost_divines", cost_divines),
+        ("expected_profit_divines", expected_profit_divines),
+    ):
+        if value is not None:
+            row[key] = value
+    _append(path, row, retention_days)
+
+
+@dataclass(frozen=True)
+class Correction:
+    """What a logged attempt becomes once the user corrects it."""
+
+    lots: int
+    units: float
+    pay_units: float
+    cost_divines: float
+    expected_profit_divines: float
+
+
+def plan_correction(
+    attempt: "Attempt",
+    *,
+    units: float | None = None,
+    cost_divines: float | None = None,
+) -> Correction:
+    """Re-cost a logged attempt at a corrected quantity or price.
+
+    The log-only counterpart to `listings.replan_units` and `listings.repriced`.
+    It cannot call either, because a logged attempt has no listing behind it —
+    all that survives of the trade is the numbers in this row.
+
+    Three rules, each of which is the honest reading of what the user is saying:
+
+    - **Changing the quantity leaves the price per item alone.** "They only had
+      three" does not change what three cost each, so the totals scale. The
+      quantity itself snaps to a whole lot, because the price only divides that
+      finely (`listings.smallest_lot`); `lots` is recorded per attempt, so the
+      step is recoverable.
+    - **Changing the total leaves the quantity alone.** That is the counteroffer
+      case, and the seller's own currency moves with the divine figure.
+    - **Proceeds are re-floored, not scaled.** Partial currency cannot be
+      traded, so proceeds round down to a whole unit of the settlement currency.
+      When the quantity is untouched the original proceeds are exact and are
+      reused (`profit + cost`); when it changes they are recomputed against
+      `sale_unit_divines`. On records written before 0.8.0 that field is missing
+      and the floor falls back to a whole divine — the pessimistic reading, and
+      the same default `listings.plan_trade` takes, because understating profit
+      is the safe direction to be wrong in.
+    """
+    old_units = attempt.units
+    new_units = old_units if units is None else max(0.0, float(units))
+
+    # Snap to a whole lot, where the log recorded enough to know what one is.
+    per_lot = old_units / attempt.lots if attempt.lots else 0.0
+    if per_lot > 0:
+        lots = max(1, round(new_units / per_lot))
+        new_units = lots * per_lot
+    else:
+        lots = attempt.lots
+
+    if cost_divines is None:
+        scale = new_units / old_units if old_units else 1.0
+        new_cost = attempt.cost_divines * scale
+        new_pay = attempt.pay_units * scale
+    else:
+        new_cost = max(0.0, float(cost_divines))
+        ratio = new_cost / attempt.cost_divines if attempt.cost_divines else 0.0
+        new_pay = attempt.pay_units * ratio
+
+    proceeds = _proceeds(attempt, new_units)
+    return Correction(
+        lots=lots,
+        units=new_units,
+        pay_units=new_pay,
+        cost_divines=new_cost,
+        expected_profit_divines=proceeds - new_cost,
+    )
+
+
+def _proceeds(attempt: "Attempt", units: float) -> float:
+    """Divines the resale realises for `units`, after the rounding floor."""
+    original = attempt.expected_profit_divines + attempt.cost_divines
+    if units == attempt.units or attempt.ce_divines <= 0:
+        return original
+    unit = attempt.sale_unit_divines or 1.0
+    if unit <= 0:
+        unit = 1.0
+    return math.floor(units * attempt.ce_divines / unit) * unit
 
 
 def record_outcome(
@@ -345,6 +482,16 @@ def _append(path: Path, row: dict, retention_days: float) -> None:
         log.warning("could not record trade outcome to %s", path, exc_info=True)
         return
     prune(path, retention_days)
+
+
+def _opt_float(value: object) -> float | None:
+    """A number that is allowed to be absent. None is not zero here."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _parse_ts(value: object) -> datetime | None:
@@ -396,7 +543,15 @@ def read_attempts(path: Path) -> list[Attempt]:
         row = attempts.get(a["id"])
         if row is None:
             continue
-        row.setdefault("asked_units", row.get("units"))
+        # Only the *first* amendment writes these, so a row corrected twice
+        # still reports what was originally whispered rather than what the
+        # previous correction left behind.
+        for kept, live in (
+            ("asked_units", "units"),
+            ("asked_pay_units", "pay_units"),
+            ("asked_cost_divines", "cost_divines"),
+        ):
+            row.setdefault(kept, row.get(live))
         row["amended"] = True
         for key in ("lots", "units", "pay_units", "cost_divines",
                     "expected_profit_divines"):
@@ -453,12 +608,12 @@ def read_attempts(path: Path) -> list[Attempt]:
                 pay_units=float(row.get("pay_units") or 0.0),
                 session_id=row.get("session_id") or None,
                 league=row.get("league") or None,
+                sale_unit_divines=_opt_float(row.get("sale_unit_divines")),
+                settle_currency=row.get("settle_currency") or None,
                 amended=bool(row.get("amended")),
-                asked_units=(
-                    float(row["asked_units"])
-                    if row.get("asked_units") is not None
-                    else None
-                ),
+                asked_units=_opt_float(row.get("asked_units")),
+                asked_pay_units=_opt_float(row.get("asked_pay_units")),
+                asked_cost_divines=_opt_float(row.get("asked_cost_divines")),
             )
         )
     return out

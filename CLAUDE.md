@@ -169,6 +169,8 @@ Four results from field tests are load-bearing in `listings.py` and must not be 
    proceeds floor to a whole unit of the settlement currency. Exalted is ~432× finer than
    divine; on the one trade that filled, settling in exalted turned 1.00 divine of profit
    into 1.79. Profit floors to `sale_unit_divines` — never to a whole divine, never unfloored.
+   Every attempt records `sale_unit_divines` and `settle_currency` from 0.8.0, so a
+   correction can re-apply the same floor; older records fall back to a whole divine.
    **But exalted is not free:** the Exchange charges ~120 gold per exalted against ~800 per
    divine (measured 2026-07-30), so settling a high-value item in exalted can cost tens of
    times more gold and strand the user unable to trade at all. Gold is a budget constraint,
@@ -182,6 +184,23 @@ whispered as "2412 exalted" reads as "5.6 div", which the user cannot match to a
 arrives an hour later in a language they don't read. Profit stays in divines, because it is
 the only unit the two sides can be compared in. `Candidate.settle_currency` records what a
 row's profit was floored to, so the figure survives the setting being changed afterwards.
+**Profit is signed and goes through `format.fmt_profit`** — an amended trade can have lost
+money, and a hand-written `f"+{v:.2f}"` renders that as `+-2.80`.
+
+**A trade is correctable in quantity *and* price, and neither correction mutates the
+attempt.** `listings.replan_units` shrinks a trade to what the seller actually had;
+`listings.repriced` moves the total to what they actually charged (a counteroffer — 1 fill
+in 36, and the one that happened logged +38.00 divines while losing money). Both write an
+**amendment record**, appended, so `asked_units` / `asked_pay_units` / `asked_cost_divines`
+keep the original ask. Two entry points, because they reach different rows:
+`outcomes.record_amendment` takes a live candidate and serves the Opportunities queue's
+*Adjust…* dialog; `outcomes.plan_correction` + `record_correction` work from the logged
+`Attempt` alone and serve the Trades tab, which is the only route back to a trade whose
+listing is long gone. Do not "unify" them by making the Trades tab re-plan a candidate —
+there isn't one. Changing a **verdict** needs neither: `record_outcome` already appends and
+a later record already wins. Why one surface is a dialog and the other edits in place, and
+why the log keeps the *whispered* gap after a reprice, are in
+[docs/FINDINGS.md](docs/FINDINGS.md), *Correcting a trade after the fact*.
 
 The league is resolved by `sweep.resolve_league`, which auto-detects and **never falls back
 to a literal name**. It used to read `cfg.league or "Standard"`; Standard priced one measured

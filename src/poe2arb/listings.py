@@ -350,7 +350,15 @@ class Candidate:
 
     @property
     def pay_per_unit(self) -> float:
-        """Per-item price in the seller's currency, to match `pay_total`."""
+        """Per-item price in the seller's currency, to match `pay_total`.
+
+        Read off the **plan** rather than the listing, so a trade amended to a
+        counteroffered price reports the price actually agreed. The two are the
+        same number on an unamended plan — `pay_units / units` reduces to
+        `lot_pay / lot_get`, which is the listing's own ratio in lowest terms.
+        """
+        if self.plan.units > 0:
+            return self.plan.pay_units / self.plan.units
         return self.listing.price_per_unit
 
     @property
@@ -390,6 +398,47 @@ def replan_units(candidate: Candidate, units: float) -> Candidate:
             pay_unit_divines=plan.pay_unit_divines,
             sale_unit_divines=plan.sale_unit_divines,
         ),
+    )
+
+
+def repriced(candidate: Candidate, pay_units: float) -> Candidate:
+    """The same quantity at a different total price — a counteroffer.
+
+    Measured 2026-08-01 against `Client.txt`: **35 of 36 fills went through at
+    the listed price**, so this is rare and the worry that the ranking rested on
+    negotiated prices is closed. The one that was counteroffered is why this
+    exists anyway — it logged +38.00 divines on a trade that lost money, because
+    the app could record a changed *quantity* and not a changed *price*.
+
+    Deliberately **not** clamped the way `replan_units` is. A correction to the
+    quantity can only ever shrink a trade, since the extra was never on offer; a
+    correction to the price usually moves it the other way, because a seller who
+    counteroffers is asking for more. Nothing here re-optimises either: the user
+    is reporting what they paid.
+
+    Only `pay_units` is given, because the proceeds are a fact about the
+    quantity and the Currency Exchange rather than about what the seller
+    charged. Profit is therefore free to come out negative, and every display of
+    it has to be able to say so — see `format.fmt_profit`.
+    """
+    plan = candidate.plan
+    if pay_units <= 0 or plan.units <= 0 or pay_units == plan.pay_units:
+        return candidate
+    cost = pay_units * plan.pay_unit_divines
+    return dataclasses.replace(
+        candidate,
+        plan=dataclasses.replace(
+            plan,
+            pay_units=pay_units,
+            cost_divines=cost,
+            profit_divines=plan.proceeds_divines - cost,
+        ),
+        # The row has to stay self-consistent: gap is derived from this, and a
+        # gap quoting the advertised price beside a total showing the negotiated
+        # one is how the log came to disagree with itself in the first place.
+        # The *logged* attempt keeps the whispered gap — an amendment record
+        # carries no gap — because that is the feature the ranking is fitted on.
+        unit_price_divines=cost / plan.units,
     )
 
 

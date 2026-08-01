@@ -25,6 +25,21 @@ reports is computed from that file.
   only that nobody said what happened, and a row can be **pinned** so it never expires at
   all. Pin one the moment a seller answers — it jumps to the top of *Waiting on a reply*,
   holds its own highlight, and stops counting down.
+- **A verdict the app got wrong could not be corrected, and now can.** The row above is
+  only half a fix: the timer stops writing "no reply" over completed trades, but the rows
+  it already got wrong stayed wrong, including the biggest trade this app has found. In
+  the Trades tab, pick a past session and **double-click the Result** — it becomes a
+  drop-down. The correction is appended to the trade log rather than written over the top,
+  so the original verdict is still in the file.
+- **A trade that lost money was recorded as +38.00 divines earned.** The seller
+  counteroffered, and the app could record a changed *quantity* but not a changed *price*
+  — so the log kept the price you were quoted rather than the one you paid. **Amount,
+  Price per and Total are all correctable now**: from *Adjust…* on a waiting row, and by
+  double-clicking the Amount or Total cell on a past session in the Trades tab. Profit is
+  recalculated, and it is allowed to come out negative — which is the point. What you were
+  originally asked for is kept alongside the correction, so you can still see how often a
+  seller has fewer than they listed or wants more than they advertised. Corrections to a
+  record more than an hour old ask before they go through.
 - **The same stale listing was being whispered over and over.** Measured across the
   fourth session: one listing went out **five times in three and a half hours**, twice to
   a seller the game had already said was offline and once to a seller it had already been

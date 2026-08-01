@@ -56,7 +56,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 
-from .listings import Band, Candidate, replan_units, whisper_text
+from .listings import Band, Candidate, replan_units, repriced, whisper_text
 from .outcomes import Outcome
 
 log = logging.getLogger(__name__)
@@ -376,18 +376,36 @@ class TradeQueue:
         current = self.offered
         return self.take(current.id, now) if current is not None else None
 
-    def revise(self, trade_id: str, units: float) -> QueuedTrade | None:
-        """Correct the quantity on a trade to what was actually available.
+    def revise(
+        self,
+        trade_id: str,
+        units: float | None = None,
+        pay_units: float | None = None,
+    ) -> QueuedTrade | None:
+        """Correct a trade to the quantity and price it actually happened at.
 
         Returns the trade if anything changed. The candidate's `key` is derived
-        from the listing rather than the quantity, so a revised trade keeps its
-        identity and is still recognised as already-whispered by the next sweep.
+        from the listing rather than the quantity or the price, so a revised
+        trade keeps its identity and is still recognised as already-whispered by
+        the next sweep.
+
+        Quantity is applied before price: shrinking the quantity re-prices the
+        trade at the listing's own rate, and an explicit `pay_units` is the user
+        overriding *that* with what the seller actually asked for.
         """
         t = self.get(trade_id)
         if t is None:
             return None
-        revised = replan_units(t.candidate, units)
-        if revised.plan.units == t.candidate.plan.units:
+        was = t.candidate
+        revised = was
+        if units is not None:
+            revised = replan_units(revised, units)
+        if pay_units is not None:
+            revised = repriced(revised, pay_units)
+        if (
+            revised.plan.units == was.plan.units
+            and revised.plan.pay_units == was.plan.pay_units
+        ):
             return None
         t.candidate = revised
         return t

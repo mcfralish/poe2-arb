@@ -42,7 +42,7 @@ from ..config import (
     save_config,
     user_config_path,
 )
-from ..format import fmt_amount, fmt_depth, fmt_pct, fmt_skew
+from ..format import fmt_amount, fmt_depth, fmt_pct, fmt_profit, fmt_skew
 from ..market import BASE_CURRENCY_CHOICES, Universe
 from ..rate_limit import Severity, check_pacing, min_safe_interval, worst_severity
 from ..session import SessionTracker
@@ -320,6 +320,7 @@ class MainWindow(QMainWindow):
         self.sweep.recheck_requested.connect(self._recheck)
         self._setup_hotkey()
         self.sweep.outcome_reported.connect(self._outcome_reported)
+        self.sweep.correction_requested.connect(self._correction_requested)
         self.tabs.addTab(self.sweep, "Trades")
 
         # Book Edges is gone. It was a raw dump of the triangular search's
@@ -903,17 +904,20 @@ class MainWindow(QMainWindow):
             return self._last_sweep.league
         return self.cfg.league or self._detected_league
 
-    def _queue_revise(self, trade_id: str, units: float) -> None:
-        """Correct a whispered trade to the quantity actually traded.
+    def _queue_revise(
+        self, trade_id: str, units: float, pay_units: float | None = None
+    ) -> None:
+        """Correct a whispered trade to the quantity and price actually traded.
 
-        The seller had fewer than they advertised, or the buyer could only
-        afford part of it. Both happened in the second field test, and until now
-        the log kept the ask — so the record said 18 Faded Crisis Fragments and
-        a profit nobody earned.
+        The seller had fewer than they advertised, the buyer could only afford
+        part of it, or the seller counteroffered. All three happened in the
+        field, and until now the log kept the ask — so the record said 18 Faded
+        Crisis Fragments and a profit nobody earned, and a counteroffered trade
+        logged +38.00 divines while losing money.
         """
         from ..outcomes import record_amendment
 
-        revised = self.trade_queue.revise(trade_id, units)
+        revised = self.trade_queue.revise(trade_id, units, pay_units)
         if revised is None:
             return
         c = revised.candidate
@@ -927,7 +931,7 @@ class MainWindow(QMainWindow):
         self._log(
             f"corrected: {c.item_name} from {c.listing.character or c.listing.account} "
             f"to {c.plan.units:g} for {fmt_amount(c.pay_total, c.listing.pay_currency)} "
-            f"(+{c.profit_divines:.2f} div)"
+            f"({fmt_profit(c.profit_divines)} div)"
         )
         self.results.reload()
         self.queue_panel.refresh(self.trade_queue)
@@ -1068,6 +1072,35 @@ class MainWindow(QMainWindow):
         assert self.cfg.outcomes_path is not None
         record_outcome(self.cfg.outcomes_path, attempt_id, outcome)
         self._log(f"trade outcome recorded: {outcome.value}")
+        self.results.reload()
+
+    def _correction_requested(self, attempt_id: str, correction) -> None:
+        """Amend a logged trade whose listing is long gone.
+
+        The Trades tab's route back into the log, for the rows the queue can no
+        longer reach: an expired verdict the timer got wrong, a quantity nobody
+        corrected at the time, a counteroffered price. Appended as an amendment
+        like any other, so the original ask survives in `asked_units` and
+        `asked_cost_divines`.
+        """
+        from ..outcomes import record_correction
+
+        assert self.cfg.outcomes_path is not None
+        record_correction(
+            self.cfg.outcomes_path,
+            attempt_id,
+            lots=correction.lots,
+            units=correction.units,
+            pay_units=correction.pay_units,
+            cost_divines=correction.cost_divines,
+            expected_profit_divines=correction.expected_profit_divines,
+            retention_days=self.cfg.history_retention_days,
+        )
+        self._log(
+            f"trade log amended: {correction.units:g} for "
+            f"{correction.cost_divines:.2f} div "
+            f"({fmt_profit(correction.expected_profit_divines)} div)"
+        )
         self.results.reload()
 
     def _bankroll_changed(self, currency: str, held: float) -> None:

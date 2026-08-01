@@ -51,7 +51,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..format import currency_label, fmt_amount, fmt_qty
+from ..format import currency_label, fmt_amount, fmt_profit, fmt_qty
 from ..listings import Band
 from ..outcomes import TIPS, Outcome, label_for
 from ..trade_queue import QueueState
@@ -111,7 +111,7 @@ AWAITING_COLUMNS = [
         "",
         "Pin holds a row that's been answered off the clock. Copy Again puts "
         "the same whisper back on the clipboard, and Adjust corrects the "
-        "quantity to what you actually bought.",
+        "quantity and the price to what you actually paid.",
     ),
 ]
 
@@ -131,7 +131,11 @@ class QueuePanel(QWidget):
     outcome_reported = Signal(str, object)    # (trade id, Outcome)
     dismiss_requested = Signal(str)           # trade id
     recopy_requested = Signal(str)            # trade id, already whispered
-    revise_requested = Signal(str, float)     # (trade id, units actually traded)
+    # (trade id, units actually traded, total actually paid in the seller's
+    # currency). Both travel together because one dialog sets both, and a
+    # correction that moved the quantity without the price would put the same
+    # lie back in the log that this exists to stop.
+    revise_requested = Signal(str, float, float)
     pin_requested = Signal(str, bool)         # (trade id, hold it off the clock)
 
     def __init__(self, parent=None):
@@ -340,9 +344,10 @@ class QueuePanel(QWidget):
                     # first: marking a trade as Traded resolves it, and the
                     # quantity has to be right before that is written down.
                     ("Adjust…",
-                     "They had fewer than they listed, or you could only afford part "
-                     "of it — correct the quantity before recording the trade.",
-                     lambda tid=t.id: self._ask_quantity(tid)),
+                     "They had fewer than they listed, you could only afford part "
+                     "of it, or they counteroffered — correct the quantity and the "
+                     "price before recording the trade.",
+                     lambda tid=t.id: self._ask_adjustment(tid)),
                     # AFK and Offline in place of the old No Reply, which said
                     # two different things depending on who pressed it. The
                     # timeout writes Expired on its own; these are the two
@@ -368,14 +373,15 @@ class QueuePanel(QWidget):
 
     # --- corrections -------------------------------------------------------
 
-    def _ask_quantity(self, trade_id: str) -> None:
+    def _ask_adjustment(self, trade_id: str) -> None:
         """Open the correction dialog for one whispered trade."""
         trade = self._queue.get(trade_id) if self._queue is not None else None
         if trade is None:
             return
-        units = QuantityDialog.ask(self, trade.candidate)
-        if units is not None:
-            self.revise_requested.emit(trade_id, units)
+        chosen = AdjustDialog.ask(self, trade.candidate)
+        if chosen is not None:
+            units, pay_units = chosen
+            self.revise_requested.emit(trade_id, units, pay_units)
 
     # --- shared cells ------------------------------------------------------
 
@@ -410,8 +416,10 @@ class QueuePanel(QWidget):
             f"{_COST_TIP}\n\nThat's {c.plan.cost_divines:.2f} divines' worth."
         )
         table.setItem(row, first + 2, cost)
+        # Signed, because an amended trade is allowed to have lost money.
         table.setItem(
-            row, first + 3, NumericItem(f"+{c.profit_divines:.2f}", c.profit_divines)
+            row, first + 3,
+            NumericItem(fmt_profit(c.profit_divines), c.profit_divines),
         )
         settle = TextItem(currency_label(c.settle_currency))
         settle.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -443,32 +451,47 @@ class QueuePanel(QWidget):
         return False
 
 
-class QuantityDialog(QDialog):
-    """Correct a whispered trade to the quantity that was actually available.
+class AdjustDialog(QDialog):
+    """Correct a whispered trade to the quantity and price it happened at.
 
-    Two things happened in the second field test that the app had no way to
-    record: a whisper for 18 Faded Crisis Fragments where only 3 were
+    Three things happened in the field that the app had no way to record. Two
+    are quantities: a whisper for 18 Faded Crisis Fragments where only 3 were
     affordable at the time, and a seller advertising 2 Omens of Whittling who
-    turned out to hold 1. Both were logged at the quantity asked for, so the
+    turned out to hold 1. The third is a price — **1 fill in 36 was
+    counteroffered** (2026-08-01, joined to `Client.txt`), and that one logged
+    +38.00 divines on a trade that lost money, because a changed price had
+    nowhere to go. All three were logged at the figures whispered, so the
     outcome log carried a cost and a profit that never happened.
 
     The quantity steps in whole lots rather than single items, because the price
     only divides that finely — see `listings.smallest_lot` — and it cannot go
-    above the original ask, which was capped by the seller's own stock.
+    above the original ask, which was capped by the seller's own stock. The
+    total has no such ceiling: a counteroffer is normally *more*, not less.
+
+    **A dialog rather than editing the row in place.** The queue tables rebuild
+    on a one-second timer for the countdowns, which would destroy an open editor
+    mid-keystroke, and this is used with a map on screen. The Trades tab reads
+    from the log, does not tick, and does edit in place.
     """
 
     def __init__(self, parent, candidate):
         super().__init__(parent)
-        from ..listings import replan_units
+        from ..listings import replan_units, repriced
 
         self._candidate = candidate
         self._replan = replan_units
-        self.setWindowTitle("Adjust the quantity")
+        self._reprice = repriced
+        # Whether the user has set a price of their own. Until they do, the
+        # total follows the quantity at the listed rate — which is what "they
+        # only had three" means and is nearly always the whole correction.
+        self._total_touched = False
+        self._syncing = False
+        self.setWindowTitle("Adjust the trade")
 
         layout = QVBoxLayout(self)
         blurb = QLabel(
-            f"How many {candidate.item_name} did you actually get from "
-            f"{_seller(candidate)}?"
+            f"What did you actually get from {_seller(candidate)}, and what did "
+            f"you pay for it?"
         )
         blurb.setWordWrap(True)
         layout.addWidget(blurb)
@@ -485,8 +508,27 @@ class QuantityDialog(QDialog):
             "far — part of a lot would cost part of an orb, which cannot be "
             "traded."
         )
-        self.units.valueChanged.connect(lambda _: self._preview())
+        self.units.valueChanged.connect(lambda _: self._quantity_changed())
         form.addRow("Quantity", self.units)
+
+        pay = candidate.listing.pay_currency
+        total = candidate.pay_total
+        self.total = QDoubleSpinBox()
+        # Whole units unless the listing was somehow priced in fractions:
+        # partial currency cannot be traded, so a decimal place here would be
+        # offering something that does not exist.
+        whole = float(total).is_integer()
+        self.total.setDecimals(0 if whole else 2)
+        self.total.setSingleStep(1.0)
+        self.total.setRange(1.0 if whole else 0.01, 1e9)
+        self.total.setValue(total)
+        self.total.setToolTip(
+            "What you handed over, in the seller's own currency. A seller who "
+            "counteroffers changes this rather than the quantity — leave it "
+            "alone and it follows the quantity at the listed price."
+        )
+        self.total.valueChanged.connect(lambda _: self._total_changed())
+        form.addRow(f"Total ({currency_label(pay)})", self.total)
         layout.addLayout(form)
 
         self.summary = QLabel()
@@ -502,26 +544,57 @@ class QuantityDialog(QDialog):
         layout.addWidget(self.buttons)
         self._preview()
 
+    # --- keeping the two fields honest about each other --------------------
+
+    def _quantity_changed(self) -> None:
+        if not self._total_touched:
+            self._syncing = True
+            self.total.setValue(self._listed_total())
+            self._syncing = False
+        self._preview()
+
+    def _total_changed(self) -> None:
+        if not self._syncing:
+            self._total_touched = True
+        self._preview()
+
+    def _listed_total(self) -> float:
+        """What this quantity costs at the price the seller advertised."""
+        return self._replan(self._candidate, self.units.value()).pay_total
+
+    def revised(self):
+        """The candidate as corrected, for the preview and for the caller."""
+        c = self._replan(self._candidate, self.units.value())
+        return self._reprice(c, self.total.value())
+
     def _preview(self) -> None:
         """Say what the correction does to the cost and the profit."""
-        revised = self._replan(self._candidate, self.units.value())
+        revised = self.revised()
         pay = revised.listing.pay_currency
-        self.summary.setText(
+        text = (
             f"{fmt_qty(revised.plan.units)} for "
             f"{fmt_amount(revised.pay_total, pay)}  ·  "
-            f"profit +{revised.profit_divines:.2f} div"
+            f"profit {fmt_profit(revised.profit_divines)} div"
         )
+        # Said out loud, because the whole reason the price is editable is a
+        # trade that lost money while the log recorded +38.00.
+        if revised.profit_divines < 0:
+            text += "  —  this trade lost money"
+        self.summary.setText(text)
 
     def chosen_units(self) -> float:
         return self.units.value()
 
+    def chosen_total(self) -> float:
+        return self.total.value()
+
     @staticmethod
-    def ask(parent, candidate) -> float | None:
-        """Run the dialog. Returns the new quantity, or None if cancelled."""
-        dlg = QuantityDialog(parent, candidate)
+    def ask(parent, candidate) -> tuple[float, float] | None:
+        """Run the dialog. Returns (units, total paid), or None if cancelled."""
+        dlg = AdjustDialog(parent, candidate)
         if not dlg.exec():
             return None
-        return dlg.chosen_units()
+        return dlg.chosen_units(), dlg.chosen_total()
 
 
 def _seller(candidate) -> str:

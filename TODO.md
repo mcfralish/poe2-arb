@@ -8,17 +8,19 @@ deleted rather than ticked, so this file stays worth reading start to finish.
 
 **Shipped:** v0.7.0 (2026-07-31). **v0.8.0 is written and untagged** on `field-test-4`:
 the outcome-log integrity half of the fourth session's defect list, plus the hotkey
-diagnostic and the column work. **It has now been run on Windows once**, via a manual
-`workflow_dispatch` build, and that single run paid for the whole diagnostic: it caught
-the hotkey refusal in the act and root-caused four releases of failure to the app's own
-updater. That fix is in 0.8.0 too. Nothing else in it has been used in game.
+diagnostic, the column work, the ranking refit and the editable rows. **It has now been
+run on Windows once**, via a manual `workflow_dispatch` build, and that single run paid
+for the whole diagnostic: it caught the hotkey refusal in the act and root-caused four
+releases of failure to the app's own updater. That fix is in 0.8.0 too. Nothing else in
+it has been used in game.
 
 > **The 0.8.0 exe that was built is no longer what 0.8.0 will tag as.** Decided
 > 2026-08-01: the ranking refit was folded into 0.8.0 rather than cut as 0.9.0, because
 > nothing has shipped to users and two unreleased versions is worse bookkeeping than one.
-> The cost is that **the ranking change inherits 0.8.0's "never run on Windows" status** —
-> the built artifact predates it. Rebuild via `workflow_dispatch` before trusting anything
-> about queue order in game. `__version__` and `pyproject.toml` stay at 0.8.0; no bump.
+> The editable rows went in on the same reasoning. The cost is that **both changes inherit
+> 0.8.0's "never run on Windows" status** — the built artifact predates them. Rebuild via
+> `workflow_dispatch` before trusting anything about queue order or in-place editing in
+> game. `__version__` and `pyproject.toml` stay at 0.8.0; no bump.
 
 **Five field tests behind the project.** The fourth ran on 2026-08-01 across four sessions
 and 969 log records; evidence in [docs/FINDINGS.md](docs/FINDINGS.md), *Found in the fourth
@@ -37,23 +39,16 @@ below its own heading and the row actions are icons; and the hotkey reports a re
 `RegisterHotKey` with `GetLastError`, shows *Refused* in Settings, tests a binding before
 saving it and retries in the background. Full list in [CHANGELOG.md](CHANGELOG.md).
 
-**Start here next session. Decided 2026-08-01 — build the editable rows first.** Not by
-"what unblocks what" this time; it was chosen, so do not re-derive an order from the
-dependency graph and get a different answer.
+**Start here next session.** The editable rows are **done** (see below); the order that was
+decided on 2026-08-01 carries on from item 2.
 
-1. **Make every non-derived value on a row editable — price included.** *(Chosen as the
-   next piece of work.)* **Two TODO items that are one change**: the *Waiting on a reply*
-   item and *The Result column can be edited* in the UI section below want the same field
-   in two places, and both are now also the landing place for the counteroffer finding —
-   1 fill in 36 was counteroffered, and the app can record a changed quantity but not a
-   changed price. It is also **the only route back to the Rigwald's Ferocity record**, the
-   biggest trade the project has made, which still reads `no_reply`. Writes go through the
-   existing amendment record (it already carries `cost_divines`), never by mutating the
-   attempt; numeric fields edit on a double-click; confirm before amending anything over an
-   hour old.
+1. ~~Make every non-derived value on a row editable — price included.~~ **Done
+   2026-08-01.** Amount, Total and Result are all correctable, in the queue via *Adjust…*
+   and on a Trades-tab history row by double-click. Details under *Done since this file was
+   last written*.
 2. **A "hide listings over 3 days old" toggle, off by default.** *(Decided 2026-08-01 —
-   see the *Both queue sections* item below for the full spec.)* Small, and it pairs
-   naturally with item 1 since both are queue-table work.
+   see the *Both queue sections* item below for the full spec.)* Small, and the next piece
+   of queue-table work.
 3. **The Send button** (*Next*) — route **decided: keystrokes**. Unblocked, ordinary work.
 4. **Pricing** (*Next*) — one branch of it is dead: the book is tight (~2%), so the
    liquidity haircut must not be built; the error is movement, so build freshness. Blocked
@@ -75,9 +70,23 @@ does not compete with the list above; it is the queue of things only playing can
   book. The single measurement blocking the pricing item. Method in *What the next field
   test must measure*.
 
-**Done since this file was last written (2026-08-01, no game time needed).** The
-counteroffer question and the ranking fit, both from data already on disk:
+**Done since this file was last written (2026-08-01, no game time needed).** The editable
+rows, the counteroffer question and the ranking fit — the last two from data already on
+disk:
 
+- **Every non-derived value on a row is editable, price included.** Both halves of the
+  change landed together, as planned. In *Waiting on a reply*, **Adjust…** now sets the
+  quantity **and** the total, and the total follows the quantity at the listed price until
+  you touch it. On a Trades-tab **history row**, Amount, Total and Result edit in place on
+  a double-click — Result through a drop-down, and anything over an hour old asks first.
+  Writes go through the amendment record (`outcomes.plan_correction` /
+  `record_correction`, which work from a logged `Attempt` with no candidate behind it), so
+  the original ask survives in `asked_units` / `asked_pay_units` / `asked_cost_divines`.
+  Profit can now be negative and `format.fmt_profit` owns the sign everywhere. **The
+  Rigwald's Ferocity record is now reachable** — it has *not* been corrected, because only
+  the maintainer knows what actually happened; open Trades → *All time* and set its Result.
+  Verified by screenshot as well as by tests. Standing decisions in
+  [docs/FINDINGS.md](docs/FINDINGS.md), *Correcting a trade after the fact*.
 - **The counteroffer worry is closed.** 35 of 36 fills went through at the **listed
   price**, joined attempt-by-attempt to `Client.txt`. Both fat-tail fills the 0.7.0
   correction rested on were unnegotiated, and two extreme gaps are corroborated by
@@ -177,6 +186,10 @@ first — see item 1 of *Start here*:
 - **Expired versus AFK versus Offline is a distinction worth making by hand.** If the
   three buttons feel like more work than the one they replaced, that is worth knowing
   before the log fills up with a split nobody uses.
+- **The in-place editors on the Trades tab.** Verified by screenshot on Linux only: the
+  Result cell's drop-down had to be widened past its own column to stop reading "No Repl",
+  and that measurement comes from the font. Worth one look on Windows — and worth checking
+  that double-clicking a *live* row still copies its whisper rather than opening an editor.
 
 **Older, still unconfirmed:**
 
@@ -192,28 +205,16 @@ which is why the original occurrence left no trace.
 
 ## Next
 
-- [ ] **The auto-expiry no longer writes `no_reply`, but the rows it already got wrong are
-      still wrong.** Built in 0.8.0: the timeout writes `Outcome.EXPIRED`, the manual
-      buttons are **AFK** and **Offline**, and a pinned row never expires. **What is left
-      is the route back** — an expired row is reachable in the *file* (verdicts apply in
-      order, so a later record wins, and `9adaaa859e10` carries `no_reply` then `filled`
-      from a real correction) and unreachable in the *UI*. Editing the result from the
-      Trades tab, in the UI section below, is that fix. Until it lands, the Rigwald's
-      Ferocity record — the biggest trade the project has made — still reads `no_reply`.
-      Also still open: `Client.txt` can mark Offline automatically, since
-      `: <char> is not online.` is already in it. See *Split NO_REPLY* below, which is now
-      the log-reading half of the same three-way split.
-- [ ] **What is left of the counteroffer question: make a row's price amendable.** The
-      measurement is **done and the worry is closed** (2026-08-01, FINDINGS *Ghost fills
-      are real fills*): all 36 fills were joined to `Client.txt`, and **35 went through at
-      the listed price**. Both fat-tail fills the 0.7.0 correction rested on — 3.92× and
-      10.94× — were unnegotiated, and two extreme gaps (42.91×, 14.09×) are corroborated by
-      independent listings on the same items in the same sweep. Do not re-open this.
-      What survives is the one consequence that was true either way: a counteroffered trade
-      must be **amendable in price, not just quantity** (1 fill in 36, and it lost money
-      while logging +38.00). The existing amendment record already carries `cost_divines`.
-      That work is the *Waiting on a reply* item in the UI section below — same field, same
-      change.
+- [ ] **The three-way split is built and editable; the log-reading half is not.** Done in
+      0.8.0: the timeout writes `Outcome.EXPIRED`, the manual buttons are **AFK** and
+      **Offline**, a pinned row never expires, and — since the editable-rows change — a
+      verdict is correctable from the Trades tab, which was the missing route back.
+      **What is left is automation from `Client.txt`**: it can mark Offline on its own,
+      since `: <char> is not online.` is already in it. See *Split NO_REPLY* below, which
+      is the log-reading half of the same three-way split.
+      **One record is waiting on the maintainer, not on code**: the Rigwald's Ferocity
+      row still reads `no_reply`, and only you know what really happened to it. Trades →
+      *All time*, double-click its Result.
 - [ ] **A restart of *Find trades* still re-scans the same items immediately.** The other
       half of the duplicate-whisper problem; the *suppress a resolved listing* half shipped
       in 0.8.0 and covers a listing that was Traded, Already Sold, Offline or Refused. What
@@ -452,16 +453,6 @@ session will read them backwards. *Trades* also moves to **second** tab position
   empty boxes without one — see [docs/FINDINGS.md](docs/FINDINGS.md), *Operational*. Doing
   this properly means bundled icon assets, not a different character.
 
-### Waiting on a reply
-
-- [ ] **Every non-derived value editable, not just the quantity.** **This is item 1 of
-  *Start here* — do it together with *The Result column can be edited* under Trades →
-  Results, which is the same field in the other table.** Price and total as well, since a
-  seller who counteroffers changes the price rather than the amount: measured at **1 fill
-  in 36** (2026-08-01), and the one that happened logged +38.00 divines on a trade that
-  lost money, so this is the field that stops the log lying. Derived values (profit, band,
-  the CE reference) stay read-only.
-
 ### Trades → Results
 
 - [ ] **Rename the tab to Results and move it to second position** (see the collision note
@@ -471,13 +462,6 @@ session will read them backwards. *Trades* also moves to **second** tab position
   name: `SESSION_LIVE` means "what the last sweep found" (its own tooltip says so), which
   is a different set from "what this session attempted" — a sweep boundary is not a session
   boundary, and 2026-08-01 ran four sessions in one evening.
-- [ ] **The Result column can be edited, along with every non-derived value.** **Item 1 of
-  *Start here*, and the other half of *Every non-derived value editable* under Waiting on a
-  reply — one change, two tables.** This is the route back to the auto-expired row in
-  *Next*, and the only way the Rigwald's Ferocity record gets corrected. Numeric fields
-  edit on a **double-click** in place. **Confirm before amending a record more than an hour
-  old.** Writes go through the existing amendment record, which preserves the original ask
-  in `asked_units` — extend it rather than mutating the attempt.
 - [ ] **Centre every column except Item and Seller.**
 
 ### Results → Trends

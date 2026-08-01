@@ -20,6 +20,7 @@ from poe2arb.listings import (
     plan_trade,
     rank_candidates,
     replan_units,
+    repriced,
     smallest_lot,
     whisper_text,
 )
@@ -710,6 +711,78 @@ def test_replan_units_clamps_to_the_original_ask():
     )
     assert replan_units(c, 99.0).plan.units == c.plan.units
     assert replan_units(c, 0.0).plan.units == 1.0
+
+
+# --- a counteroffered price --------------------------------------------------
+#
+# 35 of 36 fills went through at the listed price (2026-08-01, joined to
+# Client.txt), so this is rare. The one that did not logged +38.00 divines on a
+# trade that lost money, which is the whole reason price is amendable.
+
+def _counteroffer_candidate(stock=4.0):
+    [c] = build_candidates(
+        [listing(pay_amount=1.0, get_amount=1.0, stock=stock)],
+        {"core-destabiliser": 3.79},
+        {},
+        min_gap=1.05,
+        max_gap=1.5,
+    )
+    return c
+
+
+def test_repriced_moves_the_cost_and_the_profit_but_not_the_quantity():
+    c = _counteroffer_candidate()
+    dearer = repriced(c, 6.0)
+    assert dearer.plan.units == c.plan.units
+    assert dearer.plan.pay_units == 6.0
+    assert dearer.plan.cost_divines == 6.0
+    # Proceeds are a fact about the quantity and the Exchange, not about what
+    # the seller charged, so they do not move.
+    assert dearer.plan.proceeds_divines == c.plan.proceeds_divines
+    assert dearer.profit_divines == pytest.approx(
+        c.plan.proceeds_divines - 6.0
+    )
+    assert dearer.listing is c.listing
+
+
+def test_a_counteroffer_can_turn_the_trade_into_a_loss():
+    """The log used to be unable to say this, and recorded +38.00 instead."""
+    c = _counteroffer_candidate()
+    assert c.profit_divines > 0
+    assert repriced(c, 1000.0).profit_divines < 0
+
+
+def test_repricing_keeps_the_row_self_consistent():
+    """Gap is derived from the unit price; both must describe the same trade."""
+    c = _counteroffer_candidate()
+    dearer = repriced(c, 8.0)
+    assert dearer.unit_price_divines == pytest.approx(
+        dearer.plan.cost_divines / dearer.plan.units
+    )
+    assert dearer.gap == pytest.approx(3.79 / dearer.unit_price_divines)
+    assert dearer.gap < c.gap
+    # The per-item figure the queue displays follows the price agreed.
+    assert dearer.pay_per_unit == pytest.approx(8.0 / dearer.plan.units)
+
+
+def test_repricing_is_a_no_op_at_the_price_already_agreed():
+    c = _counteroffer_candidate()
+    assert repriced(c, c.pay_total) is c
+    assert repriced(c, 0.0) is c
+    assert repriced(c, -5.0) is c
+
+
+def test_pay_per_unit_is_unchanged_by_deriving_it_from_the_plan():
+    """It reads off the plan now; on an unamended trade that is the listing."""
+    for pay, get, stock in ((100.0, 10.0, 30.0), (3.0, 7.0, 21.0), (11.0, 1.0, 18.0)):
+        [c] = build_candidates(
+            [listing(pay_amount=pay, get_amount=get, stock=stock)],
+            {"core-destabiliser": 379.0},
+            {},
+            min_gap=1.05,
+            max_gap=1.5,
+        )
+        assert c.pay_per_unit == pytest.approx(c.listing.price_per_unit)
 
 
 # --- staleness: three days without a sale predicts a flat zero ---------------

@@ -22,7 +22,8 @@ from poe2arb.outcomes import (
     suggested_gap_band,
     summarise,
 )
-from poe2arb.listings import replan_units
+from poe2arb.outcomes import plan_correction, record_correction
+from poe2arb.listings import replan_units, repriced
 
 NOW = datetime.now(timezone.utc)
 
@@ -248,6 +249,53 @@ def test_an_amendment_corrects_the_quantity_and_keeps_the_ask(log_path):
     assert a.outcome is Outcome.FILLED
 
 
+def test_an_amendment_can_correct_the_price_alone(log_path):
+    """The counteroffer case: 1 fill in 36, and it logged a profit it lost."""
+    c = candidate(pay=11.0, stock=1.0)
+    attempt_id = record_attempt(log_path, c)
+    record_amendment(log_path, attempt_id, repriced(c, 14.0))
+
+    [a] = read_attempts(log_path)
+    assert a.amended is True
+    assert a.units == 1.0            # untouched
+    assert a.cost_divines == 14.0
+    assert a.asked_cost_divines == 11.0
+    assert a.asked_pay_units == 11.0
+    assert a.expected_profit_divines == pytest.approx(
+        c.plan.proceeds_divines - 14.0
+    )
+
+
+def test_a_second_amendment_still_reports_the_original_ask(log_path):
+    """Otherwise the ask decays into whatever the last correction left."""
+    c = candidate(pay=11.0, stock=18.0)
+    attempt_id = record_attempt(log_path, c)
+    record_amendment(log_path, attempt_id, replan_units(c, 9.0))
+    record_amendment(log_path, attempt_id, replan_units(c, 3.0))
+    [a] = read_attempts(log_path)
+    assert a.units == 3.0
+    assert a.asked_units == 18.0
+
+
+def test_the_settlement_floor_is_recorded_so_a_correction_can_reapply_it(log_path):
+    """Profit rounds down to a whole unit of it, and nothing else records it."""
+    record_attempt(log_path, candidate())
+    [a] = read_attempts(log_path)
+    assert a.sale_unit_divines == pytest.approx(0.0023)
+    assert a.settle_currency == "divine"
+
+
+def test_records_written_before_the_floor_was_logged_still_read(log_path):
+    log_path.write_text(
+        '{"kind": "attempt", "id": "x", "ts": "%s", "item_id": "omen", '
+        '"gap": 1.2, "band": "plausible"}\n' % NOW.isoformat(),
+        encoding="utf-8",
+    )
+    [a] = read_attempts(log_path)
+    assert a.sale_unit_divines is None
+    assert a.settle_currency is None
+
+
 def test_a_verdict_after_an_amendment_is_not_undone_by_it(log_path):
     """Order in the file must not decide which correction wins."""
     c = candidate(pay=11.0, stock=18.0)
@@ -258,6 +306,115 @@ def test_a_verdict_after_an_amendment_is_not_undone_by_it(log_path):
     assert a.units == 3.0
     assert a.outcome is Outcome.FILLED
     assert a.actual_profit_divines == 2.5
+
+
+# --- correcting a row whose listing is long gone -----------------------------
+#
+# The route back to a trade the queue can no longer reach: an expired verdict
+# the timer got wrong, a quantity nobody corrected at the time, a counteroffered
+# price. There is no candidate to re-plan — all that survives is the log row.
+
+class TestPlanCorrection:
+    def test_a_smaller_quantity_keeps_the_price_per_item(self):
+        """"They only had three" does not change what three cost each."""
+        a = attempt(lots=6, units=18.0, pay_units=198.0, cost_divines=198.0,
+                    ce_divines=12.0, expected_profit_divines=18.0)
+        got = plan_correction(a, units=3.0)
+        assert got.units == 3.0
+        assert got.lots == 1
+        assert got.cost_divines == pytest.approx(33.0)
+        assert got.pay_units == pytest.approx(33.0)
+
+    def test_the_quantity_snaps_to_a_whole_lot(self):
+        """Part of a lot would cost part of an orb, which cannot be traded."""
+        a = attempt(lots=6, units=18.0, cost_divines=198.0, pay_units=198.0)
+        assert plan_correction(a, units=4.0).units == 3.0
+        assert plan_correction(a, units=5.0).units == 6.0
+
+    def test_a_changed_price_leaves_the_quantity_and_the_proceeds_alone(self):
+        """The counteroffer case: same goods, more money."""
+        a = attempt(units=1.0, pay_units=11.0, cost_divines=11.0,
+                    expected_profit_divines=0.9)
+        got = plan_correction(a, cost_divines=14.0)
+        assert got.units == 1.0
+        # Proceeds were 11.9; profit follows the cost down.
+        assert got.expected_profit_divines == pytest.approx(-2.1)
+
+    def test_a_counteroffer_scales_the_sellers_own_currency_too(self):
+        a = attempt(pay_currency="exalted", units=1.0, pay_units=2412.0,
+                    cost_divines=5.58, expected_profit_divines=1.0)
+        got = plan_correction(a, cost_divines=11.16)
+        assert got.pay_units == pytest.approx(4824.0)
+
+    def test_proceeds_are_re_floored_when_the_quantity_changes(self):
+        """Partial currency cannot be traded, so they round down to a whole unit."""
+        a = attempt(lots=4, units=4.0, pay_units=4.0, cost_divines=4.0,
+                    ce_divines=3.79, expected_profit_divines=11.0,
+                    sale_unit_divines=1.0)
+        got = plan_correction(a, units=3.0)
+        # floor(3 * 3.79) = 11, less 3 divines paid.
+        assert got.expected_profit_divines == pytest.approx(8.0)
+
+    def test_a_finer_settlement_currency_floors_less(self):
+        a = attempt(lots=4, units=4.0, pay_units=4.0, cost_divines=4.0,
+                    ce_divines=3.79, expected_profit_divines=11.0,
+                    sale_unit_divines=0.0023)
+        got = plan_correction(a, units=3.0)
+        # 3 x 3.79 = 11.37, floored to 11.3689 rather than to 11, less 3 paid.
+        assert got.expected_profit_divines == pytest.approx(8.3689, abs=1e-3)
+
+    def test_an_unrecorded_settlement_floor_falls_back_to_a_whole_divine(self):
+        """The pessimistic reading — understating profit is the safe error."""
+        a = attempt(lots=4, units=4.0, pay_units=4.0, cost_divines=4.0,
+                    ce_divines=3.79, expected_profit_divines=11.0,
+                    sale_unit_divines=None)
+        assert plan_correction(a, units=3.0).expected_profit_divines == pytest.approx(8.0)
+
+    def test_correcting_nothing_reproduces_the_row(self):
+        a = attempt(lots=2, units=2.0, pay_units=4.8, cost_divines=4.8,
+                    expected_profit_divines=1.4)
+        got = plan_correction(a)
+        assert got.units == 2.0
+        assert got.cost_divines == pytest.approx(4.8)
+        assert got.expected_profit_divines == pytest.approx(1.4)
+
+
+def test_a_correction_is_appended_like_any_other_amendment(log_path):
+    c = candidate(pay=11.0, stock=18.0)
+    attempt_id = record_attempt(log_path, c)
+    [logged] = read_attempts(log_path)
+    got = plan_correction(logged, units=3.0)
+    record_correction(
+        log_path, attempt_id,
+        lots=got.lots, units=got.units, pay_units=got.pay_units,
+        cost_divines=got.cost_divines,
+        expected_profit_divines=got.expected_profit_divines,
+    )
+    [a] = read_attempts(log_path)
+    assert a.units == 3.0
+    assert a.asked_units == 18.0
+    assert a.amended is True
+
+
+def test_a_correction_omits_the_fields_it_was_not_given(log_path):
+    """A price correction must not have to invent a quantity to go with it."""
+    attempt_id = record_attempt(log_path, candidate(pay=11.0, stock=18.0))
+    record_correction(log_path, attempt_id, cost_divines=200.0)
+    rows = [json.loads(line) for line in log_path.read_text().splitlines()]
+    amend = next(r for r in rows if r["kind"] == "amend")
+    assert set(amend) == {"kind", "id", "ts", "cost_divines"}
+    [a] = read_attempts(log_path)
+    assert a.units == 18.0
+    assert a.cost_divines == 200.0
+
+
+def test_a_correction_can_reverse_a_verdict_the_timer_got_wrong(log_path):
+    """The Rigwald's Ferocity case — the biggest trade, logged as no_reply."""
+    attempt_id = record_attempt(log_path, candidate())
+    record_outcome(log_path, attempt_id, Outcome.EXPIRED)
+    assert read_attempts(log_path)[0].outcome is Outcome.EXPIRED
+    record_outcome(log_path, attempt_id, Outcome.FILLED)
+    assert read_attempts(log_path)[0].outcome is Outcome.FILLED
 
 
 def test_sessions_group_by_id_and_come_back_newest_first(log_path):
