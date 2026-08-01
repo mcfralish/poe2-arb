@@ -519,8 +519,19 @@ def build_candidates(
 # probabilities — do not quote them as fill rates.
 #
 # **Fitted 2026-08-01 from 789 logged whispers**, replacing three round numbers
-# that came from 14. Ghosts fill at 2.0% (n=601) against plausible's 12.4%
-# (n=178): a ratio of **0.16**, which is what GHOST now carries.
+# that came from 14. Ghosts fill at 2.16% (n=601) against plausible's 12.4%
+# (n=178): a ratio of **0.17**, which is what GHOST now carries.
+#
+# *Revised the same day, by one trade.* The Rigwald's Ferocity record — a
+# 137.86x ghost, the biggest the project has found — was sitting as `no_reply`
+# because the pre-0.8.0 timer wrote a verdict over it; the maintainer confirmed
+# it filled at the listed price. Ghost fills go 12 -> 13 and the prior 0.162 ->
+# 0.175. **The prior barely moves and the value ratio doubles**: ghost value per
+# whisper goes 0.251 -> 0.477 divines against plausible's 0.382, so a ghost
+# whisper is now worth *more* per message than a plausible one (ratio 1.25, was
+# 0.66). That does not change what this table holds — see below — and it rests
+# on a single observation worth 47% of all ghost realised value, so it is a
+# reason to keep measuring rather than to re-weight.
 #
 # *Why the fill-rate ratio and not the value-per-whisper ratio (0.66).* This
 # weight multiplies a candidate's **profit**, so `profit x weight` is already an
@@ -539,7 +550,7 @@ def build_candidates(
 FILL_PRIOR = {
     Band.PLAUSIBLE: 1.0,
     Band.THIN: 0.5,
-    Band.GHOST: 0.16,
+    Band.GHOST: 0.17,
 }
 
 # A listing this old has never once been traded: 0 fills in 102 whispers, and

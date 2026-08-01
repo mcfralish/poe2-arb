@@ -140,15 +140,19 @@ afterwards, and league names rotate.
 Four results from field tests are load-bearing in `listings.py` and must not be re-derived
 (full evidence in [docs/FINDINGS.md](docs/FINDINGS.md), "Negative results"):
 
-1. **Deep discounts fill rarely — not never.** *Fitted 2026-08-01 at n=789, superseding a
-   correction at n=156 which superseded "they do not fill at all" from n=14.* Measured
-   from `outcomes.jsonl`: plausible **12.4%** (n=178), ghost **2.0%** (n=601). Both earlier
-   readings under-rated ghosts; ghost is worth **0.66** of a plausible whisper in divines,
-   not 0.28. `FILL_PRIOR[GHOST]` is now **0.16** — the *fill-rate* ratio, because the
-   weight multiplies profit, so `profit × weight` is already the divines-per-whisper
-   estimate and the value ratio would count the fat tail twice. Consequence, and it is
-   deliberate: a big enough ghost now outranks a plausible. Do not re-assert that big gaps
-   never fill, do not restore the 0.0, and do not hide them.
+1. **Deep discounts fill rarely — not never, and they now earn more per whisper than
+   plausible ones do.** *Fitted 2026-08-01 at n=789, revised the same day by one corrected
+   record, superseding a correction at n=156 which superseded "they do not fill at all"
+   from n=14 — **four revisions, every one in favour of ghosts.*** Measured from
+   `outcomes.jsonl`: plausible **12.4%** (n=178), ghost **2.16%** (n=601). Ghost is worth
+   **1.25** plausible whispers in divines (0.477 against 0.382), having read 0.28 and then
+   0.66. `FILL_PRIOR[GHOST]` is **0.17** — the *fill-rate* ratio, **not** the value ratio,
+   because the weight multiplies profit, so `profit × weight` is already the
+   divines-per-whisper estimate and the value ratio would count the fat tail twice.
+   Consequence, and it is deliberate: a big enough ghost now outranks a plausible. Do not
+   re-assert that big gaps never fill, do not restore the 0.0, and do not hide them.
+   **Caveat that must travel with the number:** one 137.86× fill is 47% of all ghost
+   realised value, so the value ratio is a fat tail with a single observation in it.
    **The counteroffer worry is closed** (2026-08-01): 35 of 36 fills went through at the
    listed price, checked against `Client.txt`, including both fat-tail fills the
    correction rested on.
@@ -300,7 +304,7 @@ not 30.
   *demoted*, by a measured weight rather than a rule. Hiding either would make the ranking
   unfalsifiable, which is exactly how `FILL_PRIOR[GHOST] = 0.0` survived four field tests.
   ("Ghosts rank last" was the rule until 2026-08-01 and is no longer true: a big enough
-  ghost outranks a plausible, because at a 2.0% fill rate it should.)
+  ghost outranks a plausible, because at a 2.16% fill rate it should.)
 
 [docs/FINDINGS.md](docs/FINDINGS.md), "Deliberate decisions — do not 'fix' these", is the
 full list. Read it before changing queue timing, banding, or anything that looks like an

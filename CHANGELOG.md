@@ -73,7 +73,7 @@ reports is computed from that file.
 - **The order trades are offered in has been fitted to what actually filled** — 789
   whispers, five times the evidence the last ordering had. Two changes you will see:
   - **Long shots are no longer pinned to the bottom.** The app used to score a "too good
-    to be true" listing at zero, on the grounds that they never fill. They do — 2.0% of
+    to be true" listing at zero, on the grounds that they never fill. They do — 2.2% of
     601 of them — and the ones that land are large, so a long shot now has to be worth
     roughly six ordinary trades before it is offered first, rather than never being
     offered first at all. It is still a demotion, just an honest one. Nothing is hidden,

@@ -278,21 +278,36 @@ now reads:
 |---|---|---|---|---|---|---|
 | plausible | 178 | 22 | **12.4%** | 5 | 68.0 | **0.382** |
 | thin | 10 | 2 | 20% (n=10) | 1 | 2.0 | 0.200 |
-| ghost | 601 | 12 | **2.0%** | 2 | 150.7 | **0.251** |
+| ghost | 601 | 13 | **2.16%** | 2 | 286.7 | **0.477** |
 
-Fill rates fell as the sample grew (plausible 21% → 12.4%) and the **value ratio rose:
-ghost is now 0.66 of a plausible whisper, not 0.28.** The ranking decision still survives —
-plausible is worth ~1.5× more per message and must be offered first — but the margin is far
-narrower than either earlier reading, and `FILL_PRIOR[GHOST] = 0.0` is now wrong by a wide,
-well-powered margin (n=601). Measured ratios: **0.16 on fill rate, 0.66 on value per
-whisper**; 0.49 on value if the one counteroffered ghost (a real loss logged as +38.00) is
-struck out.
+> **Revised later the same day, by one trade, and the direction is the same one as every
+> other revision of this finding.** The ghost row above read 12 fills / 2.0% / 150.7 div /
+> 0.251 per whisper until the **Rigwald's Ferocity** record was corrected. It was a
+> **137.86× ghost** logged at 06:06Z on 01 Aug for 1.00 divine against a 137.86 divine
+> reference, and it sat as `no_reply` because the pre-0.8.0 timer wrote a verdict over a
+> trade that had completed. The maintainer confirmed (2026-08-01) it **filled at the listed
+> price**; the correction is in the log as an appended `filled` with
+> `actual_profit_divines: 136.0`. **This is the fourth time this finding has been revised
+> and the fourth time the correction favoured ghosts.**
 
-**Read the profit column as an upper bound, and most loosely on ghosts.** It is
-`expected_profit_divines`, the app's own estimate, which carries ±6% on liquid pairs and is
-least trustworthy exactly where the gap is largest. 118 of the ghost column's 150.7 divines
-come from three fills at 8.75×, 14.09× and 42.91×. Two of the three are independently
-corroborated and one is a known loss — see *Ghost fills are real fills* below.
+Fill rates fell as the sample grew (plausible 21% → 12.4%) and the **value ratio rose past
+parity: a ghost whisper is now worth 1.25 plausible whispers in divines** (0.477 against
+0.382), having read 0.28 at n=156 and 0.66 an hour earlier. `FILL_PRIOR[GHOST] = 0.0` is
+wrong by a wide, well-powered margin (n=601). Measured ratios: **0.175 on fill rate, 1.25
+on value per whisper**.
+
+**But the ranking still uses the fill-rate ratio, and it barely moved: 0.162 → 0.175.**
+`FILL_PRIOR[GHOST]` is 0.17. Do not raise it to the value ratio — the weight multiplies
+profit, so the fat tail would be counted twice; the reasoning is under *Cross-venue ranking*
+and is unchanged by this revision.
+
+**Read the profit column as an upper bound, and most loosely on ghosts — the tail is now
+one trade.** It is `expected_profit_divines`, the app's own estimate, which carries ±6% on
+liquid pairs and is least trustworthy exactly where the gap is largest. **136 of the ghost
+column's 286.7 divines — 47% — are the single Rigwald's fill**, and 254 of them come from
+four fills at 8.75×, 14.09×, 42.91× and 137.86×. Three of the four are independently
+corroborated and one is a known loss — see *Ghost fills are real fills* below. A conclusion
+resting 47% on one observation is a reason to keep measuring, not a reason to re-weight.
 
 Fill rate by gap, all 789 whispers — the curve the thresholds should be fitted to:
 
@@ -410,6 +425,40 @@ answers it without a trade:
 So the fat tail is a **real property of the Bulk Item Exchange**, not an artefact of the
 reference price. The counteroffer risk is real but rare (1 in 36) and is a reason to make a
 row's **price** amendable, not a reason to distrust the band.
+
+### The three-way verdict split has never once been used by hand — measured 2026-08-01, n=227
+
+0.8.0 replaced the single *No Reply* button with **AFK** and **Offline**, on the reasoning
+that those were the two things the maintainer ever actually meant, and left the timer to
+write **Expired** on its own. TODO flagged the risk in advance: *"if the three buttons feel
+like more work than the one they replaced, that is worth knowing before the log fills up
+with a split nobody uses."*
+
+Session `11fc03d0a4f3` (01 Aug 20:49–21:29Z) is the only session that has ever run 0.8.0 —
+it is the only one writing `expired` rather than `no_reply`, which is how to identify it.
+Its 227 whispers resolved as:
+
+| verdict | n | written by |
+|---|---|---|
+| `expired` | 209 | the timer, on its own |
+| `filled` | 14 | the user |
+| `sold` | 4 | the user |
+| `afk` | **0** | — |
+| `offline` | **0** | — |
+| `declined` | **0** | — |
+
+**Across the whole log — 789 whispers — AFK, Offline and Refused have been pressed zero
+times between them.** Every unanswered whisper in the 0.8.0 session went to the timer.
+
+What this does *not* say: that the split was a mistake. `expired` is honest where
+`no_reply` was not, and that half of the change is doing its job — a verdict is no longer
+claimed that nobody observed. What it says is that **the manual half is so far unused**,
+and therefore that the plan to split `NO_REPLY` by reading `Client.txt` (below) is now the
+*only* live route to the AFK/offline distinction rather than a supplement to a button.
+Before adding a fourth button anywhere, check this table again.
+
+One session is not a habit, and the maintainer had not been told the buttons were the
+thing to exercise. Ask before treating it as settled.
 
 ### A listing older than ~3 days has never filled — measured 2026-08-01, n=789
 
@@ -1147,6 +1196,13 @@ Also worth not rediscovering:
   hours later. Editing there is confined to **history rows** — a live sweep row is a
   listing nobody has acted on, there is nothing to correct about it, and the same
   double-click has to keep copying its whisper.
+- **A whispered row is editable in the queue while it is live, and on the Trades tab
+  afterwards — not on the live sweep table.** Decided 2026-08-01. A listing you whispered
+  this session is *carried* on the live Trades table so a verdict has a row to land on, and
+  those rows are deliberately **not** editable there: the queue's *Adjust…* covers a trade
+  in flight, and Trades → *All time* covers it once the session has moved on. The
+  alternative — a live table holding two kinds of row with two sets of edit rules, one of
+  which also has to keep double-click-to-copy — is the shape of a bug rather than a feature.
 - **A verdict change goes through `record_outcome`, not through the amendment record.**
   Verdicts already fold in order and a later record already wins — `9adaaa859e10` carries
   `no_reply` then `filled` from a real correction made by hand. Nothing new was needed in

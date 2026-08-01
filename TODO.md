@@ -17,18 +17,38 @@ it has been used in game.
 > **The 0.8.0 exe that was built is no longer what 0.8.0 will tag as.** Decided
 > 2026-08-01: the ranking refit was folded into 0.8.0 rather than cut as 0.9.0, because
 > nothing has shipped to users and two unreleased versions is worse bookkeeping than one.
-> The editable rows went in on the same reasoning. The cost is that **both changes inherit
-> 0.8.0's "never run on Windows" status** — the built artifact predates them. Rebuild via
-> `workflow_dispatch` before trusting anything about queue order or in-place editing in
-> game. `__version__` and `pyproject.toml` stay at 0.8.0; no bump.
+> The editable rows went in on the same reasoning. `__version__` and `pyproject.toml` stay
+> at 0.8.0; no bump.
+>
+> **A current exe exists and has not been run.** Built 2026-08-01 from `dc3f360` on
+> `field-test-4`: [run 30723103465](https://github.com/mcfralish/poe2-arb/actions/runs/30723103465),
+> artifact `poe2-arb-field-test-4-dc3f360…`, 14-day retention. It carries the ranking
+> refit and the editable rows; it predates the Node-20 bump and the `FILL_PRIOR` 0.16→0.17
+> change, neither of which affects what a field test would look at. **Nothing in it has
+> been used in game.**
 
-**Five field tests behind the project.** The fourth ran on 2026-08-01 across four sessions
-and 969 log records; evidence in [docs/FINDINGS.md](docs/FINDINGS.md), *Found in the fourth
-session of real use*. **A fifth ran the same evening** (`11fc03d0a4f3`, 227 attempts, 14
-fills, 20:49–21:29Z) and was found unread in `outcomes.jsonl` on 2026-08-01 — it is the
-first session run on 0.8.0, the only one that writes `expired` rather than `no_reply`, and
-it is what took the ranking sample from 156 to 789. It has **no defect write-up of its
-own**: nobody was asked what went wrong in it, so if anything did, it is still unrecorded.
+**Stop counting field tests by ordinal — they no longer agree.** This file has called the
+20:49–21:29Z run of 2026-08-01 "the fifth"; the maintainer calls it the sixth, and both are
+defensible because the log holds **six session ids on 01 Aug alone** while a "field test"
+has meant a sitting, an evening, or a build depending on the paragraph. **Identify a
+session by its id.** The one that matters is `11fc03d0a4f3` (01 Aug 20:49–21:29Z, 227
+attempts, 14 fills) — **the only session that has ever run 0.8.0**, identifiable because it
+is the only one writing `expired` rather than `no_reply`, and the one that took the ranking
+sample from 156 to 789. Earlier sessions and their 969 log records are in
+[docs/FINDINGS.md](docs/FINDINGS.md), *Found in the fourth session of real use*.
+
+**That session's defect gap is now partly closed, from the log rather than from memory.**
+Nobody was ever asked what went wrong in it. Asked on 2026-08-01, the maintainer did not
+recall — but the log answered the question the write-up would have: **AFK, Offline and
+Refused have been pressed zero times in 789 whispers**, so the manual half of 0.8.0's
+three-way verdict split is unused. Written up in [docs/FINDINGS.md](docs/FINDINGS.md),
+*The three-way verdict split has never once been used by hand*. What is still unrecorded is
+anything that went wrong which the log cannot see — worth one question after the next run
+rather than reconstructing this one.
+
+**As of 2026-08-01 the log holds 789 attempts and nothing unread.** Checked explicitly,
+because this project has twice written "no fill-rate data was recorded" over the top of
+data that overturned its biggest finding. Re-check before believing this paragraph.
 
 **What 0.8.0 built, so it is not rebuilt.** The auto-expiry writes `Outcome.EXPIRED`
 instead of `no_reply` and the manual buttons are now **AFK** / **Offline**; a waiting row
@@ -65,7 +85,14 @@ does not compete with the list above; it is the queue of things only playing can
   `MainWindow.start_hotkey`). Evidence in [docs/FINDINGS.md](docs/FINDINGS.md),
   2026-08-01, *RESOLVED*. **Still unchecked on Windows:** whether the icon buttons render,
   whether pinning is reachable mid-map, and whether the 60-second retry actually fires.
-  **The ranking refit joins this list** — see the version note below.
+  **The ranking refit and the editable rows join this list** — an exe carrying both is
+  built and waiting; see the version note above for the link.
+- **Press AFK / Offline / Refused at least once, or tell me they are not worth having.**
+  Measured 2026-08-01: **zero presses in 789 whispers.** The timer's *Expired* is doing all
+  the work, which may mean the split is unused because it is unnecessary, or because the
+  buttons are too much effort mid-map. Those two have opposite consequences and only
+  playing can tell them apart. See [docs/FINDINGS.md](docs/FINDINGS.md), *The three-way
+  verdict split has never once been used by hand*.
 - **Astrid's Creativity**, or any ~100k `ValueTraded` pair, read off both sides of the
   book. The single measurement blocking the pricing item. Method in *What the next field
   test must measure*.
@@ -82,11 +109,23 @@ disk:
   Writes go through the amendment record (`outcomes.plan_correction` /
   `record_correction`, which work from a logged `Attempt` with no candidate behind it), so
   the original ask survives in `asked_units` / `asked_pay_units` / `asked_cost_divines`.
-  Profit can now be negative and `format.fmt_profit` owns the sign everywhere. **The
-  Rigwald's Ferocity record is now reachable** — it has *not* been corrected, because only
-  the maintainer knows what actually happened; open Trades → *All time* and set its Result.
-  Verified by screenshot as well as by tests. Standing decisions in
-  [docs/FINDINGS.md](docs/FINDINGS.md), *Correcting a trade after the fact*.
+  Profit can now be negative and `format.fmt_profit` owns the sign everywhere. Verified by
+  screenshot as well as by tests. Standing decisions in
+  [docs/FINDINGS.md](docs/FINDINGS.md), *Correcting a trade after the fact* — including why
+  a whispered row on the *live* Trades table is deliberately not editable there.
+- **The Rigwald's Ferocity record is corrected, and it moved the ghost finding again.**
+  The maintainer confirmed it filled at the listed price; an appended `filled` with
+  `actual_profit_divines: 136.0` is in `outcomes.jsonl` (a backup of the pre-correction
+  file is not kept in the repo — the log is append-only and the original verdict is still
+  in it). Consequences, all in [docs/FINDINGS.md](docs/FINDINGS.md) *Negative results* 1:
+  ghost fills 12 → 13, fill rate 2.0% → 2.16%, `FILL_PRIOR[GHOST]` 0.16 → **0.17**, and
+  **ghost value per whisper 0.251 → 0.477 against plausible's 0.382** — so a ghost whisper
+  is now worth *more* per message than a plausible one (1.25×, was 0.66×). **Fourth
+  revision of this finding, fourth time it favoured ghosts.** The prior stays on the
+  fill-rate ratio; do not feed it the value ratio. Caveat recorded and load-bearing: that
+  one trade is 47% of all ghost realised value.
+- **The release workflow is off Node 20.** `checkout@v4→v5`, `setup-python@v5→v6`,
+  `upload-artifact@v4→v5`. Proved on a dispatch run, no tag, no release.
 - **The counteroffer worry is closed.** 35 of 36 fills went through at the **listed
   price**, joined attempt-by-attempt to `Client.txt`. Both fat-tail fills the 0.7.0
   correction rested on were unnegotiated, and two extreme gaps are corroborated by
@@ -528,17 +567,4 @@ session will read them backwards. *Trades* also moves to **second** tab position
   certificate (~$100–400/yr), `--onedir` as the free fallback.
 - [ ] **Mobile push on a good trade.** Needs a delivery path — ntfy, Pushover, Telegram —
   plus a decision on whether the desktop app pushes directly.
-- [ ] **Bump the release workflow's actions off Node 20.** GitHub warned on the v0.7.0
-  build (2026-08-01): `actions/checkout@v4` and `actions/setup-python@v5` target Node 20
-  and are being forced onto Node 24, per
-  [the deprecation notice](https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/).
-  Four `uses:` lines in `.github/workflows/release.yml` — checkout and setup-python appear
-  once each in both the `test` and `build-windows-exe` jobs; `softprops/action-gh-release@v2`
-  was not flagged. **`actions/upload-artifact@v4` is flagged too** (seen on the first
-  manual build, 2026-08-01), so the 0.8.0 dispatch step adds a fifth line to bump. Warning only today, so the release still builds; it becomes a broken
-  release the day the forcing stops. **The "only way to find out is to tag" argument no
-  longer holds** — 0.8.0 added `workflow_dispatch` to the same workflow, so the bump can
-  be made and proved on a manual run against a branch, with no tag and no release. That
-  makes this cheap rather than risky, and it should be done before the next tag rather
-  than discovered during one.
 - [ ] Packaging beyond one exe — PyPI for the CLI, Scoop/winget manifests.
