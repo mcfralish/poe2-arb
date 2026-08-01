@@ -153,9 +153,10 @@ Four results from field tests are load-bearing in `listings.py` and must not be 
    re-assert that big gaps never fill, do not restore the 0.0, and do not hide them.
    **Caveat that must travel with the number:** one 137.86× fill is 47% of all ghost
    realised value, so the value ratio is a fat tail with a single observation in it.
-   **The counteroffer worry is closed** (2026-08-01): 35 of 36 fills went through at the
+   **The counteroffer worry is closed** (2026-08-01): 36 of 37 fills went through at the
    listed price, checked against `Client.txt`, including both fat-tail fills the
-   correction rested on.
+   correction rested on and the 137.86× one, whose `Trade accepted.` lands 81 seconds
+   after the whisper.
 
 2. **A listing three days old has never filled** — 0 in 102 whispers, in every band,
    against a 4.56% base rate. `STALE_LISTING_S` gates on it and `rank_candidates` sorts

@@ -769,7 +769,7 @@ attempts — 06:05:45Z ↔ `2026/07/31 23:05:47`.
   of ~9.4, it was a **small loss** on a record that claims +38. It was raised here as a
   candidate explanation for the entire ghost result — if the 3.92× and 10.94× fills were
   also counteroffers, ghost value-per-whisper would be overstated or negative.
-  **Checked 2026-08-01 and it is not the explanation: 35 of 36 fills were at the listed
+  **Checked 2026-08-01 and it is not the explanation: 36 of 37 fills were at the listed
   price, this one included as the sole exception.** See *Ghost fills are real fills, not
   counteroffers* above. What survives is the narrow version: a counteroffer happens about
   1 fill in 36, and the app has no way to record one, so **a row must be amendable in
@@ -1177,8 +1177,8 @@ Also worth not rediscovering:
   freshness filtering actually solves.
 - **A failed re-check counts as "go ahead".** Unknown is not evidence of absence; don't
   talk the user out of a real trade because a request failed.
-- **`FILL_PRIOR` holds the *fill-rate* ratio (ghost 0.16), not the value-per-whisper ratio
-  (0.66) — and this looks like a transcription error.** Both numbers are measured, both are
+- **`FILL_PRIOR` holds the *fill-rate* ratio (ghost 0.17), not the value-per-whisper ratio
+  (1.25) — and this looks like a transcription error.** Both numbers are measured, both are
   in *Negative results* 1, and the smaller one is the one in the code. It is deliberate:
   `fill_weight` **multiplies profit**, so `profit × weight` is already an estimate of
   divines per whisper. Feeding it the value ratio would apply the fat tail twice, since a

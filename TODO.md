@@ -125,14 +125,18 @@ disk:
   fill-rate ratio; do not feed it the value ratio. Caveat recorded and load-bearing: that
   one trade is 47% of all ghost realised value.
 - **The release workflow is off Node 20.** `checkout@v4→v5`, `setup-python@v5→v6`,
-  `upload-artifact@v4→v5`. Proved on a dispatch run, no tag, no release.
-- **The counteroffer worry is closed.** 35 of 36 fills went through at the **listed
+  `upload-artifact@v4→**v7**`. Proved on dispatch runs, no tag, no release — and the
+  proving earned its keep: **`upload-artifact` v5 and v6 are still Node 20**, so the
+  obvious one-major-version bump left the warning in place and only v7.0.1 clears it.
+  `softprops/action-gh-release@v2` was never flagged and is untouched.
+- **The counteroffer worry is closed, and the Rigwald's fill is corroborated.** 36 of 37
+  fills went through at the **listed
   price**, joined attempt-by-attempt to `Client.txt`. Both fat-tail fills the 0.7.0
   correction rested on were unnegotiated, and two extreme gaps are corroborated by
   independent listings on the same item. The correction stands; do not re-open it.
 - **The ranking is fitted at n=789** — five times the last sample, because a **fifth**
   field-test session (`11fc03d0a4f3`, 227 attempts, 14 fills, the first run on 0.8.0) was
-  sitting in `outcomes.jsonl` unread. `FILL_PRIOR[GHOST]` is 0.16 rather than 0.0, and a
+  sitting in `outcomes.jsonl` unread. `FILL_PRIOR[GHOST]` is 0.17 rather than 0.0, and a
   listing three days old now sorts last — 0 fills in 102 whispers, 13% of every message
   the app has ever suggested. Both in `listings.py`, both in FINDINGS.
 - The lesson from last time repeated itself exactly: **read `outcomes.jsonl` before
@@ -148,10 +152,12 @@ after the fact without erasing the original ask; sessions and leagues are stampe
 whisper and the Trades tab reviews any of them; Results gained *Every trade*; columns
 reorder, resize and persist. Full list in [CHANGELOG.md](CHANGELOG.md).
 
-**The ghost correction survived being doubted, and got bigger.** At n=131 it read "ghosts
-fill at 2.3%, worth 0.28 of a plausible whisper". At **n=789** it reads: ghosts fill at
-**2.0%** (n=601) against plausible's 12.4% (n=178), and are worth **0.66** of a plausible
-whisper, not 0.28 — so both earlier readings *under*-rated them. The 2026-08-01 counteroffer
+**The ghost correction has now survived being doubted four times, and got bigger every
+time.** At n=131 it read "ghosts fill at 2.3%, worth 0.28 of a plausible whisper". At
+**n=789** it reads: ghosts fill at **2.16%** (n=601) against plausible's 12.4% (n=178), and
+are worth **1.25** plausible whispers in divines — *more*, not less. Every one of the four
+readings under-rated them, which is a pattern rather than a coincidence and is the reason
+`FILL_PRIOR[GHOST]` should never be nudged downward on a hunch. The 2026-08-01 counteroffer
 scare is resolved against the game's own log (35 of 36 fills at the listed price), and
 `FILL_PRIOR[GHOST] = 0.0` is now fixed rather than merely known-wrong. Full tables in
 [docs/FINDINGS.md](docs/FINDINGS.md), *Negative results* 1.
@@ -318,11 +324,11 @@ which is why the original occurrence left no trace.
       (2026-08-01).** Fitted at n=789, five times the sample the last attempt had; tables
       in [docs/FINDINGS.md](docs/FINDINGS.md), *Negative results* 1. Shipped in
       `listings.py`:
-      - *`FILL_PRIOR[GHOST]` is 0.16*, not 0.0. Ghosts fill at 2.0% (n=601) against
+      - *`FILL_PRIOR[GHOST]` is 0.17*, not 0.0. Ghosts fill at 2.16% (n=601) against
         plausible's 12.4% (n=178). **The open question of which ratio the prior expresses
         is answered: the fill-rate one.** `fill_weight` multiplies profit, so
         `profit × weight` is already the divines-per-whisper estimate; feeding it the
-        value ratio (0.66) would count the fat tail twice. Consequence, deliberate: a ghost
+        value ratio (now 1.25) would count the fat tail twice. Consequence, deliberate: a ghost
         worth more than ~6 plausibles now sorts above them.
       - *`max_gap_ratio = 1.50` survives, and the cliff is now located precisely* — fills
         run 9%–15% below 1.5× and 1%–3% above it. 1.50 sits on the edge. Leave it.
