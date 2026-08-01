@@ -384,7 +384,31 @@ no measurement was taken, and was written up that way here before anyone opened 
 **The log is the record; the operator's recollection is not.** Read it before concluding
 that a session produced no data.
 
-### Ghost fills are real fills, not counteroffers — measured 2026-08-01, n=36 fills
+### Ghost fills are real fills, not counteroffers — measured 2026-08-01, n=37 fills
+
+> **Updated later the same day: 37 fills, 36 at the listed price.** The Rigwald's Ferocity
+> record was corrected from `no_reply` to `filled` after this join was run, so it was not
+> in the 36. It was then checked against `Client.txt` the same way and is **corroborated
+> independently of the maintainer's recall**, which matters because it is now 47% of all
+> ghost realised value:
+>
+> ```
+> 23:06:04  @To Ciosss: Hi, I'd like to buy your 1 Rigwald's Ferocity for my 1 Divine Orb
+> 23:07:25  : Trade accepted.
+> 23:07:30  @To Ciosss: ty
+> ```
+>
+> The trade is accepted **81 seconds** after the whisper and the thank-you goes to Ciosss
+> five seconds later. `Trade accepted.` carries no name, so the join is by elimination:
+> five sellers were whispered in that window (BADL, Ciosss, Xigemalulu, 胖胖嚛,
+> Peto_Rovente) and **Ciosss is the only one that ever resolved as anything but
+> `no_reply`** — the other four were whispered 20–30 times each across six sessions and
+> never once replied. Ciosss appears in the log exactly once: one whisper, one fill. And
+> per *"Reply to the last whisper received"* below, `@To Ciosss` as a reply target means
+> Ciosss had whispered *back*, which no other candidate did.
+>
+> At **137.86×** it is now by far the largest gap ever observed to fill — 3.2× the previous
+> record of 42.91× — and the listing was **six minutes old** with the seller not AFK.
 
 **The question, and why it mattered.** On 2026-08-01 the one ghost fill observed by hand
 was a **counteroffer at 10× the listed price** that lost money while logging +38.00 divines
