@@ -480,7 +480,8 @@ session will read them backwards. *Trades* also moves to **second** tab position
   [the deprecation notice](https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/).
   Four `uses:` lines in `.github/workflows/release.yml` — checkout and setup-python appear
   once each in both the `test` and `build-windows-exe` jobs; `softprops/action-gh-release@v2`
-  was not flagged. Warning only today, so the release still builds; it becomes a broken
+  was not flagged. **`actions/upload-artifact@v4` is flagged too** (seen on the first
+  manual build, 2026-08-01), so the 0.8.0 dispatch step adds a fifth line to bump. Warning only today, so the release still builds; it becomes a broken
   release the day the forcing stops. **The "only way to find out is to tag" argument no
   longer holds** — 0.8.0 added `workflow_dispatch` to the same workflow, so the bump can
   be made and proved on a manual run against a branch, with no tag and no release. That
