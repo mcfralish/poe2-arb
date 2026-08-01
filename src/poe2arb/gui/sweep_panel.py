@@ -28,7 +28,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QLineEdit,
     QPushButton,
@@ -39,9 +38,16 @@ from PySide6.QtWidgets import (
 
 from ..format import currency_label
 from ..listings import Band, rank_candidates, whisper_text
-from ..outcomes import Outcome
-from .bands import BAND_LABEL, BAND_TIP, legend_text, legend_tooltip
-from .table_items import NumericItem, TextItem
+from ..outcomes import Outcome, leagues, read_attempts, sessions
+from .bands import (
+    BAND_LABEL,
+    BAND_TIP,
+    legend_text,
+    legend_tooltip,
+    symbol_for_name,
+    tip_for_name,
+)
+from .table_items import NumericItem, TextItem, flexible_columns
 from .theme import muted_color
 
 log = logging.getLogger(__name__)
@@ -100,6 +106,34 @@ SHOW_MODES = (
     (SHOW_BOUGHT, "Ones I bought", "Listings you recorded as an actual trade."),
 )
 
+# What the session picker is pointed at. LIVE is the sweep in front of you;
+# anything else is read back out of the outcome log, where a row is a whisper
+# that was actually sent rather than a listing that was merely found.
+SESSION_LIVE = "live"
+SESSION_ALL = "all"
+
+# Every league, rather than the one being played. Kept separate from the session
+# picker because a season is a different question — "how did I do in Rise of the
+# Abyssal" — and league names rotate, so a log spanning two of them is two
+# economies in one table.
+SEASON_ALL = "all"
+
+# A history row carries its logged attempt where a live row carries a candidate.
+# Both live on the band cell, because sorting reorders the view and the row
+# index stops being an index into anything.
+_ATTEMPT_ROLE = Qt.ItemDataRole.UserRole + 1
+
+# What the Settle in column says on a history row: the verdict, since the
+# settlement currency was never recorded per attempt and what happened is the
+# more useful thing to have there.
+_RESULT_LABEL = {
+    Outcome.PENDING: "waiting",
+    Outcome.FILLED: "traded",
+    Outcome.SOLD: "already sold",
+    Outcome.NO_REPLY: "no reply",
+    Outcome.DECLINED: "declined",
+}
+
 
 
 
@@ -134,6 +168,10 @@ class SweepPanel(QWidget):
         # figure, and because after a session you need to know which currency a
         # given trade was costed against.
         self._settlement = "divine"
+        # The outcome log, for reviewing sessions other than the live one.
+        self._history_path = None
+        self._history: list = []
+        self._live_session: str | None = None
 
         layout = QVBoxLayout(self)
 
@@ -141,6 +179,40 @@ class SweepPanel(QWidget):
         # the same thing, one of them a one-shot and one a loop, is a way to
         # end up with two sweeps arguing over the request budget.
         controls = QHBoxLayout()
+
+        # Which session, and which league. Both come from the outcome log, so
+        # they can only offer what has actually been traded; the live sweep is
+        # always the first entry and the default.
+        self.season = QComboBox()
+        self.season.addItem("All seasons", SEASON_ALL)
+        self.season.setToolTip(
+            "Which league's trades to list. Prices are only comparable within "
+            "one — a league rollover moves everything."
+        )
+        # Hidden until the log holds more than one league: until then it is a
+        # dropdown with a single choice.
+        self.season.setVisible(False)
+        self.season.currentIndexChanged.connect(lambda _: self._season_changed())
+        controls.addWidget(self.season)
+
+        self.session = QComboBox()
+        # Seeded here rather than left to the first log read, so the tab has a
+        # live selection — and therefore draws sweeps — before any whisper has
+        # ever been recorded.
+        self.session.addItem("This session", SESSION_LIVE)
+        self.session.addItem("All time", SESSION_ALL)
+        self.session.setToolTip(
+            "Which sitting to show.\n\n"
+            "A session starts when you press Find trades and ends when the last "
+            "opportunity has left the queue with nothing still running — so "
+            "pressing Find trades again mid-session continues it rather than "
+            "starting another.\n\n"
+            "This session lists what the last sweep found. The rest are read "
+            "back from the trade log, so they list whispers you sent."
+        )
+        self.session.currentIndexChanged.connect(lambda _: self._source_changed())
+        controls.addWidget(self.session)
+
         self.show_mode = QComboBox()
         for mode, label, tip in SHOW_MODES:
             self.show_mode.addItem(label, mode)
@@ -183,8 +255,10 @@ class SweepPanel(QWidget):
         self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setVisible(False)
         self.table.setSortingEnabled(True)
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        # Reorderable and resizable, and every column grows when the window does
+        # — not just the one that used to be stretched.
+        self.columns = flexible_columns(self.table)
+        self.table.setWordWrap(False)
         # Double-click is the fast path; the button is for discoverability.
         self.table.itemDoubleClicked.connect(lambda _: self.copy_selected())
         self.table.itemSelectionChanged.connect(self._selection_changed)
@@ -268,6 +342,193 @@ class SweepPanel(QWidget):
     def set_status(self, text: str) -> None:
         self.status.setText(text)
 
+    # --- sessions and seasons ----------------------------------------------
+
+    def set_history_path(self, path) -> None:
+        self._history_path = path
+        self.reload_history()
+
+    def set_live_session(self, session_id: str | None) -> None:
+        """Tell the tab which session is currently running, if any."""
+        self._live_session = session_id
+        self.reload_history()
+
+    def reload_history(self) -> None:
+        """Re-read the trade log and rebuild the two pickers.
+
+        Called whenever a whisper or a verdict is recorded, so a session that
+        has only just started appears in the list without a restart.
+        """
+        if self._history_path is None:
+            return
+        try:
+            self._history = read_attempts(self._history_path)
+        except OSError:
+            log.warning("could not read the trade log", exc_info=True)
+            self._history = []
+        self._rebuild_pickers()
+
+    def _rebuild_pickers(self) -> None:
+        """Refill the season and session combos, keeping the current choice.
+
+        Both are rebuilt wholesale rather than patched: a whisper can create a
+        season, a session, or neither, and working out which is more code than
+        rebuilding two short lists.
+        """
+        wanted_season = self.season.currentData() or SEASON_ALL
+        wanted_session = self.session.currentData() or SESSION_LIVE
+
+        blocked = self.season.blockSignals(True)
+        self.season.clear()
+        self.season.addItem("All seasons", SEASON_ALL)
+        for name in leagues(self._history):
+            self.season.addItem(name, name)
+        index = self.season.findData(wanted_season)
+        self.season.setCurrentIndex(max(0, index))
+        self.season.blockSignals(blocked)
+        self.season.setVisible(self.season.count() > 2)
+
+        season = self.season.currentData()
+        blocked = self.session.blockSignals(True)
+        self.session.clear()
+        self.session.addItem("This session", SESSION_LIVE)
+        self.session.addItem("All time", SESSION_ALL)
+        for s in sessions(self._history):
+            if season != SEASON_ALL and s.league != season:
+                continue
+            # The running session is already the first entry; listing it twice
+            # would offer the same rows under two names.
+            if s.id is not None and s.id == self._live_session:
+                continue
+            self.session.addItem(s.label, s.id or "")
+        index = self.session.findData(wanted_session)
+        self.session.setCurrentIndex(max(0, index))
+        self.session.blockSignals(blocked)
+        self._source_changed()
+
+    def _season_changed(self) -> None:
+        self._rebuild_pickers()
+
+    def _source_changed(self) -> None:
+        """Point the table at the live sweep or at the log, and redraw."""
+        live = self.session.currentData() == SESSION_LIVE
+        # Two columns carry a different fact in each mode, so they are renamed
+        # rather than left saying "Settle in" over a verdict. The columns
+        # themselves are shared because the other ten mean the same thing in
+        # both, and a second table would have to be kept in step with this one.
+        for column, title in (
+            (SETTLE_COLUMN, "Settle in" if live else "Result"),
+            (AGE_COLUMN, "Age" if live else "When"),
+        ):
+            self.table.horizontalHeaderItem(column).setText(title)
+        self.table.horizontalHeaderItem(SETTLE_COLUMN).setToolTip(
+            COLUMNS[SETTLE_COLUMN][1] if live else "What you reported back."
+        )
+        self.table.horizontalHeaderItem(AGE_COLUMN).setToolTip(
+            COLUMNS[AGE_COLUMN][1] if live else "When you copied the whisper."
+        )
+        if live:
+            self._populate()
+        else:
+            self._populate_history()
+
+    def _selected_attempts(self) -> list:
+        chosen = self.session.currentData()
+        season = self.season.currentData()
+        rows = [
+            a for a in self._history
+            if season == SEASON_ALL or a.league == season
+        ]
+        if chosen == SESSION_ALL:
+            return rows
+        return [a for a in rows if (a.session_id or "") == chosen]
+
+    def _populate_history(self) -> None:
+        """Fill the table from the outcome log rather than from a sweep.
+
+        A logged attempt is not a candidate — the listing it came from is long
+        gone, and there is nothing left to whisper — so the rows carry no
+        candidate and Copy stays disabled against them. What they do carry is
+        the whole point: what a trade you actually made was valued at.
+        """
+        attempts = self._selected_attempts()
+        self.table.setSortingEnabled(False)
+        self.table.setRowCount(len(attempts))
+        for row, a in enumerate(attempts):
+            band = NumericItem(symbol_for_name(a.band), 0)
+            band.setToolTip(tip_for_name(a.band))
+            band.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            band.setData(Qt.ItemDataRole.UserRole, None)
+            band.setData(_ATTEMPT_ROLE, a)
+            self.table.setItem(row, BAND_COLUMN, band)
+
+            name = TextItem(a.item_name)
+            if self._icons is not None:
+                icon = self._icons.icon(a.item_id)
+                if icon is not None:
+                    name.setIcon(icon)
+            if a.amended and a.asked_units:
+                name.setToolTip(
+                    f"Corrected after the fact: asked for {a.asked_units:g}, "
+                    f"traded {a.units:g}."
+                )
+            self.table.setItem(row, 1, name)
+            self.table.setItem(
+                row, 2,
+                NumericItem(_div(a.unit_price_divines), a.unit_price_divines),
+            )
+            self.table.setItem(row, 3, TextItem(_pay_label(a.pay_currency)))
+            self.table.setItem(row, 4, NumericItem(_div(a.ce_divines), a.ce_divines))
+            self.table.setItem(row, 5, NumericItem(f"{a.gap:.2f}x", a.gap))
+            self.table.setItem(row, 6, NumericItem(f"{a.units:g}", a.units))
+            self.table.setItem(
+                row, 7, NumericItem(_div(a.cost_divines), a.cost_divines)
+            )
+            profit = (
+                a.actual_profit_divines
+                if a.actual_profit_divines is not None
+                else a.expected_profit_divines
+            )
+            self.table.setItem(
+                row, PROFIT_COLUMN, NumericItem(f"+{_div(profit)}", profit)
+            )
+            # The verdict, where the live table shows the settlement currency.
+            # On a past session what happened is the column worth having, and
+            # the settlement currency is not recorded per attempt.
+            verdict = TextItem(_RESULT_LABEL.get(a.outcome, a.outcome.value))
+            verdict.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.table.setItem(row, SETTLE_COLUMN, verdict)
+            stamp = a.ts.astimezone()
+            when = NumericItem(stamp.strftime("%d %b %H:%M"), stamp.timestamp())
+            self.table.setItem(row, AGE_COLUMN, when)
+            self.table.setItem(
+                row, SELLER_COLUMN, TextItem(a.character or a.account)
+            )
+        self.table.setSortingEnabled(True)
+        self.columns.size_to_contents()
+        self._apply_filter()
+        self._describe_history(attempts)
+
+    def _describe_history(self, attempts: list) -> None:
+        fills = [a for a in attempts if a.outcome is Outcome.FILLED]
+        earned = sum(
+            a.actual_profit_divines
+            if a.actual_profit_divines is not None
+            else a.expected_profit_divines
+            for a in fills
+        )
+        if not attempts:
+            self.set_status(
+                "No whispers recorded for this selection. Sessions appear here "
+                "once you've messaged someone in them."
+            )
+            return
+        self.set_status(
+            f"{len(attempts)} whisper(s) sent  ·  {len(fills)} traded  ·  "
+            f"+{earned:.2f} div earned  ·  from the trade log, so Copy is off "
+            f"— these listings are gone"
+        )
+
     # --- content -----------------------------------------------------------
 
     def set_result(self, result, *, risk_appetite: float = 0.0) -> None:
@@ -296,7 +557,12 @@ class SweepPanel(QWidget):
         # for listings this sweep didn't see simply match nothing.
         self._rechecked.clear()
         self._last_copied = None
-        self._populate()
+        # Only redraws if the table is pointed at the live sweep; a user
+        # reviewing an old session should not have it yanked out from under them
+        # every ten minutes.
+        live = self.session.currentData() == SESSION_LIVE
+        if live:
+            self._populate()
         # After the rebuild, not before. Repopulating leaves the selection on
         # whatever row index survives, without necessarily emitting a selection
         # change — so a check run beforehand describes the previous table and
@@ -325,7 +591,8 @@ class SweepPanel(QWidget):
             parts.append("nothing worth trying this time")
         if result.errors:
             parts.append(f"{len(result.errors)} item(s) failed — see the Log tab")
-        self.set_status("  ·  ".join(parts))
+        if live:
+            self.set_status("  ·  ".join(parts))
 
     def _populate(self) -> None:
         # Sorting off while filling: Qt re-sorts on every insert otherwise, which
@@ -375,6 +642,7 @@ class SweepPanel(QWidget):
                 row, SELLER_COLUMN, TextItem(listing.character or listing.account)
             )
         self.table.setSortingEnabled(True)
+        self.columns.size_to_contents()
         self._apply_filter()
 
     def _apply_filter(self) -> None:
@@ -384,20 +652,45 @@ class SweepPanel(QWidget):
         mode = self.show_mode.currentData()
         shown = 0
         for row in range(self.table.rowCount()):
-            c = self._candidate_at(row)
-            if c is None:
+            item = self.table.item(row, BAND_COLUMN)
+            if item is None:
                 continue
-            hidden = False
-            if hide_ghosts and c.band is Band.GHOST:
-                hidden = True
-            elif not self._matches_mode(c, mode):
-                hidden = True
-            elif needle:
-                haystack = f"{c.item_name} {c.listing.character or ''} {c.listing.account}"
-                hidden = needle not in haystack.lower()
+            c = item.data(Qt.ItemDataRole.UserRole)
+            if c is not None:
+                hidden = self._hide_candidate(c, mode, hide_ghosts, needle)
+            else:
+                a = item.data(_ATTEMPT_ROLE)
+                if a is None:
+                    continue
+                hidden = self._hide_attempt(a, mode, hide_ghosts, needle)
             self.table.setRowHidden(row, hidden)
             shown += not hidden
         self._note_empty_filter(mode, shown)
+
+    def _hide_candidate(self, c, mode, hide_ghosts, needle) -> bool:
+        if hide_ghosts and c.band is Band.GHOST:
+            return True
+        if not self._matches_mode(c, mode):
+            return True
+        if needle:
+            haystack = f"{c.item_name} {c.listing.character or ''} {c.listing.account}"
+            return needle not in haystack.lower()
+        return False
+
+    def _hide_attempt(self, a, mode, hide_ghosts, needle) -> bool:
+        """The same filters against a logged whisper.
+
+        "Ones I messaged" matches everything here — the log only holds whispers
+        that were sent — so the mode that does any work is "Ones I bought".
+        """
+        if hide_ghosts and a.band == Band.GHOST.value:
+            return True
+        if mode == SHOW_BOUGHT and a.outcome is not Outcome.FILLED:
+            return True
+        if needle:
+            haystack = f"{a.item_name} {a.character or ''} {a.account}"
+            return needle not in haystack.lower()
+        return False
 
     def _matches_mode(self, candidate, mode: str) -> bool:
         if mode == SHOW_WHISPERED:
@@ -485,6 +778,7 @@ class SweepPanel(QWidget):
         from this table and read as permanently empty.
         """
         self._attempt_ids[candidate.key] = attempt_id
+        self.reload_history()
         if not any(c.key == candidate.key for c in self._candidates):
             # Whispered from the queue, and this sweep never surfaced it here —
             # add it so there is a row for the verdict to land on.
@@ -499,6 +793,25 @@ class SweepPanel(QWidget):
         """Record a verdict reached elsewhere, so the filters agree with it."""
         self._outcomes[candidate.key] = outcome
         self._apply_filter()
+        self.reload_history()
+
+    def note_revision(self, candidate) -> None:
+        """Swap in a candidate whose quantity was corrected after the whisper.
+
+        Matched on `key`, which is the listing rather than the quantity, so the
+        corrected trade lands on the row the original one is already on instead
+        of appearing beside it as a second listing that never existed.
+        """
+        replaced = False
+        for i, existing in enumerate(self._candidates):
+            if existing.key == candidate.key:
+                self._candidates[i] = candidate
+                replaced = True
+        if candidate.key in self._carried:
+            self._carried[candidate.key] = candidate
+        if replaced and self.session.currentData() == SESSION_LIVE:
+            self._populate()
+        self.reload_history()
 
     def set_settlement_currency(self, currency: str) -> None:
         """What sales are priced in, for the Settle in column.

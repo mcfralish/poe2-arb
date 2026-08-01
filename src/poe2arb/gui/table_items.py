@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import math
 
-from PySide6.QtCore import QEvent, QRect, Qt, QTimer
+from PySide6.QtCore import QEvent, QObject, QRect, Qt, QTimer
 from PySide6.QtGui import QColor, QCursor
 from PySide6.QtWidgets import (
     QApplication,
+    QHeaderView,
     QStyle,
     QStyledItemDelegate,
     QStyleOptionButton,
@@ -114,13 +115,22 @@ class RowHoverTable(QTableWidget):
         self.viewport().update()
 
     def watch(self, widget, row: int) -> None:
-        """Have `widget` and its children report hovers as belonging to `row`."""
+        """Have `widget` report hovers as belonging to `row` — but not its buttons.
+
+        The buttons deliberately report **no** row. Pointing at Accept should
+        light up Accept and nothing else: the row tint is there to say which
+        trade a click would act on, and once the cursor is on the button itself
+        that question is already answered, so a whole highlighted row is just
+        noise around the thing you are aiming at (reported from the field
+        2026-07-31). Hovering the gaps between the buttons still lights the row,
+        because there the pointer really is on the row rather than a control.
+        """
         from PySide6.QtWidgets import QAbstractButton
 
         widget._hover_row = row  # read back by eventFilter, which sees children
         widget.installEventFilter(self)
         for child in widget.findChildren(QAbstractButton):
-            child._hover_row = row
+            child._hover_row = -1
             child.installEventFilter(self)
 
     def eventFilter(self, watched, event) -> bool:  # noqa: N802 (Qt naming)
@@ -150,6 +160,173 @@ class RowHoverTable(QTableWidget):
             return
         if not inside:
             self.set_hover_row(-1)
+
+
+class ColumnLayout(QObject):
+    """Columns the user can reorder and resize, that still grow with the window.
+
+    Qt's header offers those three properties two at a time and never all three.
+    `ResizeToContents` sizes a column well and refuses to be dragged;
+    `Stretch` shares the width out and also refuses; `Interactive` is the only
+    draggable mode, and it pins every column at a fixed pixel width so widening
+    the window puts all the new space into one stretched column and leaves the
+    rest exactly as they were.
+
+    So growth is done here. Every widening hands each column a share of the new
+    space proportional to what it already has, which is what `Stretch` does,
+    while the sections stay `Interactive` and therefore draggable. Order and
+    widths both persist through `state()` / `restore()`.
+
+    Attached with `flexible_columns(table)` rather than constructed directly;
+    the table keeps a reference so the filter outlives the call.
+    """
+
+    MIN_WIDTH = 28
+
+    def __init__(self, table: QTableWidget, protected: tuple[int, ...] = ()):
+        super().__init__(table)
+        self.table = table
+        # Columns exempt from the initial squeeze — in practice the one holding
+        # a row's action buttons, which have a real width and are useless
+        # clipped. Everything else gives way to fit the window instead.
+        self._protected = set(protected)
+        self._last_width = 0
+        self._sized = False
+        header = table.horizontalHeader()
+        header.setSectionsMovable(True)
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setToolTip(
+            "Drag a heading to reorder the columns, or a divider to resize one."
+        )
+        # The viewport, not the table, and its event's own size rather than a
+        # width read back afterwards: a filter runs *before* the widget handles
+        # the event, so at that point the table is wider and the viewport inside
+        # it has not caught up yet.
+        table.viewport().installEventFilter(self)
+
+    # -- sizing
+
+    def size_to_contents(self) -> None:
+        """Fit every column to what is in it, then to the window. Once.
+
+        Called after the first rows arrive rather than at construction: an empty
+        table sizes every column to its heading, which is where "Item" ended up
+        narrower than "Seller".
+
+        The squeeze afterwards is what `Stretch` used to do for free. Sizing to
+        contents alone overflows — an item name runs to "Zarokh's Reliquary Key:
+        Against the Darkness" — and the columns that fell off the right-hand
+        edge were the actions, which is the half of the row you click.
+        """
+        if self._sized or not self.table.rowCount():
+            return
+        self._sized = True
+        self.table.resizeColumnsToContents()
+        width = self.table.viewport().width()
+        self._last_width = width
+        self._squeeze(width)
+
+    def _squeeze(self, width: int) -> None:
+        """Shrink the unprotected columns proportionally until the row fits."""
+        header = self.table.horizontalHeader()
+        visible = [i for i in range(header.count()) if not header.isSectionHidden(i)]
+        total = sum(header.sectionSize(i) for i in visible)
+        excess = total - width
+        if excess <= 0 or width <= 0:
+            return
+        givers = [i for i in visible if i not in self._protected]
+        available = sum(
+            max(0, header.sectionSize(i) - self.MIN_WIDTH) for i in givers
+        )
+        if available <= 0:
+            return
+        take = min(excess, available)
+        for i in givers:
+            slack = max(0, header.sectionSize(i) - self.MIN_WIDTH)
+            header.resizeSection(
+                i, header.sectionSize(i) - round(take * slack / available)
+            )
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 (Qt naming)
+        try:
+            if watched is self.table.viewport() and event.type() == QEvent.Type.Resize:
+                self._grow(event.size().width())
+        except (RuntimeError, AttributeError):
+            # The table, or this object's C++ half, went away underneath us
+            # while the event was in flight. Only happens during teardown, and
+            # only Qt is left to care about the answer.
+            return False
+        return super().eventFilter(watched, event)
+
+    def _grow(self, width: int) -> None:
+        if not self._sized or width <= 0:
+            self._last_width = max(self._last_width, width)
+            return
+        delta = width - self._last_width
+        self._last_width = width
+        if delta == 0:
+            return
+        header = self.table.horizontalHeader()
+        visible = [
+            i for i in range(header.count()) if not header.isSectionHidden(i)
+        ]
+        # A protected column shares in the growth but never in the shrinking.
+        # Its content is a row of buttons at a fixed size, so taking width off
+        # it does not make it smaller — it clips the last button off the end,
+        # and an action you cannot reach is worse than one you have to scroll to.
+        if delta < 0:
+            visible = [i for i in visible if i not in self._protected] or visible
+        total = sum(header.sectionSize(i) for i in visible)
+        if total <= 0:
+            return
+        # Shrinking is allowed to run the columns down to MIN_WIDTH and no
+        # further; past that the table scrolls horizontally, which is better
+        # than columns too narrow to read.
+        spent = 0
+        for i in visible[:-1]:
+            share = round(delta * header.sectionSize(i) / total)
+            header.resizeSection(i, max(self.MIN_WIDTH, header.sectionSize(i) + share))
+            spent += share
+        last = visible[-1]
+        header.resizeSection(
+            last, max(self.MIN_WIDTH, header.sectionSize(last) + delta - spent)
+        )
+
+    # -- persistence
+
+    def state(self) -> str:
+        """Order and widths as text, for ui-state.json."""
+        import base64
+
+        return base64.b64encode(bytes(self.table.horizontalHeader().saveState())).decode("ascii")
+
+    def restore(self, blob: object) -> bool:
+        """Put back a saved arrangement. Anything unreadable is ignored."""
+        import base64
+
+        if not isinstance(blob, str) or not blob:
+            return False
+        try:
+            data = base64.b64decode(blob.encode("ascii"), validate=True)
+        except (ValueError, UnicodeEncodeError):
+            return False
+        if not self.table.horizontalHeader().restoreState(data):
+            return False
+        # A restored arrangement is already sized, so the first populate must
+        # not overwrite it with resizeColumnsToContents.
+        self._sized = True
+        self._last_width = self.table.viewport().width()
+        return True
+
+
+def flexible_columns(
+    table: QTableWidget, protected: tuple[int, ...] = ()
+) -> ColumnLayout:
+    """Give `table` reorderable, resizable, proportionally growing columns."""
+    layout = ColumnLayout(table, protected)
+    table._column_layout = layout  # keeps the filter alive with the table
+    return layout
 
 
 class CentredCheckDelegate(QStyledItemDelegate):

@@ -1,10 +1,13 @@
-"""Global hotkey parsing and registration behaviour.
+"""Global hotkey parsing, registration and delivery.
 
-Registration itself is Windows-only and untestable here, so these cover the
-parsing rules and the guarantee that everything degrades quietly elsewhere.
+The real Win32 calls are Windows-only, so `fake_win32` stands in for them —
+enough of one to run the pump thread end to end, because the part that has
+failed twice in the field is delivery rather than parsing.
 """
 
 from __future__ import annotations
+
+from types import SimpleNamespace
 
 import pytest
 
@@ -103,23 +106,67 @@ def test_a_bad_binding_reports_rather_than_raises(qapp, monkeypatch):
     assert seen and "unsupported key" in seen[0]
 
 
-def test_a_taken_combination_reports_which_one(qapp, monkeypatch):
-    """The usual failure: another program already owns the keys."""
+class FakeMsg:
+    """Stands in for wintypes.MSG, which only exists on Windows."""
+
+    def __init__(self):
+        self.message = 0
+        self.wParam = 0
+
+
+def fake_win32(monkeypatch, *, registers: bool):
+    """Stand in for the Win32 calls the pump thread makes.
+
+    The hotkey now owns a thread that registers the key and runs its own
+    `GetMessage` loop — see hotkey.py for why Qt is no longer in that path — so
+    faking `RegisterHotKey` alone is not enough to exercise it.
+    """
     import ctypes
+    import threading
 
     monkeypatch.setattr("poe2arb.gui.hotkey.sys.platform", "win32")
 
+    quit_now = threading.Event()
+
     class FakeUser32:
+        GetMessageW = staticmethod(lambda *a: None)  # replaced below
+
         def RegisterHotKey(self, *a):  # noqa: N802
-            return 0
+            return 1 if registers else 0
 
         def UnregisterHotKey(self, *a):  # noqa: N802
             return 1
 
-    class FakeWindll:
-        user32 = FakeUser32()
+        def PostThreadMessageW(self, *a):  # noqa: N802
+            quit_now.set()
+            return 1
 
-    monkeypatch.setattr(ctypes, "windll", FakeWindll(), raising=False)
+    user32 = FakeUser32()
+
+    class Getter:
+        restype = None
+
+        def __call__(self, *a):
+            quit_now.wait(5.0)
+            return 0          # WM_QUIT: the loop is over
+
+    user32.GetMessageW = Getter()
+
+    class FakeWindll:
+        pass
+
+    windll = FakeWindll()
+    windll.user32 = user32
+    windll.kernel32 = SimpleNamespace(GetCurrentThreadId=lambda: 4242)
+    monkeypatch.setattr(ctypes, "windll", windll, raising=False)
+    monkeypatch.setattr("poe2arb.gui.hotkey.MSG", FakeMsg, raising=False)
+    monkeypatch.setattr(ctypes, "byref", lambda x: x, raising=False)
+    return quit_now
+
+
+def test_a_taken_combination_reports_which_one(qapp, monkeypatch):
+    """The usual failure: another program already owns the keys."""
+    fake_win32(monkeypatch, registers=False)
     seen = []
     hk = GlobalHotkey()
     hk.error.connect(seen.append)
@@ -129,26 +176,48 @@ def test_a_taken_combination_reports_which_one(qapp, monkeypatch):
 
 
 def test_a_successful_registration_reports_its_binding(qapp, monkeypatch):
-    import ctypes
-
-    monkeypatch.setattr("poe2arb.gui.hotkey.sys.platform", "win32")
-
-    class FakeUser32:
-        def RegisterHotKey(self, *a):  # noqa: N802
-            return 1
-
-        def UnregisterHotKey(self, *a):  # noqa: N802
-            return 1
-
-    class FakeWindll:
-        user32 = FakeUser32()
-
-    monkeypatch.setattr(ctypes, "windll", FakeWindll(), raising=False)
+    fake_win32(monkeypatch, registers=True)
     hk = GlobalHotkey()
     assert hk.register("ctrl+alt+d") is True
     assert hk.active and hk.binding == "ctrl+alt+d"
     hk.unregister()
     assert not hk.active and hk.binding is None
+
+
+def test_the_pump_reports_a_press_on_the_gui_thread(qapp, monkeypatch):
+    """The whole point: WM_HOTKEY reaches `pressed` without going through Qt.
+
+    Two shipped releases registered the key successfully and then dropped every
+    press, so this asserts the delivery rather than the registration.
+    """
+    from poe2arb.gui.hotkey import HOTKEY_ID, WM_HOTKEY, _HotkeyPump
+
+    fake_win32(monkeypatch, registers=True)
+    messages = [
+        (WM_HOTKEY, HOTKEY_ID),
+        (0x0100, 0),          # WM_KEYDOWN: not ours
+        (WM_HOTKEY, HOTKEY_ID),
+    ]
+
+    import ctypes
+
+    def get_message(buf, *_a):
+        if not messages:
+            return 0
+        buf.message, buf.wParam = messages.pop(0)
+        return 1
+
+    ctypes.windll.user32.GetMessageW = get_message
+    monkeypatch.setattr(ctypes, "byref", lambda x: x, raising=False)
+
+    seen = []
+    pump = _HotkeyPump(0, 0)
+    pump.pressed.connect(lambda: seen.append(1))
+    pump.start()
+    pump.wait(5000)
+    qapp.processEvents()
+    assert pump.presses == 2
+    assert seen == [1, 1]
 
 
 # --- the Settings dialog ---------------------------------------------------

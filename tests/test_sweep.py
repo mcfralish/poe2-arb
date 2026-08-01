@@ -224,6 +224,36 @@ def test_progress_names_the_item_being_fetched(snapshot):
     assert seen and all(what in names for what in seen)
 
 
+def test_candidates_are_reported_as_each_item_is_priced(snapshot):
+    """A sweep is fifteen minutes long; holding the results to the end meant a
+    long silence and then every offer at once (reported from the field
+    2026-07-31)."""
+    ggg = FakeGgg({
+        "core-destabiliser": [listing("core-destabiliser", pay=2.0)],
+        "omen-of-light": [listing("omen-of-light", pay=3.0, stock=4.0)],
+    })
+    batches = []
+    result = run_sweep(
+        cfg(), ggg=ggg, snapshot=snapshot, on_candidates=batches.append,
+    )
+    # One call per item that produced anything, and never an empty one.
+    assert len(batches) == 2
+    assert all(batch for batch in batches)
+    streamed = [c.key for batch in batches for c in batch]
+    assert sorted(streamed) == sorted(c.key for c in result.candidates)
+
+
+def test_a_failed_item_streams_nothing_and_does_not_end_the_sweep(snapshot):
+    ggg = FakeGgg(
+        {"core-destabiliser": [listing("core-destabiliser", pay=2.0)]},
+        fail={"omen-of-light"},
+    )
+    batches = []
+    result = run_sweep(cfg(), ggg=ggg, snapshot=snapshot, on_candidates=batches.append)
+    assert "omen-of-light" in result.errors
+    assert len(batches) == 1
+
+
 def test_injected_clients_are_not_closed_by_the_sweep(snapshot):
     """The caller owns what the caller passed in."""
     ggg = FakeGgg()

@@ -342,7 +342,7 @@ def test_the_status_line_reports_both_sources(window):
 
 # --- the hotkey acts on something whenever something is takeable ------------
 
-def _queued(window, *, chars=("A",)):
+def _queued(window, *, chars=("A",), stock=1.0):
     """A window with real candidates in its queue, offered and listed."""
     from datetime import datetime, timedelta, timezone
 
@@ -353,7 +353,7 @@ def _queued(window, *, chars=("A",)):
     for n, char in enumerate(chars):
         listing = Listing(
             item_id="omen", account=f"{char}#1", character=char,
-            pay_amount=11.0 - n * 0.5, get_amount=1.0, stock=1.0, indexed=t0,
+            pay_amount=11.0 - n * 0.5, get_amount=1.0, stock=stock, indexed=t0,
             whisper=f"@{char} buy {{0}} for {{1}}",
             item_whisper="{0} Thing", pay_whisper="{0} Coin",
         )
@@ -458,3 +458,111 @@ def test_a_saved_collapsed_split_is_not_restored(window, tmp_path):
     save_ui_state(ui_state_path(cache), {"ops_split": [0, 476]})
     w = window()
     assert min(w.ops_split.sizes()) > 0
+
+
+# --- sessions ---------------------------------------------------------------
+
+def test_a_session_starts_with_find_trades_and_stamps_every_whisper(window, monkeypatch):
+    from poe2arb.outcomes import read_attempts
+
+    w = window()
+    monkeypatch.setattr(w, "start_sweep", lambda: None)
+    w.sweep_action.setChecked(True)
+    assert w.session.active
+    session_id = w.session.id
+
+    _queued(w, chars=("A",))
+    w._queue_take(w.trade_queue.offered.id)
+    [logged] = read_attempts(w.cfg.outcomes_path)
+    assert logged.session_id == session_id
+
+
+def test_the_session_outlives_the_queue_while_still_looking(window, monkeypatch):
+    """Between sweeps the queue is routinely empty; that is not the end."""
+    w = window()
+    monkeypatch.setattr(w, "start_sweep", lambda: None)
+    w.sweep_action.setChecked(True)
+    started = w.session.id
+    w._queue_tick()
+    assert w.session.id == started
+
+
+def test_it_ends_once_nothing_is_running_and_nothing_is_left(window, monkeypatch):
+    w = window()
+    monkeypatch.setattr(w, "start_sweep", lambda: None)
+    w.sweep_action.setChecked(True)
+    started = w.session.id
+    _queued(w, chars=("A",))
+
+    w.sweep_action.setChecked(False)
+    w._queue_tick()
+    assert w.session.id == started        # a trade is still on offer
+
+    w._queue_dismiss(w.trade_queue.offered.id)
+    w._queue_tick()
+    assert not w.session.active
+
+    monkeypatch.setattr(w, "start_sweep", lambda: None)
+    w.sweep_action.setChecked(True)
+    assert w.session.id != started
+
+
+# --- opportunities arrive as they are found ---------------------------------
+
+def test_candidates_are_queued_before_the_sweep_finishes(window, monkeypatch):
+    """It used to be silent for fifteen minutes and then flood the queue."""
+    w = window()
+    monkeypatch.setattr(w, "start_sweep", lambda: None)
+    w.sweep_action.setChecked(True)
+    t0 = _queued(w, chars=())          # nothing queued, just a timestamp
+    from poe2arb.listings import Listing, build_candidates
+
+    listing = Listing(
+        item_id="omen", account="Streamer#1", character="Streamer",
+        pay_amount=11.0, get_amount=1.0, stock=1.0, indexed=t0,
+        whisper="@Streamer buy {0} for {1}",
+        item_whisper="{0} Thing", pay_whisper="{0} Coin",
+    )
+    cands = build_candidates(
+        [listing], {"omen": 12.0, "divine": 1.0}, {"omen": "Omen of Light"},
+        min_gap=1.05, max_gap=1.5, sale_unit_divines=0.0023,
+    )
+    w._candidates_found(cands)
+    assert w.trade_queue.outstanding == 1
+
+
+def test_nothing_is_queued_while_the_toggle_is_off(window):
+    from poe2arb.listings import Listing, build_candidates
+
+    w = window()
+    listing = Listing(
+        item_id="omen", account="Streamer#1", character="Streamer",
+        pay_amount=11.0, get_amount=1.0, stock=1.0,
+        whisper="@Streamer buy {0} for {1}",
+        item_whisper="{0} Thing", pay_whisper="{0} Coin",
+    )
+    w._candidates_found(build_candidates(
+        [listing], {"omen": 12.0, "divine": 1.0}, {"omen": "Omen of Light"},
+        min_gap=1.05, max_gap=1.5, sale_unit_divines=0.0023,
+    ))
+    assert w.trade_queue.outstanding == 0
+
+
+# --- correcting a trade after the fact --------------------------------------
+
+def test_revising_a_trade_rewrites_the_logged_quantity(window):
+    """Whispered for 18, the seller had 3 (reported from the field 2026-07-31)."""
+    from poe2arb.outcomes import read_attempts
+
+    w = window()
+    _queued(w, chars=("A",), stock=18.0)
+    live = w.trade_queue.offered
+    w._queue_take(live.id)
+    assert live.candidate.plan.units == 18.0
+
+    w._queue_revise(live.id, 3.0)
+    [logged] = read_attempts(w.cfg.outcomes_path)
+    assert logged.units == 3.0
+    assert logged.asked_units == 18.0
+    assert logged.amended is True
+    assert w.trade_queue.get(live.id).candidate.plan.units == 3.0

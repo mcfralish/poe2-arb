@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -15,6 +16,8 @@ from poe2arb.listings import (
     fill_weight,
     plan_trade,
     rank_candidates,
+    replan_units,
+    smallest_lot,
     whisper_text,
 )
 
@@ -90,9 +93,26 @@ def test_bankroll_caps_the_trade():
     assert plan.cost_divines == 9.0
 
 
-def test_bankroll_below_one_lot_yields_nothing():
-    assert plan_trade(
+def test_bankroll_buys_part_of_an_advertised_lot():
+    """A 10-for-30 listing on a 9-divine bankroll is 3 items for 9, not nothing.
+
+    The ratio divides: 30:10 is 3:1 in lowest terms, and the trade site lets you
+    ask along it. Asked for from the field 2026-07-31 — the old behaviour hid
+    every listing bigger than the bankroll rather than asking for less of it.
+    """
+    plan = plan_trade(
         pay_amount=30.0, get_amount=10.0, stock=10.0, ce_divines=5.0, bankroll_units=9.0
+    )
+    assert plan is not None
+    assert plan.units == 3.0
+    assert plan.pay_units == 9.0
+    assert plan.cost_divines == 9.0
+
+
+def test_indivisible_ratios_still_trade_whole():
+    """3-for-7 divides at nothing smaller: partial currency cannot be traded."""
+    assert plan_trade(
+        pay_amount=7.0, get_amount=3.0, stock=9.0, ce_divines=5.0, bankroll_units=6.0
     ) is None
 
 
@@ -358,10 +378,11 @@ def test_whisper_quotes_the_price_in_the_sellers_currency():
         max_gap=1.5,
         sale_unit_divines=0.00231634,
     )
-    assert c.plan.lots == 2
+    assert c.plan.units == 8.0
+    assert c.plan.pay_units == 2412.0
     text = whisper_text(c)
     assert "8 Divine Orb" in text
-    assert "2412 Exalted Orb" in text     # 2 lots x 1206 exalted
+    assert "2412 Exalted Orb" in text     # 1206:4 reduces to 603:2, so four lots
     assert "5.58" not in text             # the divine-denominated cost
 
 
@@ -582,3 +603,63 @@ class TestWhatTheWhisperOffered:
             min_gap=1.05, max_gap=1.5,
         )
         assert c.settle_currency == "divine"
+
+
+# --- sub-lot quantities and after-the-fact corrections ----------------------
+
+
+def test_smallest_lot_reduces_to_lowest_terms():
+    assert smallest_lot(100.0, 10.0) == (10.0, 1.0)
+    assert smallest_lot(7.0, 3.0) == (7.0, 3.0)
+    # Non-integer amounts are left exactly as they came.
+    assert smallest_lot(2.5, 1.0) == (2.5, 1.0)
+
+
+def test_the_search_window_still_finds_the_best_quantity():
+    """The tail-only search must agree with checking every k."""
+    for stock in (5.0, 40.0, 137.0):
+        for ce in (2.5, 3.79, 11.0):
+            plan = plan_trade(
+                pay_amount=2.0, get_amount=1.0, stock=stock, ce_divines=ce
+            )
+            brute = max(
+                (
+                    __import__("math").floor(k * ce) - k * 2.0
+                    for k in range(1, int(stock) + 1)
+                ),
+                default=0.0,
+            )
+            assert plan is not None
+            assert plan.profit_divines == pytest.approx(brute)
+
+
+def test_replan_units_shrinks_a_trade_to_what_was_actually_bought():
+    """The field case: whispered for 18, the seller only had 3."""
+    [c] = build_candidates(
+        [listing(pay_amount=1.0, get_amount=1.0, stock=18.0)],
+        {"core-destabiliser": 3.79},
+        {},
+        min_gap=1.05,
+        max_gap=1.5,
+    )
+    assert c.plan.units == 18.0
+    fewer = replan_units(c, 3.0)
+    assert fewer.plan.units == 3.0
+    assert fewer.plan.pay_units == 3.0
+    assert fewer.plan.cost_divines == 3.0
+    assert fewer.profit_divines == pytest.approx(math.floor(3 * 3.79) - 3.0)
+    # The listing itself is untouched — only the quantity asked for changed.
+    assert fewer.listing is c.listing
+    assert "3 Core Destabiliser" in whisper_text(fewer)
+
+
+def test_replan_units_clamps_to_the_original_ask():
+    [c] = build_candidates(
+        [listing(pay_amount=1.0, get_amount=1.0, stock=4.0)],
+        {"core-destabiliser": 3.79},
+        {},
+        min_gap=1.05,
+        max_gap=1.5,
+    )
+    assert replan_units(c, 99.0).plan.units == c.plan.units
+    assert replan_units(c, 0.0).plan.units == 1.0

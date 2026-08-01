@@ -22,10 +22,11 @@ python tools/dump_org_trees.py --only Runes   # regenerate OrgTrees reference fi
 
 **Verifying GUI work without a display** — set `QT_QPA_PLATFORM=offscreen`, construct the
 widget, `app.processEvents()`, then `widget.grab().save(path)` and read the image. This has
-caught eight real bugs the test suite did not, including a startup `NameError`, stale cell
-widgets painting over other rows, a whisper quoting the wrong currency, and
-`MarketPanel.set_exclusions` never syncing the table's ticks. Use it rather than assuming a
-widget renders correctly because it constructs.
+caught ten real bugs the test suite did not, including a startup `NameError`, stale cell
+widgets painting over other rows, a whisper quoting the wrong currency,
+`MarketPanel.set_exclusions` never syncing the table's ticks, and — in 0.7.0, with a green
+suite — half the Trades columns falling off the right-hand edge of the window. Use it
+rather than assuming a widget renders correctly because it constructs.
 
 Traps when driving panels from a script: `MarketPanel` needs `set_universe(...)` **and**
 `render(names=..., values=..., volumes=...)` before any row exists; a `QTableWidget`
@@ -35,6 +36,16 @@ collapsible pane to zero *regardless of its minimum size*, which is saved to `ui
 and reproduced on the next launch. Both splitters on the Opportunities tab therefore set
 `setChildrenCollapsible(False)`, and `_restore_ui_state` rejects a saved zero rather than
 clamping it.
+
+**Columns on Opportunities and Trades go through `table_items.flexible_columns`.** Qt's
+header offers reorderable, resizable and growing-with-the-window two at a time and never
+all three, so `ColumnLayout` keeps the sections `Interactive` and does the growth itself:
+size to contents once, squeeze that to fit the window, then hand out each later resize in
+proportion. Two things it gets right that are easy to undo — the resize filter is on the
+**viewport** and reads `event.size()` (a filter runs before the widget handles the event,
+so the viewport's own width is still the old one), and the action column is exempt from
+shrinking, because a row of buttons squeezed does not get smaller, it gets clipped. Order
+and widths persist through `saveState` in `ui-state.json`.
 
 Releases are tag-driven: push `vX.Y.Z` and `.github/workflows/release.yml` runs the tests,
 builds the Windows exe with PyInstaller, and cuts release notes from `CHANGELOG.md`. The
@@ -90,6 +101,14 @@ settlement problem) → `client.GggExchangeClient.fetch_listings()` per item, pa
 `listings.build_candidates()` → `listings.rank_candidates()` → `trade_queue` offers them one
 at a time → `hotkey` puts a whisper on the clipboard → `outcomes.jsonl` records what happened.
 
+**Candidates are emitted per item, not per sweep** (`run_sweep(on_candidates=...)`). A sweep
+is ~15 minutes; batching to the end meant silence followed by every offer at once, and made
+the first item's listings a quarter of an hour stale before anyone saw them. `session.py`
+brackets the whole loop: a session starts on *Find trades* and ends only when nothing is
+running **and** nothing is outstanding, so pressing the toggle again mid-session continues
+it. Its id and the league go on every attempt — neither is recoverable from the log
+afterwards, and league names rotate.
+
 Two results from field tests are load-bearing in `listings.py` and must not be re-derived
 (full evidence in [docs/FINDINGS.md](docs/FINDINGS.md), "Negative results"):
 
@@ -100,7 +119,13 @@ Two results from field tests are load-bearing in `listings.py` and must not be r
    more **per whisper sent** — but `FILL_PRIOR[GHOST] = 0.0` is now known to be wrong, and
    ghosts earned **71% of the one profitable session's divines** on a fat tail. Do not
    re-assert that big gaps never fill, and do not hide them.
-2. **Settlement denomination decides the haircut.** Partial currency can't be traded, so
+2. **A listing is a ratio, not a bundle.** `listings.smallest_lot` reduces
+   `pay_amount:get_amount` to lowest terms, so "10 for 100 divine" is buyable 1-at-10 and a
+   20-divine bankroll asks for 2 rather than being shown nothing. The floor on how finely
+   it divides is the same one as below: partial currency cannot be traded, so 7:3 divides
+   at nothing smaller. `TradePlan.pay_units` is what the whisper offers;
+   `plan.lots × listing.pay_amount` is **wrong** now that a lot is the reduced one.
+3. **Settlement denomination decides the haircut.** Partial currency can't be traded, so
    proceeds floor to a whole unit of the settlement currency. Exalted is ~432× finer than
    divine; on the one trade that filled, settling in exalted turned 1.00 divine of profit
    into 1.79. Profit floors to `sale_unit_divines` — never to a whole divine, never unfloored.
@@ -126,8 +151,8 @@ economy and whispered sellers who could not answer.
 ### Layering
 
 The core package is **Qt-free on purpose** — `trade_queue`, `rate_limit`, `outcomes`,
-`icons`, `listings` and `install` all take injected clocks/clients so they test without a
-display or a network. Keep it that way; the GUI wraps them, they never import from `gui/`.
+`session`, `icons`, `listings` and `install` all take injected clocks/clients so they test
+without a display or a network. Keep it that way; the GUI wraps them, they never import from `gui/`.
 `version.py` sits at package root rather than under `gui/` because the installer needs it
 and the installer must not depend on the GUI layer.
 

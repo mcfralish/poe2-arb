@@ -562,3 +562,103 @@ def test_an_unknown_band_still_prints_something(qapp):
 
     assert bands.symbol_for_name("something-retired") == "something-retired"
     assert bands.tip_for_name("something-retired") == ""
+
+
+# --- reviewing a past session ----------------------------------------------
+
+def _log(path, rows):
+    import json
+
+    path.write_text(
+        "\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8"
+    )
+
+
+def _attempt(n, session, league, outcome, ts=None):
+    return [
+        {
+            "kind": "attempt", "id": f"id{n}", "ts": (ts or NOW).isoformat(),
+            "session_id": session, "league": league, "item_id": "omen",
+            "item_name": "Omen of Light", "account": f"seller{n}#1",
+            "character": f"Seller{n}", "pay_currency": "exalted",
+            "unit_price_divines": 2.4, "ce_divines": 3.1, "gap": 1.29,
+            "band": "plausible", "lots": 2, "units": 2.0, "cost_divines": 4.8,
+            "expected_profit_divines": 1.4, "listing_age_s": 3600.0,
+            "afk": False, "outcome": "pending",
+        },
+        {"kind": "outcome", "id": f"id{n}", "ts": (ts or NOW).isoformat(),
+         "outcome": outcome},
+    ]
+
+
+def test_the_session_picker_offers_what_the_log_holds(qapp, tmp_path):
+    path = tmp_path / "outcomes.jsonl"
+    _log(path, _attempt(0, "s1", "Abyssal", "filled") + _attempt(1, "s2", "Dawn", "no_reply"))
+    p = SweepPanel()
+    p.set_history_path(path)
+    qapp.processEvents()
+    assert [p.session.itemData(i) for i in range(2)] == ["live", "all"]
+    assert p.session.count() == 4          # live, all time, and the two sessions
+    # Two leagues, so the season picker is worth showing.
+    assert p.season.isVisibleTo(p) or p.season.count() == 3
+
+
+def test_a_past_session_lists_its_whispers_from_the_log(qapp, tmp_path):
+    path = tmp_path / "outcomes.jsonl"
+    _log(path, _attempt(0, "s1", "Abyssal", "filled") + _attempt(1, "s2", "Dawn", "no_reply"))
+    p = SweepPanel()
+    p.set_history_path(path)
+    p.session.setCurrentIndex(p.session.findData("s1"))
+    qapp.processEvents()
+    assert p.table.rowCount() == 1
+    assert p.table.item(0, SELLER_COLUMN).text() == "Seller0"
+    # The Settle in column carries the verdict on a past session.
+    assert p.table.item(0, 9).text() == "traded"
+    # Nothing to copy: the listing is long gone.
+    assert p.selected_candidate() is None
+
+
+def test_the_season_narrows_the_sessions_on_offer(qapp, tmp_path):
+    path = tmp_path / "outcomes.jsonl"
+    _log(path, _attempt(0, "s1", "Abyssal", "filled") + _attempt(1, "s2", "Dawn", "no_reply"))
+    p = SweepPanel()
+    p.set_history_path(path)
+    p.season.setCurrentIndex(p.season.findData("Dawn"))
+    qapp.processEvents()
+    ids = [p.session.itemData(i) for i in range(p.session.count())]
+    assert "s2" in ids and "s1" not in ids
+
+
+def test_all_time_spans_every_session(qapp, tmp_path):
+    path = tmp_path / "outcomes.jsonl"
+    _log(path, _attempt(0, "s1", "Abyssal", "filled") + _attempt(1, "s2", "Dawn", "no_reply"))
+    p = SweepPanel()
+    p.set_history_path(path)
+    p.session.setCurrentIndex(p.session.findData("all"))
+    qapp.processEvents()
+    assert p.table.rowCount() == 2
+
+
+def test_the_running_session_is_not_listed_twice(qapp, tmp_path):
+    """It is already the first entry, under the name "This session"."""
+    path = tmp_path / "outcomes.jsonl"
+    _log(path, _attempt(0, "live1", "Abyssal", "filled"))
+    p = SweepPanel()
+    p.set_live_session("live1")
+    p.set_history_path(path)
+    qapp.processEvents()
+    assert [p.session.itemData(i) for i in range(p.session.count())] == ["live", "all"]
+
+
+def test_a_sweep_does_not_yank_a_history_view_away(qapp, tmp_path):
+    """The table refreshes every ten minutes; a session being reviewed must not."""
+    path = tmp_path / "outcomes.jsonl"
+    _log(path, _attempt(0, "s1", "Abyssal", "filled"))
+    p = SweepPanel()
+    p.set_history_path(path)
+    p.session.setCurrentIndex(p.session.findData("s1"))
+    qapp.processEvents()
+    p.set_result(result_from([listing("omen", 11.0, char="Fresh")]))
+    qapp.processEvents()
+    assert p.table.rowCount() == 1
+    assert p.table.item(0, SELLER_COLUMN).text() == "Seller0"

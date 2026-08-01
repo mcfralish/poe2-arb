@@ -21,10 +21,10 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QSlider,
+    QVBoxLayout,
     QWidget,
 )
 
-from ..format import fmt_amount
 from .theme import muted_color
 
 # The two currencies sellers actually quote in. Anything else is unconstrained.
@@ -54,7 +54,26 @@ class BankrollBar(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        layout = QHBoxLayout(self)
+        # Two rows, and normally only the first has anything in it. The money
+        # controls and the long-shots slider do not both fit at the window's
+        # minimum width, and something has to give: overflowing clipped the
+        # right-hand end of the row, and letting the spin boxes shrink truncated
+        # "no limit (div)" to "no limit (di…" — which is exactly the state the
+        # denomination in that string exists to disambiguate (reported from the
+        # field 2026-07-31). So the slider drops to its own line instead. See
+        # `_reflow`.
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(2)
+        self._top = QHBoxLayout()
+        self._top.setContentsMargins(0, 0, 0, 0)
+        self._bottom = QHBoxLayout()
+        self._bottom.setContentsMargins(0, 0, 0, 0)
+        outer.addLayout(self._top)
+        outer.addLayout(self._bottom)
+
+        self.money = QWidget()
+        layout = QHBoxLayout(self.money)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(QLabel("Bankroll:"))
 
@@ -71,11 +90,6 @@ class BankrollBar(QWidget):
             # 2026-07-30). Naming the denomination keeps them distinguishable in
             # exactly the state where the number can't do it.
             spin.setSpecialValueText(f"no limit ({suffix})")
-            # Wide enough for that string outright. Left to its own sizeHint the
-            # box measures the numeric range and elides the longer special text.
-            spin.setMinimumWidth(
-                _fits(spin, f"no limit ({suffix})", f"100000000 {suffix}", padding=44)
-            )
             spin.setToolTip(
                 f"How many {currency} orbs you have to spend.\n\n"
                 f"This only limits listings that ask to be paid in {currency} — "
@@ -88,22 +102,12 @@ class BankrollBar(QWidget):
             self.spins[currency] = spin
             layout.addWidget(spin)
 
-        # What is already promised to whispers still awaiting an answer. Shown
-        # because the pots above are what you *had*: with 500 exalted you could
-        # accept four separate 400-exalted trades, each individually affordable
-        # (reported from the field 2026-07-31). Hidden when nothing is
-        # outstanding, which is most of the time.
-        self.committed_label = QLabel()
-        self.committed_label.setStyleSheet(f"color: {muted_color(self)};")
-        self.committed_label.setToolTip(
-            "Currency promised to whispers you're still waiting on. It's held "
-            "back from the trades you're offered until you say what happened, "
-            "so you can't commit the same orbs twice."
-        )
-        self.committed_label.hide()
-        layout.addWidget(self.committed_label)
+        # No "committed" readout. v0.6.0 held outstanding whispers back from the
+        # bankroll and showed what they had claimed; reverted 2026-07-31 because
+        # at a ~2-21% fill rate the money is almost never actually spent, so the
+        # holdback suppressed more real trades than it prevented double-spends.
 
-        layout.addSpacing(12)
+        layout.addSpacing(10)
         layout.addWidget(QLabel("Settle in:"))
         # Here rather than in Settings because it changes every Profit figure
         # in the table below by a large factor — exalted is ~432x finer than
@@ -126,14 +130,15 @@ class BankrollBar(QWidget):
         )
         layout.addWidget(self.settlement)
 
-        layout.addStretch(1)
-
-        layout.addWidget(QLabel("Long shots:"))
+        self.long_shots = QWidget()
+        shots = QHBoxLayout(self.long_shots)
+        shots.setContentsMargins(0, 0, 0, 0)
+        shots.addWidget(QLabel("Long shots:"))
         # A slider, not a number: this is a taste, and no one has a considered
         # opinion about whether their appetite is 0.35 or 0.4.
         self.appetite = QSlider(Qt.Orientation.Horizontal)
         self.appetite.setRange(0, 100)
-        self.appetite.setFixedWidth(110)
+        self.appetite.setFixedWidth(90)
         self.appetite.setToolTip(
             "How far to chase big discounts that rarely fill.\n"
             "Left: rank by what actually fills — long shots sink to the bottom "
@@ -142,19 +147,80 @@ class BankrollBar(QWidget):
             "Nothing is ever hidden either way; only the order changes."
         )
         self.appetite.valueChanged.connect(self._appetite_moved)
-        layout.addWidget(self.appetite)
+        shots.addWidget(self.appetite)
 
         self.appetite_label = QLabel()
         self.appetite_label.setStyleSheet(f"color: {muted_color(self)};")
         # Sized to its own longest string and pinned there. A minimum width alone
         # let the layout hand the slider the slack and clip the readout instead,
         # which is what put "45%" half under the slider on a narrow window.
+        # Left-aligned within that width: right-aligned, a short reading like
+        # "45%" sat at the far end of the box with a finger's width of nothing
+        # between it and the slider it belongs to.
         self.appetite_label.setFixedWidth(_fits(self.appetite_label, *_APPETITE_LABELS, padding=6))
         self.appetite_label.setAlignment(
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         )
-        layout.addWidget(self.appetite_label)
+        shots.addWidget(self.appetite_label)
         self._refresh_appetite_label()
+
+        self._top.addWidget(self.money)
+        self._top.addStretch(1)
+        self._bottom.addStretch(1)
+        self._wrapped = False
+        self._top.addWidget(self.long_shots)
+        self._size_spins()
+
+    # -- layout
+
+    def _size_spins(self) -> None:
+        """Pin each spin box wide enough for its own longest text.
+
+        Measured after the widget is polished, and taken as the larger of what
+        the text needs and what the style asks for: computing it at construction
+        from the default font under-measured on Windows, where the box inherits
+        a wider font from the window and the frame plus the up/down buttons cost
+        more than the padding guessed here.
+        """
+        for currency, suffix, _step in POTS:
+            spin = self.spins[currency]
+            spin.ensurePolished()
+            spin.setMinimumWidth(
+                max(
+                    _fits(spin, f"no limit ({suffix})", f"100000000 {suffix}", padding=44),
+                    spin.sizeHint().width(),
+                )
+            )
+
+    def changeEvent(self, event) -> None:  # noqa: N802 (Qt naming)
+        from PySide6.QtCore import QEvent
+
+        super().changeEvent(event)
+        if event.type() in (QEvent.Type.FontChange, QEvent.Type.StyleChange):
+            self._size_spins()
+            self._reflow()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt naming)
+        super().resizeEvent(event)
+        self._reflow()
+
+    def _reflow(self) -> None:
+        """Drop the long-shots slider onto its own row when the row won't hold it.
+
+        Decided from the two groups' size hints rather than from their current
+        geometry, so the answer doesn't depend on which row they are in and the
+        two states can't oscillate.
+        """
+        needed = (
+            self.money.sizeHint().width() + self.long_shots.sizeHint().width() + 24
+        )
+        wrapped = self.width() < needed
+        if wrapped == self._wrapped:
+            return
+        self._wrapped = wrapped
+        (self._top if wrapped else self._bottom).removeWidget(self.long_shots)
+        (self._bottom if wrapped else self._top).addWidget(self.long_shots)
+        self.long_shots.setVisible(True)
 
     def set_values(self, held: dict[str, float]) -> None:
         """Load saved amounts without reporting them back as user edits."""
@@ -165,18 +231,6 @@ class BankrollBar(QWidget):
 
     def values(self) -> dict[str, float]:
         return {c: spin.value() for c, spin in self.spins.items()}
-
-    def set_committed(self, spent: dict[str, float]) -> None:
-        """Show what outstanding whispers have already claimed, if anything."""
-        parts = [
-            fmt_amount(amount, currency)
-            for currency, amount in sorted(spent.items())
-            if amount > 0
-        ]
-        self.committed_label.setText(
-            f"({' + '.join(parts)} committed)" if parts else ""
-        )
-        self.committed_label.setVisible(bool(parts))
 
     # -- settlement currency
 
