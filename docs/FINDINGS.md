@@ -282,9 +282,9 @@ worth more than the individual fixes:
   branch is Windows-only. It is now logged at warning and reported to the user once.
 - **The bankroll was a per-trade allowance, not a total.** `build_candidates` sizes each
   candidate against the whole pot, which is correct in isolation and wrong across a queue:
-  four separate 400-exalted trades are each affordable with 500 exalted. The queue now
-  holds committed currency back until the whisper is answered for. Affordability belongs
-  in the queue, not the sweep — the sweep cannot know what is already outstanding.
+  four separate 400-exalted trades are each affordable with 500 exalted. The queue held
+  committed currency back until the whisper was answered for. **Reverted in 0.7.0** — see
+  *The holdback was the wrong fix* below. The observation stands; the remedy did not.
 - **Costs were displayed in divines for exalted-priced listings.** A listing whispered as
   "2412 exalted" appeared as "5.6 div". Same money, but the user has to recognise the
   offer when a reply arrives an hour later, often in a language they do not read. Money is
@@ -300,6 +300,230 @@ worth more than the individual fixes:
   restarts, with only a handle jammed against the top edge to explain it. Found by
   screenshot, from a real saved `ops_split` of `[0, 476]`. Neither splitter is
   collapsible now, and a saved zero is rejected rather than clamped.
+
+### Found in the third session of real use (2026-07-31), fixed in 0.7.0
+
+- **The hotkey still did nothing, with the app itself focused.** The 0.6.0 fix — the
+  missing `import ctypes.wintypes` — was real and was not the whole story. Tested in game
+  *and* with the app as the active window, so this is not foreground-window or elevation
+  behaviour: the message was never being seen. The remaining suspect is the delivery path
+  itself. `GlobalHotkey` inherited from both `QObject` and `QAbstractNativeEventFilter`,
+  and PySide6 does not reliably construct the C++ half of a second wrapper base, so the
+  filter Qt was handed may never have been called at all. **Qt is now out of the path
+  entirely**: `RegisterHotKey(NULL, …)` posts WM_HOTKEY to the thread that registered it,
+  so a dedicated thread registers the key and runs its own `GetMessage` loop. Nothing has
+  to reach Qt's event dispatcher for a press to be noticed. *Two failed fixes in two
+  releases is the lesson here:* the feature is Windows-only and no test could see it, so
+  0.7.0 also adds a press counter to the Settings dialog — pressing the key with the
+  dialog open now says so on screen, which makes the next report diagnosable in seconds
+  rather than needing another release to find out.
+- **The holdback was the wrong fix.** 0.6.0 treated a copied whisper as money spent until
+  the user said otherwise. Against the measured fill rates — 21% plausible, 2.3% ghost,
+  so 79%+ of whispers never touch the bankroll — the guard withheld far more real trades
+  than it prevented double-spends. Reverted on the maintainer's call. **The general
+  lesson:** a correctness argument that ignores the base rate can be locally sound and
+  still net negative. Sizing every candidate against the whole bankroll is the accurate
+  model when whispers rarely fill.
+- **Bulk listings are ratios, not bundles.** A listing advertising "10 Faded Crisis
+  Fragments for 100 divine" can be traded along at any point that divides — the trade site
+  allows it, and the maintainer reports sellers answer such asks; they are only "less
+  likely to reply". The app treated the advertised amounts as an indivisible lot, so a
+  100-divine listing was invisible to anyone holding 20 divines, which is most of the
+  time. Now reduced to lowest terms (`listings.smallest_lot`): 100:10 divides at 10:1, so
+  20 divines buys 2. The floor on how finely it divides is that **partial currency cannot
+  be traded** — the same fact behind the settlement haircut — so a 7:3 ratio divides at
+  nothing smaller than 7:3.
+- **Sellers list stock they do not have, and buyers cannot always afford the ask.** Two
+  cases in one session: a whisper for 18 Faded Crisis Fragments where only 3 were
+  affordable at the time, and a seller advertising 2 Omens of Whittling who held 1. Both
+  were logged at the quantity asked for, so the outcome log carried a cost and a profit
+  that never happened — in a file whose entire purpose is being the honest record. The
+  quantity is now correctable after the fact, appended as an amendment so **the original
+  ask survives in `asked_units`**: the gap between what was listed and what was there is
+  itself a measurement, and one worth accumulating.
+- **A fifteen-minute sweep that reports only at the end is worse than a slower one that
+  reports as it goes.** Candidates were built from the whole listing set after the last
+  fetch, so a sweep was silent for its entire run and then queued everything at once.
+  Each item's candidates are now emitted as that item is priced. This is also more
+  accurate, not just calmer: the first item's listings are already a quarter of an hour
+  stale by the time the last one is fetched.
+- **Hovering an in-row button lit the whole row.** Added in 0.6.0 on the reasoning that
+  the row tint says which trade a click acts on. Reported as noise: by the time the
+  cursor is on the button that question is already answered. Buttons now report no row;
+  the rest of the row, including the gaps between the buttons, still lights up.
+
+### What the game's own log can and cannot tell us — measured 2026-07-31
+
+Asked whether trade or party history could auto-mark outcomes. Measured by joining the
+maintainer's real `…/Path of Exile 2/logs/Client.txt` (194 MB, append-only;
+`LatestClient.txt` beside it is the current session) against the 189 attempts in
+`outcomes.jsonl`, over the 2026-07-29..31 sessions. **Not implemented** — this is the
+evidence for deciding whether to.
+
+**The lines that exist**, `[INFO Client NNNNN]` prefix stripped:
+
+```
+… @To Xithira: Hi, I'd like to buy your 1 Architect's Orb for my 4 Divine Orb in Runes of Aldur
+… @From Ti_ny: This player is AFK.
+… : Xithira has joined the area.
+… : Trade accepted.          (and : Trade cancelled.)
+… @To Xithira: ty
+```
+
+Party invites are **not logged at all**, and `has joined the area` fires only when someone
+enters *your* hideout — half the trades are the other way round. Neither is a foundation.
+
+**Attribution works, and by a route that is not obvious.** `Trade accepted.` carries no
+character. Matching it to "the last seller we whispered" fails badly, because whispers go
+out at ~2/minute and the wrong neighbour is usually nearer. Three rules in order —
+(1) whoever most recently *joined the area*, (2) else whoever we sent a **non-template**
+whisper to within two minutes afterwards (the "ty"; the app's own whisper always names the
+league, a thank-you never does), (3) else the last seller asked — score **10 of 11**
+hand-marked fills, the one error being two trades 90 seconds apart assigned to each
+other's sellers.
+
+**But auto-marking fills buys almost nothing.** Of 18 `Trade accepted.` lines in that
+window, 11 attribute to app whispers and **all 11 are trades the maintainer had already
+marked by hand**; the other 7 fall outside session hours and are ordinary trading. *No fill
+was missed.* An earlier pass of this analysis claimed four were — that was the naive
+last-whisper matcher misattributing accepts, and it is recorded here because it is exactly
+the mistake the better matcher exists to avoid.
+
+**The value is in the NO_REPLY bucket, which is not one thing.** Of 176 whispers the app
+recorded as `no_reply`:
+
+| what the game log shows | n | share |
+|---|---|---|
+| genuinely silent | 134 | 76% |
+| seller AFK (GGG's own auto-reply) | 39 | 22% |
+| a human answered | 2 | 1% |
+| "already gone" — i.e. `SOLD` | 1 | 1% |
+
+So roughly **a quarter of the fill-rate denominator is a state the app has no category
+for**, and the AFK auto-reply arrives within a second of the whisper — it is knowable
+immediately, not after a ten-minute timeout.
+
+**Bonus, and it undermines a feature we already ship:** of the 40 whispers that hit an AFK
+auto-reply, GGG's exchange API had flagged the seller AFK beforehand in only **29**. The
+other **11 (28%)** were reported present and were not. The Results tab's *By seller state*
+split is measured against a flag that is wrong more than a quarter of the time in the
+direction that matters.
+
+**Implementation notes, so nobody re-derives them:** timestamps are local, not UTC (derive
+the offset by correlating `@To` lines against logged attempts rather than trusting the
+machine's zone); the file is append-only, so tail from a stored offset; and the AFK reply
+is localised — this log alone carries it in English, Korean, French, Portuguese, Chinese
+and Russian, so match on the set, never on one string.
+
+**NO_REPLY is four states, not two.** Besides the AFK auto-reply the log carries
+`: <char> is not online.` — 19 of them since 2026-07-29. That one is a **freshness
+measurement**, not just a category: the sweep filters to `status: online`, so every one of
+these is a listing that went stale between the fetch and the whisper. Silent / AFK / not
+online / already gone are four different problems with four different fixes.
+
+### GGG's trade site sends whispers server-side, with no client input — measured 2026-07-31
+
+**Corrects an earlier claim in this file that the site's whisper button only fills the
+clipboard. It does not.** The maintainer sent one from the browser as a test; the game
+logged it while the browser still had focus:
+
+```
+2026/07/31 20:49:04  @To Oooosung: Hi, I would like to buy your Undiluted Greater Mana
+                     Flask of the Constant listed for 1 exalted in Runes of Aldur …
+2026/07/31 20:49:07  [WINDOW] Gained focus
+```
+
+Focus arrives **three seconds after** the whisper is already in the log. Across 188
+buy-whispers since 07-29, exactly one was sent while the client was unfocused, and it is
+that test. So the message is delivered by GGG's servers to the client; nothing types into
+the game.
+
+**Why this matters more than any macro question.** If the same path is available to us, the
+app can send whispers with *no synthetic input at all*: no foreground check, no
+wrong-window hazard, no `Ctrl+A` clobbering whatever the user was typing, works while
+alt-tabbed, and it is GGG's own mechanism rather than a macro sitting inside a rule. It
+also dissolves the "which trade is the thank-you for?" problem, because the send is
+initiated from the app where the row is unambiguous.
+
+**What is not known yet.** The whisper the maintainer tested came from the *item search*
+page. Our cached `/api/trade2/exchange` responses carry **no whisper token** of any kind —
+only the localised `whisper` template — so either the token is issued only to an
+authenticated session, or only item search offers it and the bulk exchange does not. The
+cheap experiment, before any code: open the **Bulk Item Exchange** tab on the trade site
+with the game unfocused, whisper a listing, and see whether it arrives. That is the only
+blocking unknown.
+
+**Confirmed on the bulk exchange too** (2026-07-31, one exalted for an armour scrap from
+a Korean seller), so the path is not item-search-only.
+
+**But it is not a sanctioned path, and that reverses the recommendation.** Checked against
+GGG's own developer documentation the same day:
+
+- The OAuth scope list is `account:profile`, `account:leagues`, `account:stashes`,
+  `account:characters`, `account:league_accounts`, `account:item_filter`, plus
+  confidential-only `service:*`. **There is no trade, whisper or messaging scope, and the
+  documented API has no trade-search or whisper endpoint at all.**
+- Desktop apps are "public clients" in GGG's terms — Authorization Code with PKCE, a local
+  redirect, shared rate limits — and public clients **cannot hold `service:*` scopes**.
+
+So the site's whisper button is a *first-party* endpoint driven by the web session. For
+this app to use it, it would have to impersonate the website with the user's `POESESSID` —
+a full account session, undocumented, living inside a distributed exe. Meanwhile the
+keystroke route is *explicitly* blessed (one action per key press, "totally fine to use a
+macro to say thanks for the trade"). **On the axis that matters most — is this sanctioned
+— the ranking is the reverse of what this section first concluded.** Synthesised input is
+documented as allowed; the API route is merely undetectable.
+
+### "Reply to the last whisper received" is right 7 times in 11 — measured 2026-07-31
+
+The maintainer intends to use Sidekick's auto-thank, which answers the last whisper
+*received*. Scored against the 11 completed trades: **7 correct**, which is far better
+than answering the last whisper *sent* (2 of 11) and still not reliable. The failure mode
+is specific and worth knowing: two of the four misses would have thanked a seller whose
+last message was `This player is AFK.` — an auto-reply from an unrelated listing that
+landed between the trade and the keypress. Harmless as a message, but it means **a "ty" in
+the log is not proof of a trade with that person**, so those lines cannot be parsed back
+as fill markers.
+
+### GGG publishes an official Currency Exchange API, and it has both sides of the book
+
+Found 2026-07-31 while checking the OAuth scopes. `service:cxapi` — "Get Exchange
+Markets" — returns aggregate CE trade history in hourly digests, per market pair:
+
+```
+market_pair, volume_traded, lowest_stock, highest_stock, lowest_ratio, highest_ratio
+```
+
+**`lowest_ratio` / `highest_ratio` is the thing this project has never had.** The standing
+#1 item is that the reference price runs ~26% high on thin items, and the fork that
+decides the fix is whether that gap is *spread* — which needs both sides of the book, and
+FINDINGS records elsewhere that poe2scout has "no bid, no ask, no depth anywhere". A
+per-pair ratio range over an hour measures exactly that, from GGG rather than from a
+third-party derivation.
+
+**It is out of reach for now, and the exact reason matters.** `service:cxapi` is a
+**confidential-client-only** scope, and a distributed desktop exe is a public client by
+GGG's own definition. The public CDN URL in the docs,
+`https://web.poecdn.com/api/currency-exchange`, answers HTTP 200 with 90 KB — but it is a
+**stale July-2024 PoE1 snapshot**: `next_change_id` is pinned at 1722027600, the leagues
+are Settlers and Hardcore Settlers, and adding `realm=poe2` or an `id=` for the current
+hour changes nothing. 14 of its 109 markets carry non-zero ratios, so the shape is real
+even though the data is not current.
+
+So: **only a backend could use this**, and it would settle the project's biggest open
+question if one ever existed. Worth re-testing when GGG's PoE2 API coverage widens — the
+docs already note "limited APIs return PoE2 game information".
+
+### There is no party roster in the log — checked 2026-07-31
+
+Asked whether the trade partner could be identified by scanning party members. **No.** The
+whole 194 MB log contains one party-related line, `InstanceClientSetSelfPartyInvitation
+SecurityCode`, which carries no names; every other occurrence of the word is chat spam.
+The only name-carrying events are `has joined the area` / `has left the area` and
+whispers — and those fire only when someone enters *your* hideout. Most of these trades
+went the other way, and when the buyer travels to the seller nothing in the log names
+them. Reading the party UI or game memory is the other side of the line the app does not
+cross.
 
 ## Denomination — the correction that mattered most
 
@@ -419,6 +643,8 @@ Also worth not rediscovering:
   event at all while the pointer is over one (`RowHoverTable.watch` reports it instead);
   and setting `State_MouseOver` alone paints nothing under the styles this ships with, so
   the delegate fills the row itself with a translucent tint from the palette's highlight.
+  **The buttons themselves report no row** (0.7.0): pointing at Accept highlights Accept,
+  because by then which trade it acts on is not in question.
 - **Action widgets must be unparented, not just removed, on rebuild.** `removeCellWidget`
   only schedules deletion; the orphan keeps painting at its old geometry until the event
   loop catches up, which put a live Accept/Decline on top of another row's Item column.
@@ -442,10 +668,15 @@ Also worth not rediscovering:
   template is a fact about that fetch, and suppressing it would hide the listing if a
   later fetch returned it complete. Deliberately **not persisted** — the reason for
   declining is usually "not right now", which does not survive a restart.
-- **Currency promised to an outstanding whisper is held back from new offers.** See
-  *Negative results*, 0.6.0. Unaffordable candidates stay QUEUED rather than being
-  dropped, so a NO_REPLY frees the money and makes them offerable again. A pot left at 0
-  still means "I didn't say", not "I have nothing" — capping it would silently hide trades.
+- **Currency promised to an outstanding whisper is *not* held back.** 0.6.0 held it
+  back; 0.7.0 reverted that on the maintainer's call, because 79%+ of whispers go
+  unanswered and the guard suppressed more real trades than it prevented double-spends.
+  Do not re-add it without a fill rate that justifies it. A pot left at 0 still means
+  "I didn't say", not "I have nothing" — capping it would silently hide trades.
+- **The quantity on a whispered trade can be corrected afterwards, and only downwards.**
+  `TradeQueue.revise` → `listings.replan_units`, appended to the log as an amendment. The
+  correction is deliberately *not* re-optimised: the user is reporting what they bought,
+  not asking for the best trade at that size.
 - **Ghosts are never queued** (`queue_ghosts=False`). Interrupting a map for something
   measured never to fill is pure cost. They stay visible in Trades.
 - **A whispered trade cannot be dismissed, only resolved.** It is already recorded as an
@@ -489,7 +720,20 @@ Also worth not rediscovering:
   before anything is compiled.
 - **UI state lives in a JSON file in the cache dir**, not in the TOML config (meant to stay
   hand-editable) and not in QSettings (which would write to the registry, contradicting
-  "delete the folder to remove it").
+  "delete the folder to remove it"). Column order and widths are part of it, as the
+  header's own `saveState` blob.
+- **Columns are `Interactive` plus arithmetic, not `Stretch` or `ResizeToContents`.** Qt
+  offers reorderable, resizable and growing two at a time and never all three, so
+  `table_items.ColumnLayout` sizes to contents once, squeezes that to the window, and
+  hands out each later resize in proportion. The action column is exempt from shrinking:
+  a row of buttons does not get smaller when squeezed, it gets clipped, and an action you
+  cannot reach is worse than one you have to scroll to.
+- **A session is defined by the queue draining, not by a clock.** `session.py`: it starts
+  on *Find trades* and ends only when nothing is running *and* nothing is outstanding, so
+  pressing the toggle again mid-session continues it. Between sweeps the queue is
+  routinely empty for minutes — ending there would close a session in the middle of one
+  and leave the whispers afterwards belonging to nothing. Stamped on every attempt,
+  along with the league, because neither is recoverable from the log afterwards.
 - **Nothing is excluded by default** — that's the user's call. **Exclusions don't apply to
   Quick Lookup**: excluding something from the sweep shouldn't stop you pricing it.
 - **Tier ordering is by measured price, not the alphabet.** Numbers in `market.py`.

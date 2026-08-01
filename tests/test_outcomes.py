@@ -11,12 +11,16 @@ from poe2arb.outcomes import (
     MIN_SAMPLES,
     Attempt,
     Outcome,
+    leagues,
     read_attempts,
+    record_amendment,
     record_attempt,
     record_outcome,
+    sessions,
     suggested_gap_band,
     summarise,
 )
+from poe2arb.listings import replan_units
 
 NOW = datetime.now(timezone.utc)
 
@@ -203,3 +207,69 @@ def test_a_band_is_suggested_once_buckets_are_populated():
                      expected_profit_divines=2.0) for i in range(10)]
     band = suggested_gap_band(summarise(rows))
     assert band == (1.25, 1.5)
+
+
+# --- sessions, seasons and corrections --------------------------------------
+
+def test_an_attempt_carries_its_session_and_league(log_path):
+    """Neither is recoverable afterwards: sessions are how the app was driven,
+    and league names rotate, so a log without them mixes two economies."""
+    record_attempt(log_path, candidate(), session_id="sess1", league="Rise of the Abyssal")
+    [a] = read_attempts(log_path)
+    assert a.session_id == "sess1"
+    assert a.league == "Rise of the Abyssal"
+    assert a.pay_units == 11.0
+
+
+def test_older_records_without_a_session_still_read(log_path):
+    log_path.write_text(
+        '{"kind": "attempt", "id": "x", "ts": "%s", "item_id": "omen", '
+        '"gap": 1.2, "band": "plausible"}\n' % NOW.isoformat(),
+        encoding="utf-8",
+    )
+    [a] = read_attempts(log_path)
+    assert a.session_id is None and a.league is None
+
+
+def test_an_amendment_corrects_the_quantity_and_keeps_the_ask(log_path):
+    """The field case: whispered for 18, the seller only had 3."""
+    c = candidate(pay=11.0, stock=18.0)
+    attempt_id = record_attempt(log_path, c, session_id="s")
+    record_amendment(log_path, attempt_id, replan_units(c, 3.0))
+    record_outcome(log_path, attempt_id, Outcome.FILLED)
+
+    [a] = read_attempts(log_path)
+    assert a.amended is True
+    assert a.units == 3.0
+    assert a.asked_units == 18.0
+    assert a.cost_divines == 33.0
+    assert a.outcome is Outcome.FILLED
+
+
+def test_a_verdict_after_an_amendment_is_not_undone_by_it(log_path):
+    """Order in the file must not decide which correction wins."""
+    c = candidate(pay=11.0, stock=18.0)
+    attempt_id = record_attempt(log_path, c)
+    record_outcome(log_path, attempt_id, Outcome.FILLED, actual_profit_divines=2.5)
+    record_amendment(log_path, attempt_id, replan_units(c, 3.0))
+    [a] = read_attempts(log_path)
+    assert a.units == 3.0
+    assert a.outcome is Outcome.FILLED
+    assert a.actual_profit_divines == 2.5
+
+
+def test_sessions_group_by_id_and_come_back_newest_first(log_path):
+    record_attempt(log_path, candidate(char="A"), session_id="old", league="Dawn")
+    record_attempt(log_path, candidate(char="B"), session_id="new", league="Abyssal")
+    record_attempt(log_path, candidate(char="C"), session_id="new", league="Abyssal")
+    found = sessions(read_attempts(log_path))
+    assert [s.id for s in found] == ["new", "old"]
+    assert found[0].attempts == 2
+    assert found[0].league == "Abyssal"
+    assert "0/2 traded" in found[0].label
+
+
+def test_leagues_lists_what_the_log_has_seen(log_path):
+    record_attempt(log_path, candidate(char="A"), league="Dawn")
+    record_attempt(log_path, candidate(char="B"), league="Abyssal")
+    assert set(leagues(read_attempts(log_path))) == {"Dawn", "Abyssal"}

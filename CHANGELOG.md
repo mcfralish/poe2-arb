@@ -6,6 +6,61 @@ says what changed for you and, where it matters, why.
 Versions follow `MAJOR.MINOR.PATCH`. Until 1.0 the minor number moves for
 anything user-visible.
 
+## [0.7.0] — 2026-07-31
+
+A third session of real use, and the defect list it produced. Two things in 0.6.0 turned
+out to be wrong rather than merely incomplete — the hotkey and the bankroll holdback —
+and both are corrected here rather than quietly patched.
+
+> **Prices are still optimistic on rarely-traded items.** Nothing in this release changes
+> the arithmetic; see the 0.5.0 note. Liquid currency is fine, thin items are not, and the
+> *uncertain* rating says so.
+
+### Fixed
+
+- **The global hotkey still did nothing.** 0.6.0 fixed a real bug and not the one that
+  mattered: the key was tested in game *and* with the app in front, and neither worked.
+  Windows key events were being routed through Qt, which never delivered them. The hotkey
+  now listens on its own, with nothing in between. **Settings can prove it** — open
+  Settings and press the key, and the line under the hotkey field says it fired. If it
+  doesn't, the hotkey isn't working and you'll know immediately rather than after a trade
+  goes past.
+- **Listings bigger than your bankroll were hidden instead of trimmed.** A seller offering
+  10 of something for 100 divine simply didn't appear if you held 20 — even though you can
+  ask for 2 for 20, and the trade site lets you. The app now offers the largest amount
+  that fits. Sellers may be less likely to answer a partial ask; they can't answer one
+  that was never sent.
+- **Money promised to a whisper is no longer held back from your bankroll.** Added in
+  0.6.0, removed here: most whispers are never answered, so holding the money aside
+  suppressed far more real trades than double-spends it prevented.
+- **"No limit (div)" and "no limit (ex)" were being cut off** at narrow window widths.
+  The long-shots slider now drops to its own line rather than squeezing them.
+- **Hovering a button lit up the whole row.** It now highlights the button you're pointing
+  at. The rest of the row still lights up when you're on the row itself.
+
+### Added
+
+- **Correct a trade after the fact.** *Adjust…* on anything you're waiting on: you asked
+  for 18 and could only afford 3, or the seller advertised 2 and had 1. The cost and
+  profit are recalculated, and the trade log keeps both what you asked for and what you
+  got — so the record is what actually happened.
+- **Opportunities arrive as they're found.** A pass takes about fifteen minutes; it used
+  to say nothing for all of it and then queue everything at once. Trades now appear in a
+  steady trickle, and the early ones reach you a quarter of an hour fresher.
+- **A session picker on the Trades tab**, so you can review what you bought this sitting
+  or go back to an earlier one. A session starts when you press *Find trades* and ends
+  when the last opportunity has left the queue with nothing still running — pressing
+  *Find trades* again in the middle continues it. There's an *All time* option, and a
+  season picker once the log holds more than one league.
+- **An "Every trade" tab on Results**, listing the whispers that actually became trades,
+  without filtering *Every whisper* by hand.
+
+### Changed
+
+- **Columns can be dragged into a different order and resized**, on both Opportunities
+  and Trades, and both are remembered between runs. Widening the window now grows every
+  column in proportion instead of putting all the space into *Item*.
+
 ## [0.6.0] — 2026-07-31
 
 The second field test, and the first profitable one — about 20 divines cleared. Almost
@@ -20,7 +75,9 @@ everything here comes from that session. The pricing warning below still stands.
 - **The global hotkey did nothing when pressed.** It registered, said so in the log,
   and then silently ignored every keypress — the code that reads Windows key events
   was missing an import, and the resulting error was being swallowed. Fixed, and if
-  it ever fails again the app now says so instead of going quiet.
+  it ever fails again the app now says so instead of going quiet. *(This was a real
+  bug and not the one that mattered — the hotkey was still dead in testing. See
+  0.7.0.)*
 - **The hotkey now works whenever a trade is takeable**, not only during the few
   seconds a new trade is flashing. If nothing is flashing it takes the top row of
   *Ready to whisper* — the one closest to expiring.
@@ -28,7 +85,8 @@ everything here comes from that session. The pricing warning below still stands.
   bankroll, so with 500 exalted you could be offered, and accept, four separate
   400-exalted trades. Currency promised to a whisper you're still waiting on is now
   held back, and shown next to the bankroll boxes. Say what happened — or let it time
-  out — and the money frees up again.
+  out — and the money frees up again. *(Reverted in 0.7.0: too few whispers are
+  answered for the holdback to be worth what it suppressed.)*
 - **"Ones I messaged" and "Ones I bought" on the Trades tab were always empty.** They
   only knew about whispers copied from that table, and almost every whisper comes from
   the Opportunities queue instead. They also forgot everything on each new pass — and

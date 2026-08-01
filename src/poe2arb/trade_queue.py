@@ -49,7 +49,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 
-from .listings import Band, Candidate, whisper_text
+from .listings import Band, Candidate, replan_units, whisper_text
 from .outcomes import Outcome
 
 log = logging.getLogger(__name__)
@@ -143,9 +143,6 @@ class TradeQueue:
         # Deliberately not persisted — the reason for declining is usually "not
         # right now", which does not survive a restart.
         self._declined: set[tuple] = set()
-        # What the user holds, per currency. Empty (or a zero) means
-        # unconstrained in that currency — see `_affordable`.
-        self._bankroll: dict[str, float] = {}
 
     # --- inspection --------------------------------------------------------
 
@@ -191,50 +188,26 @@ class TradeQueue:
     def pending(self) -> list[QueuedTrade]:
         return [t for t in self._trades if t.state is QueueState.QUEUED]
 
+    @property
+    def outstanding(self) -> int:
+        """Trades the user could still act on or owes an answer for.
+
+        What decides whether a trading session is over — see `session.py`.
+        Resolved and expired rows are done with and don't hold one open.
+        """
+        return sum(
+            1
+            for t in self._trades
+            if t.state in (
+                QueueState.QUEUED,
+                QueueState.OFFERED,
+                QueueState.AVAILABLE,
+                QueueState.AWAITING,
+            )
+        )
+
     def get(self, trade_id: str) -> QueuedTrade | None:
         return next((t for t in self._trades if t.id == trade_id), None)
-
-    # --- the bankroll ledger -----------------------------------------------
-
-    def set_bankroll(self, pots: dict[str, float]) -> None:
-        """What the user holds, by currency id. 0 or absent = unconstrained."""
-        self._bankroll = dict(pots)
-
-    def committed(self) -> dict[str, float]:
-        """Currency already promised to whispers still awaiting an answer.
-
-        `build_candidates` sizes each trade against the *whole* bankroll, which
-        is right for one trade in isolation and wrong for a queue: with 500
-        exalted you were offered, and could accept, four separate 400-exalted
-        trades. Reported from the field 2026-07-31 as costs above bankroll.
-        Money is treated as spent from the moment the whisper is copied —
-        recovering it needs the user to say the trade fell through, which is
-        exactly what the awaiting section asks them for.
-        """
-        spent: dict[str, float] = {}
-        for t in self._trades:
-            if t.state is not QueueState.AWAITING:
-                continue
-            currency = t.candidate.listing.pay_currency
-            spent[currency] = spent.get(currency, 0.0) + t.candidate.pay_total
-        return spent
-
-    def remaining(self) -> dict[str, float]:
-        """Bankroll left to spend, for every capped currency."""
-        spent = self.committed()
-        return {
-            currency: max(0.0, pot - spent.get(currency, 0.0))
-            for currency, pot in self._bankroll.items()
-            if pot > 0
-        }
-
-    def affordable(self, trade: QueuedTrade) -> bool:
-        """Whether this trade still fits in what is left of its currency."""
-        currency = trade.candidate.listing.pay_currency
-        pot = self._bankroll.get(currency, 0.0)
-        if pot <= 0:
-            return True  # unconstrained: the user never told us what they hold
-        return trade.candidate.pay_total <= self.remaining().get(currency, 0.0) + 1e-9
 
     # --- filling -----------------------------------------------------------
 
@@ -320,15 +293,19 @@ class TradeQueue:
         return result
 
     def _next_to_offer(self) -> QueuedTrade | None:
-        """Best pending trade the user can still pay for.
+        """Best pending trade.
 
-        Affordability is checked here rather than in `build_candidates` because
-        it depends on what is *already* awaiting a reply, which the sweep that
-        built the candidate could not know. An unaffordable trade stays QUEUED
-        rather than being dropped: a "no reply" on an outstanding whisper frees
-        the money up again, and at that point it becomes offerable.
+        Nothing is held back against outstanding whispers. v0.6.0 treated a
+        copied whisper as money spent until the user said otherwise, so a
+        second trade in the same currency was withheld while the first went
+        unanswered. Reverted 2026-07-31 on the maintainer's call: whispers
+        resolve as no-reply ~79% of the time, so the money is almost never
+        actually committed, and the guard mostly suppressed offers the user
+        could have taken. Sizing against the whole bankroll — which
+        `build_candidates` already does — is the accurate model at that fill
+        rate.
         """
-        pending = [t for t in self.pending if self.affordable(t)]
+        pending = self.pending
         if not pending:
             return None
         return min(pending, key=_ranking_key)
@@ -354,6 +331,22 @@ class TradeQueue:
         """What the hotkey does. None when nothing is armed."""
         current = self.offered
         return self.take(current.id, now) if current is not None else None
+
+    def revise(self, trade_id: str, units: float) -> QueuedTrade | None:
+        """Correct the quantity on a trade to what was actually available.
+
+        Returns the trade if anything changed. The candidate's `key` is derived
+        from the listing rather than the quantity, so a revised trade keeps its
+        identity and is still recognised as already-whispered by the next sweep.
+        """
+        t = self.get(trade_id)
+        if t is None:
+            return None
+        revised = replan_units(t.candidate, units)
+        if revised.plan.units == t.candidate.plan.units:
+            return None
+        t.candidate = revised
+        return t
 
     def resolve(
         self, trade_id: str, outcome: Outcome, now: datetime | None = None

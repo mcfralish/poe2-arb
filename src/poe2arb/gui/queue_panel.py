@@ -34,8 +34,11 @@ from datetime import datetime, timezone
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QDoubleSpinBox,
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QPushButton,
     QSplitter,
@@ -49,7 +52,7 @@ from ..listings import Band
 from ..outcomes import Outcome
 from ..trade_queue import QueueState
 from .bankroll_bar import BankrollBar
-from .table_items import NumericItem, RowHoverTable, TextItem
+from .table_items import NumericItem, RowHoverTable, TextItem, flexible_columns
 from .theme import muted_color
 
 log = logging.getLogger(__name__)
@@ -88,7 +91,11 @@ AWAITING_COLUMNS = [
     ("Seller", "Who you whispered."),
     ("Sent", "How long ago you copied the whisper."),
     ("Auto", "Marks itself as no reply when this runs out."),
-    ("", "Copy again puts the same whisper back on the clipboard."),
+    (
+        "",
+        "Copy again puts the same whisper back on the clipboard. Adjust "
+        "corrects the quantity to what you actually bought.",
+    ),
 ]
 
 READY_TIMER_COLUMN = 8
@@ -107,6 +114,7 @@ class QueuePanel(QWidget):
     outcome_reported = Signal(str, object)    # (trade id, Outcome)
     dismiss_requested = Signal(str)           # trade id
     recopy_requested = Signal(str)            # trade id, already whispered
+    revise_requested = Signal(str, float)     # (trade id, units actually traded)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -145,6 +153,8 @@ class QueuePanel(QWidget):
 
         self._icons = None
         self._hotkey_hint = ""
+        # The queue as last drawn, so an in-row button can look its own trade up.
+        self._queue = None
         # Row identity as last drawn, so a redraw can tell "same trades, new
         # countdown" from "the list actually changed".
         self._ready_ids: list[str] = []
@@ -164,6 +174,7 @@ class QueuePanel(QWidget):
     # --- rendering ---------------------------------------------------------
 
     def refresh(self, queue, now=None) -> None:
+        self._queue = queue
         if queue is None:
             self.ready.setRowCount(0)
             self.awaiting.setRowCount(0)
@@ -179,7 +190,8 @@ class QueuePanel(QWidget):
         now = now or datetime.now(timezone.utc)
         self._sync_ready(queue.available, now)
         self._sync_awaiting(queue.awaiting, now)
-        self.bankroll.set_committed(queue.committed())
+        self.ready._column_layout.size_to_contents()
+        self.awaiting._column_layout.size_to_contents()
         self._update_headline(queue, now)
 
     def _update_headline(self, queue, now) -> None:
@@ -290,6 +302,13 @@ class QueuePanel(QWidget):
                     # is how a trade gets lost.
                     ("Copy again", "Put this whisper back on the clipboard, unchanged.",
                      lambda tid=t.id: self.recopy_requested.emit(tid)),
+                    # Before the verdict buttons, because it has to be used
+                    # first: marking a trade as Traded resolves it, and the
+                    # quantity has to be right before that is written down.
+                    ("Adjust…",
+                     "They had fewer than they listed, or you could only afford part "
+                     "of it — correct the quantity before recording the trade.",
+                     lambda tid=t.id: self._ask_quantity(tid)),
                     ("Traded", "The trade went through.",
                      lambda tid=t.id: self.outcome_reported.emit(tid, Outcome.FILLED)),
                     ("No reply", "They never answered.",
@@ -300,6 +319,17 @@ class QueuePanel(QWidget):
             )
             self.awaiting.setCellWidget(row, AWAITING_ACTION_COLUMN, actions)
             self.awaiting.watch(actions, row)
+
+    # --- corrections -------------------------------------------------------
+
+    def _ask_quantity(self, trade_id: str) -> None:
+        """Open the correction dialog for one whispered trade."""
+        trade = self._queue.get(trade_id) if self._queue is not None else None
+        if trade is None:
+            return
+        units = QuantityDialog.ask(self, trade.candidate)
+        if units is not None:
+            self.revise_requested.emit(trade_id, units)
 
     # --- shared cells ------------------------------------------------------
 
@@ -361,6 +391,87 @@ class QueuePanel(QWidget):
                 btn.click()
                 return True
         return False
+
+
+class QuantityDialog(QDialog):
+    """Correct a whispered trade to the quantity that was actually available.
+
+    Two things happened in the second field test that the app had no way to
+    record: a whisper for 18 Faded Crisis Fragments where only 3 were
+    affordable at the time, and a seller advertising 2 Omens of Whittling who
+    turned out to hold 1. Both were logged at the quantity asked for, so the
+    outcome log carried a cost and a profit that never happened.
+
+    The quantity steps in whole lots rather than single items, because the price
+    only divides that finely — see `listings.smallest_lot` — and it cannot go
+    above the original ask, which was capped by the seller's own stock.
+    """
+
+    def __init__(self, parent, candidate):
+        super().__init__(parent)
+        from ..listings import replan_units
+
+        self._candidate = candidate
+        self._replan = replan_units
+        self.setWindowTitle("Adjust the quantity")
+
+        layout = QVBoxLayout(self)
+        blurb = QLabel(
+            f"How many {candidate.item_name} did you actually get from "
+            f"{_seller(candidate)}?"
+        )
+        blurb.setWordWrap(True)
+        layout.addWidget(blurb)
+
+        form = QFormLayout()
+        step = candidate.plan.get_per_lot or 1.0
+        self.units = QDoubleSpinBox()
+        self.units.setDecimals(0 if float(step).is_integer() else 2)
+        self.units.setRange(step, candidate.plan.units)
+        self.units.setSingleStep(step)
+        self.units.setValue(candidate.plan.units)
+        self.units.setToolTip(
+            "Steps in whole lots, because the seller's price only divides that "
+            "far — part of a lot would cost part of an orb, which cannot be "
+            "traded."
+        )
+        self.units.valueChanged.connect(lambda _: self._preview())
+        form.addRow("Quantity", self.units)
+        layout.addLayout(form)
+
+        self.summary = QLabel()
+        self.summary.setWordWrap(True)
+        self.summary.setStyleSheet(f"color: {muted_color(self)};")
+        layout.addWidget(self.summary)
+
+        self.buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        layout.addWidget(self.buttons)
+        self._preview()
+
+    def _preview(self) -> None:
+        """Say what the correction does to the cost and the profit."""
+        revised = self._replan(self._candidate, self.units.value())
+        pay = revised.listing.pay_currency
+        self.summary.setText(
+            f"{fmt_qty(revised.plan.units)} for "
+            f"{fmt_amount(revised.pay_total, pay)}  ·  "
+            f"profit +{revised.profit_divines:.2f} div"
+        )
+
+    def chosen_units(self) -> float:
+        return self.units.value()
+
+    @staticmethod
+    def ask(parent, candidate) -> float | None:
+        """Run the dialog. Returns the new quantity, or None if cancelled."""
+        dlg = QuantityDialog(parent, candidate)
+        if not dlg.exec():
+            return None
+        return dlg.chosen_units()
 
 
 def _seller(candidate) -> str:
@@ -437,14 +548,16 @@ def _make_table(columns) -> RowHoverTable:
     table.verticalHeader().setVisible(False)
     # Deliberately not sortable: the order is presentation order — oldest first
     # in Ready, newest first in Waiting — and a click that reordered it would
-    # move rows out from under the cursor mid-click.
-    header = table.horizontalHeader()
-    header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
-    # Item absorbs the slack, not Seller. Item names run to "Zarokh's Reliquary
-    # Key: Against the Darkness"; character names are short, and stretching
-    # them left a third of the table as one empty column.
-    item = next(i for i, (title, _) in enumerate(columns) if title == "Item")
-    header.setSectionResizeMode(item, QHeaderView.ResizeMode.Stretch)
+    # move rows out from under the cursor mid-click. Reordering and resizing the
+    # *columns* is a different thing entirely, and is allowed — see
+    # `flexible_columns`. Item no longer takes the whole slack on its own;
+    # widening the window now grows every column.
+    # The action column is exempt from the fit-to-window squeeze: its buttons
+    # have a real width and are no use half cut off.
+    flexible_columns(table, protected=(len(columns) - 1,))
+    # Long item names elide rather than wrapping onto a second line, so every
+    # row is one line tall and the countdown columns stay aligned.
+    table.setWordWrap(False)
     return table
 
 

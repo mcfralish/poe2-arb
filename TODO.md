@@ -9,26 +9,35 @@ deleted rather than ticked, so this file stays worth reading start to finish.
 **Shipped:** v0.5.0 (2026-07-30) — the first field test and what it exposed. Two real
 trades, both losses.
 
-**v0.6.0 is on `main`, unreleased.** The second field test (2026-07-31) was the first
-profitable session — **about 20 divines cleared** — and produced a defect list rather
-than a measurement. Everything on it is now fixed: the global hotkey had never once
-worked (a missing `import ctypes.wintypes` swallowed at debug level), the bankroll was
-a per-trade allowance rather than a total, costs were shown in divines for
-exalted-priced listings, both Trades history filters were structurally empty, *Ready to
-whisper* was losing its alert seconds out of its listed time, and a dragged-shut
-splitter could hide half the Opportunities tab permanently. Plus the queue reordering,
-Decline-means-never, Copy again, per-unit and settlement columns, minutes in Settings,
-always-on-top, and a swappable Quick Lookup. Full list in
-[CHANGELOG.md](CHANGELOG.md); the durable half in [docs/FINDINGS.md](docs/FINDINGS.md).
+**v0.6.0 and v0.7.0 are on `main`, unreleased.** 0.6.0 came out of the second field test
+(2026-07-31), the first profitable session — about 20 divines cleared. 0.7.0 came out of
+the session after it, and **two of 0.6.0's fixes turned out to be wrong rather than
+incomplete**:
 
-**That session left 147 fully-resolved whispers in `outcomes.jsonl`**, read on
-2026-07-31, and they **overturn the project's second-biggest finding**: ghosts fill at
-2.3% (n=131), not at 0% — including one at 10.94× — and they earned 71% of the
-session's divines on a fat tail. Plausible still wins per whisper sent (0.40 div vs
-0.113), so the ranking stands, but `FILL_PRIOR[GHOST] = 0.0` is now measurably wrong.
-Full tables in [docs/FINDINGS.md](docs/FINDINGS.md), *Negative results* 1. **This
-unblocks "Fit the ranking to the outcome log" in *Next*, which no longer needs another
-field test to start.**
+- *The hotkey had still never fired.* 0.6.0 fixed a real missing import; the key was then
+  tested in game **and** with the app focused, and did nothing either way. Qt is now out
+  of the delivery path entirely — the hotkey owns a thread that registers the key and
+  pumps its own messages. **Still unconfirmed in the field**, which is why Settings now
+  shows a press counter: pressing the key with Settings open says so on screen.
+- *The bankroll holdback was reverted.* Withholding money promised to an outstanding
+  whisper is only correct if whispers usually fill; 79%+ never do, so it suppressed more
+  real trades than double-spends it prevented.
+
+0.7.0 also: listings are ratios rather than bundles, so a 100-divine listing is now
+buyable on a 20-divine bankroll; opportunities queue as they are found rather than all at
+once; quantities are correctable after the fact and the correction is logged without
+erasing the ask; sessions and leagues are stamped on every whisper and the Trades tab can
+review any of them; Results gained *Every trade*; and both tables' columns can be
+reordered, resized and remembered. Full list in [CHANGELOG.md](CHANGELOG.md); the durable
+half in [docs/FINDINGS.md](docs/FINDINGS.md).
+
+**The 147 fully-resolved whispers from the second session still stand** and still
+**overturn the project's second-biggest finding**: ghosts fill at 2.3% (n=131), not at 0%
+— including one at 10.94× — and they earned 71% of that session's divines on a fat tail.
+Plausible still wins per whisper sent (0.40 div vs 0.113), so the ranking stands, but
+`FILL_PRIOR[GHOST] = 0.0` is measurably wrong. Full tables in
+[docs/FINDINGS.md](docs/FINDINGS.md), *Negative results* 1. **This unblocks "Fit the
+ranking to the outcome log" in *Next*, which no longer needs another field test to start.**
 
 *What the next field test must measure* below still blocks the **pricing** item — that
 one needs a human in game and cannot be recovered from any log.
@@ -40,9 +49,9 @@ one needs a human in game and cannot be recovered from any log.
 
 **The shape of the app.** Toolbar: *Find trades* (a toggle — sweeps, waits, sweeps again)
 and *Settings*. Tabs: *Opportunities* (the queue, plus bankroll, settlement, long-shots and
-Quick Lookup), *Market* (the whole economy from poe.ninja), *Trades* (what the last sweep
-found, filterable down to what you messaged or bought), *Results* (the whisper log — fill
-rates and takings), *Log*.
+Quick Lookup), *Market* (the whole economy from poe.ninja), *Trades* (what the current
+session found, or any past session read back from the log), *Results* (the whisper log —
+fill rates, takings, and every trade), *Log*.
 
 ## What the next field test must measure
 
@@ -57,16 +66,17 @@ API. If a trade is made in v0.5.0, record all four in the same session:
    error is *spread*, and a tight book says it is not.
 4. The **time** of each reading, since one candidate explanation is a same-day price move.
 
-Also worth confirming, because v0.6.0 changed them and nothing but a human can check:
+Also worth confirming, because v0.7.0 changed them and nothing but a human can check:
 
-- **The hotkey actually fires now** — this is the important one, since it has never
-  worked in any shipped build and the fix is Windows-only, so no test covers it. Bind
-  it, tick the box, press it in game, and confirm a whisper lands on the clipboard both
-  while a trade is flashing and while one is merely sitting in *Ready to whisper*.
-- Costs read in the seller's currency everywhere, and match what the whisper actually
-  offered.
-- Committed currency appears beside the bankroll boxes, and a trade you cannot afford
-  is not offered until you answer for the one holding the money.
+- **The hotkey actually fires now.** Third attempt; it has never worked in any build, and
+  the code is Windows-only so no test can cover it. **Check it in Settings first** — bind
+  it, tick the box, press OK, reopen Settings and press the key: the line under the field
+  says whether it fired. That separates "the key isn't reaching us" from "the queue had
+  nothing to take", which the last two attempts could not.
+- **Partial asks get answered.** Listings bigger than the bankroll are now whispered for
+  the affordable fraction. Worth knowing whether the reply rate on those is materially
+  worse than on whole-lot asks — it is a new class of whisper and the log can measure it,
+  but only once some have been sent.
 - Always-on-top floats over the game in borderless windowed.
 
 **If the install error recurs:** `%LOCALAPPDATA%\poe2-arb\poe2-arb.log`, grep for
@@ -124,8 +134,84 @@ which is why the original occurrence left no trace.
       and worth skipping when three plausible trades are waiting. `risk_appetite` is the
       user hand-solving this. Consider making it a rate ("whispers per minute I'm willing
       to send") that the ranking spends, rather than a taste slider.
-- [ ] **Optional auto-paste on the hotkey.** One `SendInput` for Ctrl+V, as a setting
-  defaulting to **off**. Never auto-Enter, never read chat.
+- [ ] **Split NO_REPLY using the game's own log.** Measured 2026-07-31 against 189 real
+      attempts — full numbers in [docs/FINDINGS.md](docs/FINDINGS.md), "What the game's own
+      log can and cannot tell us". The maintainer has lifted the "no reading game state"
+      constraint for passive log reading (2026-07-31); what remains is worth deciding on
+      the evidence, because the obvious feature is the worthless one:
+      - *Auto-marking fills is not worth building.* All 11 fills in the sample were already
+        hand-marked correctly; the log adds no trade the user missed. It would save clicks
+        and nothing else.
+      - *Splitting NO_REPLY is worth building.* 22% of it is GGG's AFK auto-reply, which
+        lands within a second of the whisper rather than after a ten-minute timeout, and
+        another ~2% is a reply or an "already gone". A quarter of the denominator under
+        every fill rate in the project is currently one bucket that is really three.
+      - *It also audits a source we already trust.* GGG's API called 11 of 40 AFK sellers
+        present — 28% wrong, in the direction that matters — so the Results tab's *By
+        seller state* split rests on a bad flag. Worth confirming on a bigger sample
+        before changing anything that reads `afk`.
+      Keep it **read-only and advisory**: mark a suggestion the user confirms, never write
+      a verdict straight to the log. Tail from a stored offset (194 MB, append-only),
+      prefer `LatestClient.txt` for a live session, derive the local-time offset by
+      correlating rather than trusting the machine's zone, and match the AFK reply against
+      the localised set — one log alone carries it in six languages.
+- [ ] **A Send button that whispers the seller, instead of only filling the clipboard.**
+      Agreed 2026-07-31 for the next patch; **research done, nothing built.** Evidence in
+      [docs/FINDINGS.md](docs/FINDINGS.md), "GGG's trade site sends whispers server-side".
+
+      **The route is a real decision and the research reversed the obvious answer.**
+      Confirmed: the trade site delivers whispers server-side, on the Bulk Item Exchange
+      as well as item search — the maintainer's tests appear in `Client.txt` before the
+      game regains focus. But GGG's developer docs have **no trade, whisper or messaging
+      scope, and no trade endpoint at all**, and `service:*` scopes are closed to public
+      clients, which is what a desktop exe is. So:
+
+      | | keystrokes | the site's endpoint |
+      |---|---|---|
+      | sanctioned | **yes** — "one action per key press", staff-confirmed | undocumented; impersonates the website |
+      | credentials | none | `POESESSID`, a full account session, inside a shipped exe |
+      | needs focus | yes — and from a *button*, needs `SetForegroundWindow` | no |
+      | wrong-window risk | real | none |
+      | logs a true attempt | only if the paste lands | always (4 of 189 logged attempts were never actually sent) |
+      | tells you the listing died | no | yes — a failed whisper *is* the re-check, for free |
+
+      **Recommendation: keystrokes, unless the maintainer is comfortable shipping a
+      session cookie.** The UX of the endpoint is better on every axis except the one that
+      decides whether it should exist. If it is chosen anyway: never write `POESESSID` to
+      the TOML config or any log, keep it in Windows Credential Manager / DPAPI, and treat
+      a 401 as "re-authenticate", not as a failed trade.
+
+      *If keystrokes:* a button in the app means the app has focus, so this is the case
+      that needs `SetForegroundWindow` — Windows grants it only to a process that received
+      the last input event, it is asynchronous, and sending before the switch lands is
+      exactly how these tools type into the wrong window. Verify the foreground actually
+      changed, with a timeout, and abort rather than send blind. Then Enter → Ctrl+A →
+      paste → Enter, pasting rather than typing because the whisper is GGG's own localised
+      template (this log carries Korean, Chinese, Russian, Portuguese and Spanish).
+      A hotkey pressed *in game* needs none of this — the game is already in front — so
+      button and hotkey are two different problems and the hotkey is the easy one.
+
+      **Either way it changes a hard constraint.** Rewrite CLAUDE.md and FINDINGS'
+      *The line the app does not cross* in the same change, to:
+
+      > one keypress or one click → exactly one message. Never on a timer, never in
+      > reaction to a reply, never more than one action per press.
+
+      Default **off**, `trade_hotkey_action = "copy" | "send"`, copy stays the shipped
+      behaviour. And it is Windows-only and untestable here — the shape of code that
+      shipped broken twice — so carry the Settings press-counter idea forward and log
+      every message the app sends.
+
+- [ ] **Thanking a seller to mark the trade — parked, and here is why.** The maintainer
+      will use Sidekick's auto-thank rather than build this. Worth knowing before relying
+      on it: measured 2026-07-31, "answer the last whisper **received**" is right in
+      **7 of 11** real trades — much better than "last whisper sent" (2 of 11), and two of
+      the four misses would thank a seller whose last message was `This player is AFK.`,
+      an auto-reply that landed in between. Harmless as a message; it does mean **a "ty"
+      in the log is not proof of a trade**, so those lines must not be parsed back as fill
+      markers. Party scanning cannot fix it either — there is no party roster in
+      `Client.txt` (checked). If this is ever built in-app, initiating it from the clicked
+      row is the only unambiguous option.
 
 ## Open — UX
 
@@ -154,6 +240,15 @@ which is why the original occurrence left no trace.
   the ones the Exchange has depth in, which is a judgement that will age. poe2scout's
   `/ReferenceCurrencies` endpoint publishes the real reference set — exalted at exactly 1.0,
   chaos and divine alongside it — and would be the honest source.
+- [ ] **GGG's own Currency Exchange API has both sides of the book — and we cannot reach
+  it yet.** Found 2026-07-31; full detail in [docs/FINDINGS.md](docs/FINDINGS.md), "GGG
+  publishes an official Currency Exchange API". `service:cxapi` returns per-pair
+  `lowest_ratio` / `highest_ratio` / stock / volume, which is **exactly the both-sides
+  measurement the pricing item above is blocked on** — poe2scout has no bid, no ask and no
+  depth. Blocked on client type, not on effort: it is a confidential-client scope and a
+  distributed exe is a public client. The public CDN URL in the docs serves a stale
+  July-2024 PoE1 snapshot whatever `realm` or `id` you pass. Re-test when GGG widens PoE2
+  API coverage; a small backend would unblock the project's biggest open question.
 - [ ] **poe2scout endpoints we never used.** `/openapi/v1.json` lists
   `Currencies/ByCategory` (paged, and it takes a `referenceCurrency`, so it answers "what is
   this worth in annul?" directly), `Currencies/{apiId}` with `PriceLogs` and `CurrentPrice`,

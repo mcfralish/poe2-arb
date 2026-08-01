@@ -30,6 +30,7 @@ ever been sent below 1.10x, and it is entangled with the reference price's own
 
 from __future__ import annotations
 
+import dataclasses
 import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -111,19 +112,84 @@ class Listing:
 
 @dataclass(frozen=True)
 class TradePlan:
-    """The best whole-lot trade against one listing."""
+    """The best whole-lot trade against one listing.
+
+    A "lot" is the listing's ratio **in lowest terms**, not the bundle the
+    seller advertised — see `smallest_lot`. The plan carries the two divine
+    rates it was computed against so a trade can be re-planned at a different
+    quantity afterwards without the caller having to remember them.
+    """
 
     lots: int
     units: float             # items received
+    pay_units: float         # paid, in the seller's own currency
     cost_divines: float      # divines paid
     proceeds_divines: float  # divines realised, after the floor
     profit_divines: float
     units_value: float       # what `units` is worth before the floor
+    # What one unit of each side was worth in divines when this was planned.
+    pay_unit_divines: float = 1.0
+    sale_unit_divines: float = 1.0
 
     @property
     def rounding_loss(self) -> float:
         """Divines lost to the integer floor. Large on small trades."""
         return self.units_value - self.proceeds_divines
+
+    @property
+    def get_per_lot(self) -> float:
+        """Items in one whole-currency lot — the quantity step you can buy in."""
+        return self.units / self.lots if self.lots else 0.0
+
+
+def smallest_lot(pay_amount: float, get_amount: float) -> tuple[float, float]:
+    """The listing's ratio in lowest terms: the smallest tradeable quantity.
+
+    A listing advertising "10 Faded Crisis Fragments for 100 divine" is a
+    *ratio*, not a bundle — the trade site lets you ask for any quantity along
+    it, and sellers answer those asks. Buying the whole advertised lot or
+    nothing meant a 100-divine listing was invisible to anyone holding 20
+    divines, which is most of the time (reported from the field 2026-07-31).
+
+    The floor on how finely it divides is that partial currency cannot be
+    traded: 3 of the 10 above would cost 30 divine, which is whole and fine,
+    while a 3-for-7 ratio only divides at 3 and 7. Dividing by the GCD gives
+    exactly the smallest step whose price is still a whole number of the
+    seller's currency. Non-integer amounts are left alone — GGG's exchange
+    quotes whole units, so that case is a malformed response rather than a
+    finer market.
+    """
+    if not (float(pay_amount).is_integer() and float(get_amount).is_integer()):
+        return pay_amount, get_amount
+    divisor = math.gcd(int(pay_amount), int(get_amount))
+    if divisor <= 1:
+        return pay_amount, get_amount
+    return pay_amount / divisor, get_amount / divisor
+
+
+def _plan_for_lots(
+    lots: int,
+    *,
+    lot_pay: float,
+    lot_get: float,
+    ce_divines: float,
+    pay_unit_divines: float,
+    sale_unit_divines: float,
+) -> TradePlan:
+    units = lots * lot_get
+    raw = units * ce_divines
+    proceeds = math.floor(raw / sale_unit_divines) * sale_unit_divines
+    return TradePlan(
+        lots=lots,
+        units=units,
+        pay_units=lots * lot_pay,
+        cost_divines=lots * lot_pay * pay_unit_divines,
+        proceeds_divines=float(proceeds),
+        profit_divines=proceeds - lots * lot_pay * pay_unit_divines,
+        units_value=raw,
+        pay_unit_divines=pay_unit_divines,
+        sale_unit_divines=sale_unit_divines,
+    )
 
 
 def plan_trade(
@@ -141,10 +207,13 @@ def plan_trade(
     Everything is accounted in divines, but neither side of the trade is
     denominated in them:
 
-        cost(k)     = k * pay_amount * pay_unit_divines      (exact — listing
+        cost(k)     = k * lot_pay * pay_unit_divines      (exact — listing
                         amounts are whole units of the seller's currency)
-        proceeds(k) = floor(k * get_amount * ce_divines / sale_unit_divines)
+        proceeds(k) = floor(k * lot_get * ce_divines / sale_unit_divines)
                         * sale_unit_divines
+
+    `lot_pay` and `lot_get` are the listing's ratio in lowest terms rather than
+    the amounts it advertises — see `smallest_lot`.
 
     `sale_unit_divines` is what one unit of the currency you settle in is worth.
     It is the single most consequential number here. Selling the same item for
@@ -158,45 +227,53 @@ def plan_trade(
     divine total. A seller wanting exalted can only be paid in exalted, and
     converting divines to exalted on the CE costs the spread, so a pooled
     divine figure would promise quantities you cannot actually buy. 0 means
-    unbounded. Iterating rather than solving
-    analytically because the floor makes profit non-monotonic in k: with a
-    3.79 rate and a 3.5 cost, successive lots add 3 or 4 divines alternately,
-    so the largest affordable k is not always the best one.
+    unbounded — and it caps the *quantity asked for* rather than dropping the
+    listing, which is what makes a 100-divine listing usable on a 20-divine
+    bankroll.
+
+    Searched rather than solved analytically because the floor makes profit
+    non-monotonic in k: with a 3.79 rate and a 3.5 cost, successive lots add 3
+    or 4 divines alternately, so the largest affordable k is not always the best
+    one. Only the tail of the range is searched — see `_WINDOW` below.
     """
     if pay_amount <= 0 or get_amount <= 0 or ce_divines <= 0 or stock <= 0:
         return None
     if pay_unit_divines <= 0 or sale_unit_divines <= 0:
         return None
-    lot_cost = pay_amount * pay_unit_divines
+    lot_pay, lot_get = smallest_lot(pay_amount, get_amount)
+    lot_cost = lot_pay * pay_unit_divines
     # Sell value of one lot must exceed its cost, or no k can profit: proceeds
-    # are floored, so they never exceed k * get_amount * ce_divines.
-    if get_amount * ce_divines <= lot_cost:
+    # are floored, so they never exceed k * lot_get * ce_divines.
+    gain = lot_get * ce_divines - lot_cost
+    if gain <= 0:
         return None
 
-    max_by_stock = int(stock // get_amount)
+    max_by_stock = int(stock // lot_get)
     if bankroll_units > 0:
-        max_by_bankroll = int(bankroll_units // pay_amount)
+        max_by_bankroll = int(bankroll_units // lot_pay)
     else:
         max_by_bankroll = MAX_LOTS
     k_max = min(max_by_stock, max_by_bankroll, MAX_LOTS)
     if k_max < 1:
         return None
 
+    # profit(k) lies in (k*gain - sale_unit, k*gain], so any k more than
+    # sale_unit/gain lots below k_max is strictly worse than k_max and needn't
+    # be tried. Without this, reducing the ratio to lowest terms would turn a
+    # handful of iterations per listing into thousands.
+    window = min(k_max, math.ceil(sale_unit_divines / gain) + 1)
     best: TradePlan | None = None
-    for k in range(1, k_max + 1):
-        units = k * get_amount
-        raw = units * ce_divines
-        proceeds = math.floor(raw / sale_unit_divines) * sale_unit_divines
-        profit = proceeds - k * lot_cost
-        if best is None or profit > best.profit_divines:
-            best = TradePlan(
-                lots=k,
-                units=units,
-                cost_divines=k * lot_cost,
-                proceeds_divines=float(proceeds),
-                profit_divines=profit,
-                units_value=raw,
-            )
+    for k in range(k_max - window + 1, k_max + 1):
+        plan = _plan_for_lots(
+            k,
+            lot_pay=lot_pay,
+            lot_get=lot_get,
+            ce_divines=ce_divines,
+            pay_unit_divines=pay_unit_divines,
+            sale_unit_divines=sale_unit_divines,
+        )
+        if best is None or plan.profit_divines > best.profit_divines:
+            best = plan
     if best is None or best.profit_divines <= 0:
         return None
     return best
@@ -262,7 +339,7 @@ class Candidate:
         whispered as "2412 exalted" appeared on screen as "5.6 div", which is
         unrecognisable as the offer that was made.
         """
-        return self.plan.lots * self.listing.pay_amount
+        return self.plan.pay_units
 
     @property
     def pay_per_unit(self) -> float:
@@ -272,6 +349,41 @@ class Candidate:
     @property
     def affordable(self) -> bool:
         return self.plan.lots >= 1
+
+
+def replan_units(candidate: Candidate, units: float) -> Candidate:
+    """The same listing bought at a different quantity, rounded to a whole lot.
+
+    For correcting a trade after the fact. A whisper asking for 18 is answered
+    with "I've only got 3", or the seller turns out to hold one of the two they
+    advertised — and until that correction can be made, the outcome log records
+    a trade that never happened at a profit nobody earned, which is the one
+    thing this file's numbers are meant to be good for.
+
+    Deliberately **not** re-optimised: the user is reporting what they bought,
+    so the quantity is taken as given even where a different one would have paid
+    better. Clamped to at least one lot and at most what the plan originally
+    asked for — a correction can only ever shrink a trade, since the extra was
+    never on offer.
+    """
+    plan = candidate.plan
+    lot_get = plan.get_per_lot
+    if lot_get <= 0:
+        return candidate
+    lots = max(1, min(plan.lots, round(units / lot_get)))
+    if lots == plan.lots:
+        return candidate
+    return dataclasses.replace(
+        candidate,
+        plan=_plan_for_lots(
+            lots,
+            lot_pay=plan.pay_units / plan.lots,
+            lot_get=lot_get,
+            ce_divines=candidate.ce_divines,
+            pay_unit_divines=plan.pay_unit_divines,
+            sale_unit_divines=plan.sale_unit_divines,
+        ),
+    )
 
 
 def classify(gap: float, *, min_gap: float, max_gap: float) -> Band:
@@ -422,7 +534,7 @@ def whisper_text(candidate: Candidate) -> str | None:
     listing predates the fields (offline listings carry none of them), so the
     caller can disable the copy action rather than paste a broken message.
 
-    The paid amount is in the **seller's** currency — `lots * pay_amount` — not
+    The paid amount is in the **seller's** currency — `plan.pay_units` — not
     `plan.cost_divines`. Those coincide only when the listing is priced in
     divines, so using the divine figure produced messages offering 5.58 exalted
     for something listed at 2412.
@@ -432,5 +544,5 @@ def whisper_text(candidate: Candidate) -> str | None:
         return None
     plan = candidate.plan
     buying = listing.item_whisper.replace("{0}", _fmt_qty(plan.units))
-    paying = listing.pay_whisper.replace("{0}", _fmt_qty(plan.lots * listing.pay_amount))
+    paying = listing.pay_whisper.replace("{0}", _fmt_qty(plan.pay_units))
     return listing.whisper.replace("{0}", buying).replace("{1}", paying)

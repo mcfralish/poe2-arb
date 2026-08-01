@@ -191,3 +191,40 @@ class TestBreakdowns:
         write_log(tmp_path / "outcomes.jsonl", [attempt(1), attempt(2)])
         t.reload()
         assert t.attempts.rowCount() == 2
+
+
+# --- Every trade ------------------------------------------------------------
+
+def test_every_trade_lists_only_the_ones_that_filled(tab):
+    """Asked for from the field: finding what you bought meant opening Every
+    whisper and sorting on Result."""
+    t = tab([
+        attempt(0), verdict(0, Outcome.FILLED, profit=3.0),
+        attempt(1), verdict(1, Outcome.NO_REPLY),
+        attempt(2), verdict(2, Outcome.SOLD),
+        attempt(3), verdict(3, Outcome.FILLED),
+    ])
+    assert t.attempts.rowCount() == 4
+    assert t.trades.rowCount() == 2
+    results = {t.trades.item(r, 6).text() for r in range(t.trades.rowCount())}
+    assert results == {"traded"}
+
+
+def test_every_trade_is_empty_without_a_fill(tab):
+    t = tab([attempt(0), verdict(0, Outcome.NO_REPLY)])
+    assert t.attempts.rowCount() == 1
+    assert t.trades.rowCount() == 0
+
+
+def test_a_corrected_quantity_shows_what_was_asked_for(tab):
+    """The difference between the ask and the trade measures missing stock."""
+    t = tab([
+        attempt(0),
+        {"kind": "amend", "id": "a0", "ts": "2026-07-20T12:04:00+00:00",
+         "lots": 1, "units": 3.0, "cost_divines": 3.0,
+         "expected_profit_divines": 0.9},
+        verdict(0, Outcome.FILLED),
+    ])
+    cell = t.trades.item(0, 2)
+    assert cell.text() == "3"
+    assert "Asked for 1" in cell.toolTip()

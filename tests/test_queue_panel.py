@@ -34,10 +34,10 @@ def qapp():
     return QApplication.instance() or QApplication([])
 
 
-def cand(*, char="Seller", pay=11.0, item="omen"):
+def cand(*, char="Seller", pay=11.0, item="omen", stock=1.0, get=1.0):
     listing = Listing(
         item_id=item, account=f"{char}#1", character=char,
-        pay_amount=pay, get_amount=1.0, stock=1.0, indexed=T0,
+        pay_amount=pay, get_amount=get, stock=stock, indexed=T0,
         whisper=f"@{char} buy {{0}} for {{1}}",
         item_whisper="{0} Thing", pay_whisper="{0} Coin",
     )
@@ -304,7 +304,7 @@ class TestCostColumns:
         assert "21,708 ex" in p.headline.text()
 
 
-# --- hovering a button highlights the row it acts on ------------------------
+# --- the row lights up, but not under a button -----------------------------
 
 def _enter(widget):
     from PySide6.QtCore import QPoint
@@ -317,8 +317,13 @@ def _enter(widget):
 
 
 class TestRowHover:
-    """Cell widgets are separate widgets the view never sees a mouse event for,
-    so hovering Accept used to highlight nothing at all."""
+    """Pointing at a button highlights the button; pointing at the row lights it.
+
+    Reported from the field 2026-07-31: reaching for Accept lit the whole row,
+    which is noise around the control you are already aiming at. The row tint
+    exists to say *which trade* a click acts on, and the cursor sitting on the
+    button has answered that already.
+    """
 
     def _button(self, panel, table, row, label):
         column = (
@@ -327,29 +332,33 @@ class TestRowHover:
         widget = table.cellWidget(row, column)
         return next(b for b in widget.findChildren(QPushButton) if b.text() == label)
 
-    def test_hovering_accept_marks_its_own_row(self, qapp):
+    def test_hovering_accept_leaves_the_row_alone(self, qapp):
         p, q = loaded(qapp, cand(char="A"), cand(char="B"))
         q.tick(T0 + timedelta(seconds=16))
         p.refresh(q, T0 + timedelta(seconds=16))
         qapp.processEvents()
         assert p.ready.rowCount() == 2
+        p.ready.set_hover_row(1)
         _enter(self._button(p, p.ready, 1, "Accept"))
-        assert p.ready.hover_row == 1
+        assert p.ready.hover_row == -1
 
-    def test_hovering_decline_marks_the_same_row(self, qapp):
-        p, q = loaded(qapp, cand())
-        _enter(self._button(p, p.ready, 0, "Decline"))
-        assert p.ready.hover_row == 0
-
-    def test_the_waiting_verdict_buttons_do_it_too(self, qapp):
+    def test_the_waiting_verdict_buttons_do_the_same(self, qapp):
         p, q = loaded(qapp, cand())
         q.take_offered(T0)
         p.refresh(q, T0)
         qapp.processEvents()
         for label in ("Traded", "No reply", "Already sold"):
-            p.awaiting.set_hover_row(-1)
+            p.awaiting.set_hover_row(0)
             _enter(self._button(p, p.awaiting, 0, label))
-            assert p.awaiting.hover_row == 0, label
+            assert p.awaiting.hover_row == -1, label
+
+    def test_the_rest_of_the_row_still_lights_up(self, qapp):
+        """Including the gaps between the buttons, which are row, not control."""
+        p, q = loaded(qapp, cand())
+        holder = p.ready.cellWidget(0, READY_ACTION_COLUMN)
+        p.ready.set_hover_row(-1)
+        _enter(holder)
+        assert p.ready.hover_row == 0
 
 
 # --- repeating a whisper ----------------------------------------------------
@@ -373,3 +382,61 @@ def test_the_two_sections_share_a_draggable_splitter(qapp):
     p, _ = loaded(qapp, cand())
     assert p.split.count() == 2
     assert not p.split.childrenCollapsible()
+
+
+# --- correcting a trade after the fact --------------------------------------
+
+def test_adjust_asks_for_the_quantity_actually_traded(qapp, monkeypatch):
+    """Whispered for 18, the seller had 3 (reported from the field 2026-07-31)."""
+    from poe2arb.gui import queue_panel as qp
+
+    p, q = loaded(qapp, cand(pay=11.0, stock=18.0))
+    taken = q.take_offered(T0)
+    p.refresh(q, T0)
+    qapp.processEvents()
+    assert taken.candidate.plan.units == 18.0
+
+    monkeypatch.setattr(qp.QuantityDialog, "ask", staticmethod(lambda *_a: 3.0))
+    seen = []
+    p.revise_requested.connect(lambda tid, units: seen.append((tid, units)))
+    assert p.click_action(p.awaiting, 0, "Adjust…")
+    assert seen == [(taken.id, 3.0)]
+
+
+def test_adjust_cancelled_changes_nothing(qapp, monkeypatch):
+    from poe2arb.gui import queue_panel as qp
+
+    p, q = loaded(qapp, cand(pay=11.0, stock=18.0))
+    q.take_offered(T0)
+    p.refresh(q, T0)
+    qapp.processEvents()
+    monkeypatch.setattr(qp.QuantityDialog, "ask", staticmethod(lambda *_a: None))
+    seen = []
+    p.revise_requested.connect(lambda *a: seen.append(a))
+    p.click_action(p.awaiting, 0, "Adjust…")
+    assert seen == []
+
+
+class TestQuantityDialog:
+    def _dialog(self, qapp, **kw):
+        from poe2arb.gui.queue_panel import QuantityDialog
+
+        return QuantityDialog(None, cand(**kw))
+
+    def test_it_cannot_ask_for_more_than_was_offered(self, qapp):
+        d = self._dialog(qapp, pay=11.0, stock=18.0)
+        assert d.units.maximum() == 18.0
+        assert d.units.value() == 18.0
+
+    def test_it_steps_in_whole_lots(self, qapp):
+        """Part of a lot would cost part of an orb, which cannot be traded."""
+        d = self._dialog(qapp, pay=11.0, stock=18.0, get=3.0)
+        assert d.units.singleStep() == 3.0
+        assert d.units.minimum() == 3.0
+
+    def test_the_preview_prices_the_correction(self, qapp):
+        d = self._dialog(qapp, pay=11.0, stock=18.0)
+        d.units.setValue(3.0)
+        qapp.processEvents()
+        assert "3 for 33 Divine Orbs" in d.summary.text() or "3 for" in d.summary.text()
+        assert "profit" in d.summary.text()

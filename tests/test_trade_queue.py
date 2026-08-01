@@ -454,53 +454,48 @@ def test_a_drop_the_app_made_itself_is_not_a_decline():
     assert q.submit([c], T0 + timedelta(minutes=10)) == 1
 
 
-# --- the bankroll is a total, not a per-trade allowance --------------------
+# --- outstanding whispers do not hold the bankroll ------------------------
 
-def test_currency_promised_to_a_whisper_is_not_offered_twice():
-    """With 500 exalted you could accept four separate 400-exalted trades.
+def test_an_outstanding_whisper_does_not_hold_back_the_next_trade():
+    """The 0.6.0 holdback, reverted 2026-07-31 on the maintainer's call.
 
-    Each was affordable on its own, because the sweep sizes every candidate
-    against the whole bankroll and cannot know what is already outstanding.
+    Treating a copied whisper as money spent until the user said otherwise was
+    accurate only if whispers usually fill. They do not: 79% go unanswered, so
+    the guard mostly withheld trades from a bankroll that was never touched.
     """
     q = queue()
-    q.set_bankroll({"divine": 20.0})
     q.submit([cand(char="A", pay=11.0), cand(char="B", pay=11.5)], T0)
     first = q.tick(T0).newly_offered
     q.take(first.id, T0)
-    assert q.committed() == {"divine": 11.0}
-    assert q.remaining() == {"divine": 9.0}
-
-    # B costs 11.5 and only 9 is left, so it is not promoted.
-    assert q.tick(T0 + timedelta(seconds=1)).newly_offered is None
-    assert len(q.pending) == 1
+    second = q.tick(T0 + timedelta(seconds=1)).newly_offered
+    assert second is not None
+    assert second.candidate.listing.character == "B"
 
 
-def test_freeing_the_money_makes_the_held_back_trade_offerable():
-    """It stays QUEUED rather than being dropped, so a no-reply revives it."""
+def test_outstanding_counts_everything_still_in_flight():
+    """What decides whether a session is over — see session.py."""
     q = queue()
-    q.set_bankroll({"divine": 20.0})
-    q.submit([cand(char="A", pay=11.0), cand(char="B", pay=11.5)], T0)
-    first = q.tick(T0).newly_offered
-    q.take(first.id, T0)
-    assert q.tick(T0 + timedelta(seconds=1)).newly_offered is None
-
-    q.resolve(first.id, Outcome.NO_REPLY)
-    assert q.committed() == {}
-    offered = q.tick(T0 + timedelta(seconds=2)).newly_offered
-    assert offered is not None
-    assert offered.candidate.listing.character == "B"
+    assert q.outstanding == 0
+    q.submit([cand(char="A", pay=11.0)], T0)
+    assert q.outstanding == 1              # queued
+    offered = q.tick(T0).newly_offered
+    assert q.outstanding == 1              # offered
+    q.take(offered.id, T0)
+    assert q.outstanding == 1              # awaiting a reply
+    q.resolve(offered.id, Outcome.NO_REPLY)
+    assert q.outstanding == 0
 
 
-def test_an_unset_pot_is_unconstrained():
-    """0 means "I didn't say", not "I have nothing" — capping it would hide trades."""
+def test_revise_corrects_the_quantity_without_losing_the_trades_identity():
+    """Whispered for 18, the seller had 3 — see listings.replan_units."""
     q = queue()
-    q.set_bankroll({"exalted": 500.0})     # nothing said about divine
-    q.submit([cand(char="A", pay=11.0)], T0)    # a divine-priced listing
-    first = q.tick(T0).newly_offered
-    assert first is not None
-    # And it stays unconstrained however much of it is already outstanding.
-    q.take(first.id, T0)
-    assert q.committed() == {"divine": 11.0}
-    assert q.remaining() == {"exalted": 500.0}
-    q.submit([cand(char="B", pay=11.5)], T0)
-    assert q.tick(T0 + timedelta(seconds=1)).newly_offered is not None
+    q.submit([cand(char="A", pay=11.0, stock=18.0)], T0)
+    trade = q.tick(T0).newly_offered
+    q.take(trade.id, T0)
+    before = trade.key
+    revised = q.revise(trade.id, 3.0)
+    assert revised is not None
+    assert revised.candidate.plan.units == 3.0
+    assert revised.key == before
+    # Nothing to change is reported as nothing changed.
+    assert q.revise(trade.id, 3.0) is None

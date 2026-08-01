@@ -45,6 +45,7 @@ from ..config import (
 from ..format import fmt_amount, fmt_depth, fmt_pct, fmt_skew
 from ..market import BASE_CURRENCY_CHOICES, Universe
 from ..rate_limit import Severity, check_pacing, min_safe_interval, worst_severity
+from ..session import SessionTracker
 from ..trade_queue import TradeQueue
 from .icon import make_app_icon
 from .icon_provider import IconProvider
@@ -129,6 +130,9 @@ class MainWindow(QMainWindow):
         # Kept so the long-shots slider can re-rank without another sweep.
         self._last_sweep = None
         self._quitting = False
+        # Which run of the trade loop we're in. Stamped on every whisper, so the
+        # Trades tab can show one evening's work rather than the whole log.
+        self.session = SessionTracker()
 
         self.trade_queue = TradeQueue(
             offer_window_s=self.cfg.offer_window_s,
@@ -138,10 +142,6 @@ class MainWindow(QMainWindow):
             # so they have to be allowed into the queue to be offered at all.
             queue_ghosts=self.cfg.risk_appetite > 0.0,
         )
-        # So the queue can hold back currency already promised to an outstanding
-        # whisper. The sweep sizes each trade against the whole bankroll, which
-        # is right one trade at a time and wrong across a queue of them.
-        self.trade_queue.set_bankroll(self.cfg.bankroll())
         self._apply_always_on_top()
 
         self.icons = IconProvider(self.cfg.cache_dir, self)
@@ -275,6 +275,7 @@ class MainWindow(QMainWindow):
         self.queue_panel.outcome_reported.connect(self._queue_outcome)
         self.queue_panel.dismiss_requested.connect(self._queue_dismiss)
         self.queue_panel.recopy_requested.connect(self._queue_recopy)
+        self.queue_panel.revise_requested.connect(self._queue_revise)
         self.lookup = QuickLookup()
         self.ops_split = QSplitter(Qt.Orientation.Vertical)
         self.ops_split.addWidget(self.queue_panel)
@@ -328,6 +329,9 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self._log_tab(), "Log")
 
         self.results.set_path(self.cfg.outcomes_path)
+        # The Trades tab reads the same log, for reviewing sessions other than
+        # the one in front of you.
+        self.sweep.set_history_path(self.cfg.outcomes_path)
 
         self.setCentralWidget(central)
 
@@ -584,6 +588,7 @@ class MainWindow(QMainWindow):
         self._sweep_worker = SweepWorker(self.cfg, self)
         self._sweep_worker.progress.connect(self._sweep_progress)
         self._sweep_worker.budget.connect(self._show_budget)
+        self._sweep_worker.candidates.connect(self._candidates_found)
         self._sweep_worker.finished_ok.connect(self._sweep_done)
         self._sweep_worker.failed.connect(self._sweep_failed)
         self._sweep_worker.finished.connect(self._sweep_thread_finished)
@@ -595,6 +600,12 @@ class MainWindow(QMainWindow):
 
     def _sweep_toggled(self, on: bool) -> None:
         if on:
+            # A session spans however many sweeps it takes; pressing this again
+            # while anything is still in flight carries on with the same one.
+            if not self.session.active:
+                self.session.begin()
+                self._log("session started")
+                self.sweep.set_live_session(self.session.id)
             self._log("looking for trades")
             self.start_sweep()
             return
@@ -661,6 +672,21 @@ class MainWindow(QMainWindow):
             return
         self._schedule_next_sweep()
 
+    def _candidates_found(self, candidates) -> None:
+        """Queue one item's trades the moment that item is priced.
+
+        A sweep is fifteen minutes long, and holding everything back until it
+        finished meant a long silence followed by every offer at once (reported
+        from the field 2026-07-31). The Trades tab still waits for the full
+        result, because it describes the pass as a whole.
+        """
+        if not candidates or not self.sweep_action.isChecked():
+            return
+        added = self.trade_queue.submit(candidates)
+        if added:
+            self._log(f"{added} new trade(s) queued")
+            self._queue_tick()
+
     def _sweep_done(self, result) -> None:
         self._last_sweep = result
         # Set before the table is filled, and from the value this sweep actually
@@ -678,6 +704,9 @@ class MainWindow(QMainWindow):
             )
             self._queue_tick()
             return
+        # Almost always a no-op: the trades were queued as they were found. It
+        # is the safety net for anything the streaming path missed — a candidate
+        # emitted while the toggle was briefly off, say.
         added = self.trade_queue.submit(result.candidates)
         if added:
             self._log(f"{added} new trade(s) queued")
@@ -713,6 +742,17 @@ class MainWindow(QMainWindow):
         if tick.auto_resolved:
             self.trade_queue.forget_resolved()
         self.queue_panel.refresh(self.trade_queue)
+        self._check_session_end()
+
+    def _check_session_end(self) -> None:
+        """Close the session once nothing is looking and nothing is outstanding."""
+        ended = self.session.note_state(
+            looking=self.sweep_action.isChecked(),
+            outstanding=self.trade_queue.outstanding,
+        )
+        if ended is not None:
+            self._log("session ended — the queue is empty and nothing is running")
+            self.sweep.set_live_session(None)
 
     def _record_auto_no_reply(self, trade) -> None:
         """Write a timed-out whisper to the outcome log as NO_REPLY.
@@ -799,6 +839,8 @@ class MainWindow(QMainWindow):
         assert self.cfg.outcomes_path is not None
         taken.attempt_id = record_attempt(
             self.cfg.outcomes_path, taken.candidate,
+            session_id=self.session.begin(),
+            league=self._league(),
             retention_days=self.cfg.history_retention_days,
         )
         c = taken.candidate
@@ -817,6 +859,47 @@ class MainWindow(QMainWindow):
             f"whisper copied: {c.plan.units:g} × {c.item_name} from "
             f"{c.listing.character or c.listing.account} for "
             f"{fmt_amount(c.pay_total, c.listing.pay_currency)}"
+        )
+        self.results.reload()
+        self.queue_panel.refresh(self.trade_queue)
+
+    def _league(self) -> str | None:
+        """The league a whisper is being sent in, for the outcome log.
+
+        Taken from the sweep that found the listing where there is one — that is
+        the league the price was read in — and from the configured or detected
+        name otherwise. League names rotate every few months, so a log without
+        this silently mixes two economies.
+        """
+        if self._last_sweep is not None:
+            return self._last_sweep.league
+        return self.cfg.league or self._detected_league
+
+    def _queue_revise(self, trade_id: str, units: float) -> None:
+        """Correct a whispered trade to the quantity actually traded.
+
+        The seller had fewer than they advertised, or the buyer could only
+        afford part of it. Both happened in the second field test, and until now
+        the log kept the ask — so the record said 18 Faded Crisis Fragments and
+        a profit nobody earned.
+        """
+        from ..outcomes import record_amendment
+
+        revised = self.trade_queue.revise(trade_id, units)
+        if revised is None:
+            return
+        c = revised.candidate
+        if revised.attempt_id:
+            assert self.cfg.outcomes_path is not None
+            record_amendment(
+                self.cfg.outcomes_path, revised.attempt_id, c,
+                retention_days=self.cfg.history_retention_days,
+            )
+        self.sweep.note_revision(c)
+        self._log(
+            f"corrected: {c.item_name} from {c.listing.character or c.listing.account} "
+            f"to {c.plan.units:g} for {fmt_amount(c.pay_total, c.listing.pay_currency)} "
+            f"(+{c.profit_divines:.2f} div)"
         )
         self.results.reload()
         self.queue_panel.refresh(self.trade_queue)
@@ -910,6 +993,8 @@ class MainWindow(QMainWindow):
         assert self.cfg.outcomes_path is not None
         attempt_id = record_attempt(
             self.cfg.outcomes_path, candidate,
+            session_id=self.session.begin(),
+            league=self._league(),
             retention_days=self.cfg.history_retention_days,
         )
         self.sweep.note_attempt(candidate, attempt_id)
@@ -940,7 +1025,6 @@ class MainWindow(QMainWindow):
             log.warning("no bankroll field for %r", currency)
             return
         setattr(self.cfg, field, held)
-        self.trade_queue.set_bankroll(self.cfg.bankroll())
         self._bankroll_save_timer.start()
 
     def _apply_always_on_top(self) -> None:
@@ -1014,20 +1098,30 @@ class MainWindow(QMainWindow):
                 isinstance(n, int) and n > 0 for n in sizes
             ):
                 splitter.setSizes(sizes)
+        for key, layout in self._column_layouts().items():
+            layout.restore(state.get(key))
         tab = state.get("tab")
         if isinstance(tab, int) and 0 <= tab < self.tabs.count():
             self.tabs.setCurrentIndex(tab)
 
+    def _column_layouts(self) -> dict:
+        """The tables whose column order and widths are the user's to arrange."""
+        return {
+            "ready_columns": self.queue_panel.ready._column_layout,
+            "awaiting_columns": self.queue_panel.awaiting._column_layout,
+            "trades_columns": self.sweep.columns,
+        }
+
     def _save_ui_state(self) -> None:
-        save_ui_state(
-            ui_state_path(self.cfg.cache_dir),
-            {
-                "geometry": encode_geometry(self.saveGeometry()),
-                "ops_split": self.ops_split.sizes(),
-                "queue_split": self.queue_panel.split.sizes(),
-                "tab": self.tabs.currentIndex(),
-            },
-        )
+        state = {
+            "geometry": encode_geometry(self.saveGeometry()),
+            "ops_split": self.ops_split.sizes(),
+            "queue_split": self.queue_panel.split.sizes(),
+            "tab": self.tabs.currentIndex(),
+        }
+        for key, layout in self._column_layouts().items():
+            state[key] = layout.state()
+        save_ui_state(ui_state_path(self.cfg.cache_dir), state)
 
     @staticmethod
     def _set_row(table: QTableWidget, row: int, items: list[QTableWidgetItem]) -> None:
@@ -1045,6 +1139,7 @@ class MainWindow(QMainWindow):
             universe=self._universe,
             leagues=self._leagues,
             detected_league=self._detected_league,
+            hotkey=getattr(self, "_hotkey", None),
         )
         if dlg.exec():
             previous = self.cfg
@@ -1066,7 +1161,6 @@ class MainWindow(QMainWindow):
         self.trade_queue.available_ttl_s = self.cfg.available_ttl_s
         self.trade_queue.awaiting_timeout_s = self.cfg.awaiting_timeout_s
         self.trade_queue.queue_ghosts = self.cfg.risk_appetite > 0.0
-        self.trade_queue.set_bankroll(self.cfg.bankroll())
         self._apply_always_on_top()
 
         rebind = (

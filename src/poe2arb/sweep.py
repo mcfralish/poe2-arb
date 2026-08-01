@@ -103,6 +103,7 @@ def run_sweep(
     progress: Callable[[int, int, str], None] | None = None,
     should_cancel: Callable[[], bool] | None = None,
     on_budget: Callable[..., None] | None = None,
+    on_candidates: Callable[[list[Candidate]], None] | None = None,
     ggg: GggExchangeClient | None = None,
     snapshot: CeSnapshot | None = None,
 ) -> SweepResult:
@@ -112,6 +113,13 @@ def run_sweep(
     access. A failure on one item is logged and skipped rather than aborting:
     a sweep is a series of independent probes, and losing item 40 of 69 is no
     reason to discard the 39 already priced.
+
+    `on_candidates` is called with each item's candidates the moment that item
+    is priced, rather than everything arriving at the end. A sweep is fifteen
+    minutes of paced requests, and holding the results back made it fifteen
+    silent minutes followed by a flood of queued offers all at once — which is
+    both overwhelming and wrong, since the first item's listings are already a
+    quarter of an hour stale by the time the last one is fetched.
     """
     started = datetime.now(timezone.utc)
     own_ggg = ggg is None
@@ -142,22 +150,23 @@ def run_sweep(
             )
 
         listings: list[Listing] = []
+        found: list[Candidate] = []
         for n, item_id in enumerate(items, 1):
             # Announced before the fetch, not after: the label should name what
             # is being waited on, which is the whole point of watching it.
             if progress is not None:
                 progress(n, len(items), names.get(item_id, item_id))
             try:
-                listings.extend(ggg.fetch_listings(league, item_id))
+                fresh = ggg.fetch_listings(league, item_id)
             except ScanCancelled:
                 raise
             except Exception as e:  # noqa: BLE001 - one bad item must not end the sweep
                 log.warning("sweep: %s failed: %s", item_id, e)
                 errors[item_id] = str(e)
-
-        candidates = rank_candidates(
-            build_candidates(
-                listings,
+                continue
+            listings.extend(fresh)
+            priced = build_candidates(
+                fresh,
                 ce_price,
                 names,
                 min_gap=cfg.min_gap_ratio,
@@ -166,9 +175,16 @@ def run_sweep(
                 sale_unit_divines=sale_unit,
                 settle_currency=cfg.sale_currency,
                 min_profit_divines=cfg.min_profit_divines,
-            ),
-            risk_appetite=cfg.risk_appetite,
-        )
+            )
+            if not priced:
+                continue
+            found.extend(priced)
+            if on_candidates is not None:
+                on_candidates(
+                    rank_candidates(priced, risk_appetite=cfg.risk_appetite)
+                )
+
+        candidates = rank_candidates(found, risk_appetite=cfg.risk_appetite)
         log.info(
             "cross-venue sweep: %d listings -> %d candidates (%d plausible)",
             len(listings), len(candidates),

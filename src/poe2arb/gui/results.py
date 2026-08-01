@@ -123,6 +123,12 @@ class ResultsTab(QWidget):
         self.tabs.addTab(self.by_age, "By listing age")
         self.by_presence = _make_table(_buckets_named("Seller"))
         self.tabs.addTab(self.by_presence, "By seller state")
+        # Trades before whispers: "what did I actually buy" is the question
+        # asked most often, and answering it by opening Every whisper and
+        # sorting on Result was two steps too many (asked for from the field
+        # 2026-07-31). Same columns, same rows — just the ones that filled.
+        self.trades = _make_table(ATTEMPT_COLUMNS, sort_column=0)
+        self.tabs.addTab(self.trades, "Every trade")
         self.attempts = _make_table(ATTEMPT_COLUMNS, sort_column=0)
         self.tabs.addTab(self.attempts, "Every whisper")
         layout.addWidget(self.tabs)
@@ -170,7 +176,9 @@ class ResultsTab(QWidget):
                 "you which discounts are worth messaging about — which is "
                 "currently an estimate from a handful of trades."
             )
-            for table in (self.by_gap, self.by_age, self.by_presence, self.attempts):
+            for table in (
+                self.by_gap, self.by_age, self.by_presence, self.trades, self.attempts
+            ):
                 table.setRowCount(0)
             return
 
@@ -178,7 +186,10 @@ class ResultsTab(QWidget):
         self._fill_buckets(self.by_gap, summary.by_gap)
         self._fill_buckets(self.by_age, summary.by_age)
         self._fill_buckets(self.by_presence, summary.by_presence)
-        self._fill_attempts()
+        self._fill_attempts(self.attempts, self._attempts)
+        self._fill_attempts(
+            self.trades, [a for a in self._attempts if a.outcome.is_success]
+        )
 
         pending = sum(1 for a in self._attempts if not a.outcome.is_resolved)
         bits = [f"{summary.fills} of {summary.resolved} whispers traded"]
@@ -241,21 +252,28 @@ class ResultsTab(QWidget):
         table.setSortingEnabled(True)
         table.sortByColumn(0, Qt.SortOrder.AscendingOrder)
 
-    def _fill_attempts(self) -> None:
-        table = self.attempts
+    def _fill_attempts(self, table: QTableWidget, attempts: list) -> None:
         table.setSortingEnabled(False)
-        table.setRowCount(len(self._attempts))
-        for row, a in enumerate(self._attempts):
+        table.setRowCount(len(attempts))
+        for row, a in enumerate(attempts):
             profit = (
                 a.actual_profit_divines
                 if a.actual_profit_divines is not None
                 else a.expected_profit_divines
             )
             stamp = a.ts.astimezone()
+            bought = NumericItem(f"{a.units:g}", a.units)
+            if a.amended and a.asked_units:
+                # The ask is kept as well as the correction: the difference is
+                # itself a measurement of how much listed stock isn't there.
+                bought.setToolTip(
+                    f"Asked for {a.asked_units:g}, traded {a.units:g} — corrected "
+                    f"after the fact."
+                )
             cells = [
                 NumericItem(stamp.strftime("%d %b %H:%M"), stamp.timestamp()),
                 TextItem(a.item_name),
-                NumericItem(f"{a.units:g}", a.units),
+                bought,
                 NumericItem(f"{a.gap:.2f}x", a.gap),
                 _band_cell(a.band),
                 TextItem(a.character or a.account),

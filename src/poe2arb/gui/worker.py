@@ -38,6 +38,9 @@ class SweepWorker(QThread):
 
     progress = Signal(int, int, str)  # (item number, total, item name)
     budget = Signal(object)           # BudgetState, straight off the headers
+    # One item's candidates, as soon as that item is priced. The queue fills
+    # from these rather than waiting for the whole sweep — see run_sweep.
+    candidates = Signal(object)       # list[Candidate]
     finished_ok = Signal(object)  # SweepResult
     failed = Signal(str)
 
@@ -61,6 +64,7 @@ class SweepWorker(QThread):
                 self._cfg,
                 progress=lambda i, n, what: self.progress.emit(i, n, what),
                 on_budget=self.budget.emit,
+                on_candidates=self.candidates.emit,
                 should_cancel=self._is_cancelled,
             )
         except ScanCancelled:

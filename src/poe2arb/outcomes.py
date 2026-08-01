@@ -14,7 +14,14 @@ Two design choices worth keeping:
   The unanswered ones are the whole signal.
 - **Outcomes are corrections to an existing row, appended rather than edited.**
   The file stays append-only (cheap, crash-safe, same shape as scan history) and
-  the reader folds later verdicts onto earlier attempts by id.
+  the reader folds later verdicts onto earlier attempts by id. Amendments — the
+  quantity actually bought, when it differs from the quantity whispered for —
+  work the same way, so the original ask is never overwritten.
+
+Every attempt also carries the **session** it belongs to and the **league** it
+was made in. Neither is derivable afterwards: sessions are a fact about how the
+app was driven, and league names rotate, so a log spanning two of them silently
+mixes two different economies.
 """
 
 from __future__ import annotations
@@ -26,7 +33,7 @@ import statistics
 import uuid
 from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 
@@ -84,6 +91,20 @@ class Attempt:
     # What the trade actually cleared, when the user tells us. Left None on a
     # fill we weren't given a figure for, which is not the same as zero.
     actual_profit_divines: float | None = None
+    # Total paid in the seller's own currency — the figure that went into the
+    # whisper. `cost_divines` is the same money in the unit the maths runs in.
+    pay_units: float = 0.0
+    pay_currency_total: str | None = None
+    # Which run of the app this whisper belongs to, and which league it was made
+    # in. None on records written before 0.7.0.
+    session_id: str | None = None
+    league: str | None = None
+    # True once the quantity has been corrected after the fact — the seller had
+    # fewer than they advertised, or the buyer could only afford part of it.
+    amended: bool = False
+    # What was originally asked for, kept when `amended`. A correction that
+    # erased the ask would hide how often sellers list stock they don't have.
+    asked_units: float | None = None
 
 
 # --- retention -------------------------------------------------------------
@@ -167,7 +188,14 @@ def _new_id() -> str:
     return uuid.uuid4().hex[:12]
 
 
-def record_attempt(path: Path, candidate, *, retention_days: float = 0.0) -> str:
+def record_attempt(
+    path: Path,
+    candidate,
+    *,
+    session_id: str | None = None,
+    league: str | None = None,
+    retention_days: float = 0.0,
+) -> str:
     """Log a copied whisper as a pending attempt. Returns its id."""
     listing = candidate.listing
     attempt_id = _new_id()
@@ -175,6 +203,8 @@ def record_attempt(path: Path, candidate, *, retention_days: float = 0.0) -> str
         "kind": "attempt",
         "id": attempt_id,
         "ts": datetime.now(timezone.utc).isoformat(),
+        "session_id": session_id,
+        "league": league,
         "item_id": listing.item_id,
         "item_name": candidate.item_name,
         "account": listing.account,
@@ -186,6 +216,7 @@ def record_attempt(path: Path, candidate, *, retention_days: float = 0.0) -> str
         "band": candidate.band.value,
         "lots": candidate.plan.lots,
         "units": candidate.plan.units,
+        "pay_units": candidate.pay_total,
         "cost_divines": candidate.plan.cost_divines,
         "expected_profit_divines": candidate.profit_divines,
         "listing_age_s": listing.age_s(),
@@ -194,6 +225,33 @@ def record_attempt(path: Path, candidate, *, retention_days: float = 0.0) -> str
     }
     _append(path, row, retention_days)
     return attempt_id
+
+
+def record_amendment(
+    path: Path, attempt_id: str, candidate, *, retention_days: float = 0.0
+) -> None:
+    """Correct an attempt's quantity to what was actually traded.
+
+    Appended, never edited over the top: the difference between what was asked
+    for and what was available is itself a measurement — the field test found
+    sellers advertising two Omens and holding one — and an amendment that
+    overwrote the ask would destroy it. `read_attempts` folds these on and keeps
+    the original in `asked_units`.
+    """
+    _append(
+        path,
+        {
+            "kind": "amend",
+            "id": attempt_id,
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "lots": candidate.plan.lots,
+            "units": candidate.plan.units,
+            "pay_units": candidate.pay_total,
+            "cost_divines": candidate.plan.cost_divines,
+            "expected_profit_divines": candidate.profit_divines,
+        },
+        retention_days,
+    )
 
 
 def record_outcome(
@@ -250,6 +308,7 @@ def read_attempts(path: Path) -> list[Attempt]:
     attempts: dict[str, dict] = {}
     order: list[str] = []
     verdicts: list[dict] = []
+    amendments: list[dict] = []
     try:
         with open(path, encoding="utf-8") as f:
             for line in f:
@@ -266,8 +325,23 @@ def read_attempts(path: Path) -> list[Attempt]:
                     attempts[row["id"]] = row
                 elif row.get("kind") == "outcome" and row.get("id"):
                     verdicts.append(row)
+                elif row.get("kind") == "amend" and row.get("id"):
+                    amendments.append(row)
     except OSError:
         return []
+
+    # Amendments before verdicts, because a verdict can carry a realised profit
+    # and must not be undone by a quantity correction written earlier.
+    for a in amendments:
+        row = attempts.get(a["id"])
+        if row is None:
+            continue
+        row.setdefault("asked_units", row.get("units"))
+        row["amended"] = True
+        for key in ("lots", "units", "pay_units", "cost_divines",
+                    "expected_profit_divines"):
+            if key in a:
+                row[key] = a[key]
 
     for v in verdicts:
         row = attempts.get(v["id"])
@@ -316,9 +390,86 @@ def read_attempts(path: Path) -> list[Attempt]:
                     if row.get("actual_profit_divines") is not None
                     else None
                 ),
+                pay_units=float(row.get("pay_units") or 0.0),
+                session_id=row.get("session_id") or None,
+                league=row.get("league") or None,
+                amended=bool(row.get("amended")),
+                asked_units=(
+                    float(row["asked_units"])
+                    if row.get("asked_units") is not None
+                    else None
+                ),
             )
         )
     return out
+
+
+@dataclass(frozen=True)
+class Session:
+    """One run of the trade loop, as reconstructed from the log."""
+
+    id: str | None
+    started_at: datetime
+    ended_at: datetime
+    league: str | None
+    attempts: int
+    fills: int
+    realised_divines: float
+
+    @property
+    def label(self) -> str:
+        """What the session picker shows. Local time — the user's own clock."""
+        start = self.started_at.astimezone()
+        if self.id is None:
+            return f"Before sessions were recorded ({self.attempts} whispers)"
+        span = self.ended_at.astimezone()
+        clock = start.strftime("%d %b %H:%M")
+        if span - start >= timedelta(minutes=1):
+            clock += f"–{span.strftime('%H:%M')}"
+        return f"{clock}  ·  {self.fills}/{self.attempts} traded"
+
+
+def sessions(attempts: list[Attempt]) -> list[Session]:
+    """Every session in the log, newest first.
+
+    Grouped by the id the app stamped on each attempt rather than by a gap in
+    the timestamps: a session is defined by the queue draining, which is not
+    something a clock can see — two sweeps twenty minutes apart with a whisper
+    outstanding across them are one session, and two a minute apart with nothing
+    in between are two.
+    """
+    groups: dict[str | None, list[Attempt]] = {}
+    for a in attempts:
+        groups.setdefault(a.session_id, []).append(a)
+    out = []
+    for session_id, rows in groups.items():
+        fills = [a for a in rows if a.outcome.is_success]
+        out.append(
+            Session(
+                id=session_id,
+                started_at=min(a.ts for a in rows),
+                ended_at=max(a.ts for a in rows),
+                league=next((a.league for a in rows if a.league), None),
+                attempts=len(rows),
+                fills=len(fills),
+                realised_divines=sum(
+                    a.actual_profit_divines
+                    if a.actual_profit_divines is not None
+                    else a.expected_profit_divines
+                    for a in fills
+                ),
+            )
+        )
+    return sorted(out, key=lambda s: s.started_at, reverse=True)
+
+
+def leagues(attempts: list[Attempt]) -> list[str]:
+    """Every league the log has whispers from, most recent first."""
+    seen: dict[str, datetime] = {}
+    for a in attempts:
+        if a.league:
+            seen[a.league] = max(seen.get(a.league, a.ts), a.ts)
+    return sorted(seen, key=lambda name: seen[name], reverse=True)
 
 
 # ---------------------------------------------------------------------------

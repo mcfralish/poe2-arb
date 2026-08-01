@@ -42,6 +42,7 @@ class SettingsDialog(QDialog):
         universe=None,
         leagues: list[str] | None = None,
         detected_league: str | None = None,
+        hotkey=None,
     ):
         super().__init__(parent)
         self.setWindowTitle("Settings")
@@ -266,6 +267,20 @@ class SettingsDialog(QDialog):
         self.hotkey.changed.connect(lambda _: self._revalidate())
         form.addRow("Hotkey", self.hotkey)
 
+        # Whether the key is actually listening, and whether it has ever fired.
+        # Two releases shipped a hotkey that registered, said so in the log and
+        # then dropped every press, with nothing on screen able to tell that
+        # from a user who hadn't pressed it. This dialog stays open while the
+        # key is live, so pressing it here answers the question on the spot.
+        self._hotkey_obj = hotkey
+        self.hotkey_state = QLabel()
+        self.hotkey_state.setWordWrap(True)
+        self.hotkey_state.setStyleSheet(f"color: {muted_color(self)};")
+        form.addRow("", self.hotkey_state)
+        if hotkey is not None:
+            hotkey.pressed.connect(self._hotkey_fired)
+        self._refresh_hotkey_state()
+
         self.budget_label = QLabel()
         self.budget_label.setWordWrap(True)
         layout.addWidget(self.budget_label)
@@ -323,6 +338,36 @@ class SettingsDialog(QDialog):
         # default — wiping a long list on a button labelled "restore defaults"
         # would be a nasty surprise. Clear All inside the picker still exists.
         self._revalidate()
+
+    # ---------------------------------------------------------------- the hotkey
+
+    def _refresh_hotkey_state(self) -> None:
+        """Say whether the binding is live right now, in plain words."""
+        hk = self._hotkey_obj
+        if hk is None:
+            self.hotkey_state.setText("")
+            return
+        if not hk.supported:
+            self.hotkey_state.setText("Windows only — the hotkey does nothing here.")
+        elif not hk.active:
+            self.hotkey_state.setText(
+                "Not listening. Tick the box above and press OK to bind it."
+            )
+        elif hk.presses:
+            self.hotkey_state.setText(
+                f"Listening — fired {hk.presses} time"
+                f"{'s' if hk.presses != 1 else ''} since it was bound."
+            )
+        else:
+            self.hotkey_state.setText(
+                "Listening. Press it now to check — this line will say so."
+            )
+
+    def _hotkey_fired(self) -> None:
+        presses = self._hotkey_obj.presses if self._hotkey_obj is not None else 1
+        self.hotkey_state.setText(
+            f"Just fired — the hotkey is working ({presses} so far)."
+        )
 
     # ---------------------------------------------------------------- validation
 
