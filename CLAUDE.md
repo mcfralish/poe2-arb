@@ -32,6 +32,14 @@ every emoji button rendering as the same empty box. **A screenshot is the only t
 sees any of these** — none of them raise, and none of them change a widget's API. Use it
 rather than assuming a widget renders correctly because it constructs.
 
+**What a Linux screenshot does not see: the fonts users actually have.** The 0.8.0 dingbat
+buttons (✔ ✖ ⚑ ⚐ ❐ ✎ ☾ ⊘ ✕) were checked this way, drew cleanly, and shipped **illegible on
+Windows** — verified in game 2026-08-02, worst in the seven-action *Waiting on a reply* row.
+Anything whose correctness is a *glyph or a text measurement* — icon characters, a
+`sizeHint` derived from a font, a drop-down widened to fit its longest label — is verified
+here only provisionally, and needs a Windows build to confirm. The offscreen screenshot
+proves layout and paint order; it does not prove legibility.
+
 Traps when driving panels from a script: `MarketPanel` needs `set_universe(...)` **and**
 `render(names=..., values=..., volumes=...)` before any row exists; a `QTableWidget`
 check indicator is drawn on the leading edge whatever `setTextAlignment` says — centring one
@@ -124,11 +132,27 @@ now because 5% is *inside the noise*, not because of a 26% bias.
 **All of the above is true of liquid pairs only, and 2026-08-02 reversed it below them.**
 Astrid's Creativity (~110k `ValueTraded`) was read off both sides of the book: the book is
 **22.2% wide** against a 1.7% liquid control, and the app sits **+53% above the bid** —
-above even the *ask*. So **the liquidity-scaled haircut is back on**; it was killed on
-evidence from pairs at 1.6M and 10.0M, which is not where the app loses money. It explains
-both known real losses, one of which was banded *plausible*. Do not re-kill it by quoting
-the liquid numbers. See [docs/FINDINGS.md](docs/FINDINGS.md), "The reference
-price does not match what a sale realises".
+above even the *ask*. It explains both known real losses, one of which was banded
+*plausible*. **Do not re-kill "thin items are overstated" by quoting the liquid numbers**;
+1.6M and 10.0M `ValueTraded` is not where the app loses money.
+
+**But the haircut is a floor, not a curve — four more pairs, same day, settled that.**
+Tecrod's Gaze (115k), Uhtred's Saga (173k), Expedition Logbook (568k) and Cowardly Fate
+(580k) were read the same way. Two results, and the second is the one that constrains code:
+
+- **The direction holds.** Below ~600k `ValueTraded` the app quotes **at or above the bid on
+  5 of 5** readings and above the *ask* on 4; above 1.6M it goes both ways. Median error over
+  the bid **+9.4%**.
+- **`ValueTraded` does not predict the size of it.** The error is non-monotone in liquidity
+  (110k → +53%, 115k → **−0.1%**, 173k → +8.1%, 568k → +9.4%, 580k → +21.5%) and **book
+  width does not predict it either** — Cowardly Fate has the tightest book ever measured
+  here (0.6%) and the second-largest error. **Do not fit `haircut = f(ValueTraded)`.** Build
+  a flat conservative floor below ~1M instead: believe the bid, not the quote.
+
+A wrong *level* on a tight book is what a **stale** reference price looks like, so age is
+the untested axis — `ce_age_s` is recorded on every whisper since 0.8.0 and has never been
+analysed. See [docs/FINDINGS.md](docs/FINDINGS.md), "The reference price does not match what
+a sale realises" → "Four more pairs, 2026-08-02".
 
 ### The pipeline
 
@@ -144,6 +168,18 @@ brackets the whole loop: a session starts on *Find trades* and ends only when no
 running **and** nothing is outstanding, so pressing the toggle again mid-session continues
 it. Its id and the league go on every attempt — neither is recoverable from the log
 afterwards, and league names rotate.
+
+**The app is used sitting in town with full attention, not glanced at mid-map** (measured
+2026-08-02, the first real play session on 0.8.0). This corrects a premise that several
+decisions were built on — the toast and alert-window model, the 30px buttons, "where someone
+mid-map is looking", and `risk_appetite` as a tolerance for interruption. **Density and
+throughput beat glanceability**; the scarce resource is whispers sent per minute of sitting
+there, not the user's patience. Two consequences are decided and **not yet built**, so read
+TODO before touching `trade_queue` or `queue_panel`: *Ready to whisper* loses its
+one-per-`offer_window_s` drip (everything found lands in the queue immediately) and sorts by
+the hotkey's own ranking order, so **row 1 is always the trade the hotkey will take**. The
+old rule it replaces — oldest-first so nothing on screen moves — is annotated as reversed in
+[docs/FINDINGS.md](docs/FINDINGS.md), *The offer queue*.
 
 Four results from field tests are load-bearing in `listings.py` and must not be re-derived
 (full evidence in [docs/FINDINGS.md](docs/FINDINGS.md), "Negative results"):
@@ -313,7 +349,11 @@ not 30.
   *demoted*, by a measured weight rather than a rule. Hiding either would make the ranking
   unfalsifiable, which is exactly how `FILL_PRIOR[GHOST] = 0.0` survived four field tests.
   ("Ghosts rank last" was the rule until 2026-08-01 and is no longer true: a big enough
-  ghost outranks a plausible, because at a ~2% fill rate it should.)
+  ghost outranks a plausible, because at a ~2% fill rate it should.) **One exception, and
+  it is the user's own switch:** `queue_ghosts = risk_appetite > 0.0`, so at *Long shots* 0
+  ghosts are not queued at all. Above zero **every** ghost is; the slider then only
+  re-weights them (`fill_weight`: 0.16 → 0.58 at 50% → 1.0). Raising it past 50% pulls in
+  nothing new. The app must never make that call on its own.
 
 [docs/FINDINGS.md](docs/FINDINGS.md), "Deliberate decisions — do not 'fix' these", is the
 full list. Read it before changing queue timing, banding, or anything that looks like an

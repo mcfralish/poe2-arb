@@ -133,10 +133,14 @@ items trade" is answerable even though "how many divines" is not.
 >
 > **Consequences, and they reverse standing decisions:**
 >
-> 1. **The liquidity-scaled haircut is back on.** It was declared dead on 2026-08-01 —
->    "it corrects for a spread that is not there" — on the strength of two pairs carrying
->    1.6M and 10.0M `ValueTraded`. At 110k the spread is emphatically there. The dead
->    branch was dead *for liquid pairs*, which is not where the app loses money.
+> 1. **A haircut is back on — but *not* scaled on `ValueTraded`.** It was declared dead on
+>    2026-08-01 — "it corrects for a spread that is not there" — on the strength of two
+>    pairs carrying 1.6M and 10.0M `ValueTraded`. At 110k the spread is emphatically there,
+>    so the dead branch was dead *for liquid pairs*, which is not where the app loses money.
+>    **Four more readings the next day then killed the *scaling* while confirming the
+>    direction** — the error is not monotone in `ValueTraded` and book width does not
+>    predict it. See *Four more pairs, 2026-08-02* immediately below before building
+>    anything; what it supports is a flat floor under ~1M, not a curve.
 > 2. **Freshness is still worth building but is no longer the whole story.** Movement
 >    explains the ±6%, sign-flipping error on liquid pairs. It does not explain a
 >    one-directional +53% on a thin one; a 22% book does.
@@ -153,9 +157,73 @@ items trade" is answerable even though "how many divines" is not.
 > figure as indicative — but the maintainer recorded it as a real loss at the time, and a
 > 22% book is a sufficient explanation where a ±6% wobble never was.)
 >
-> **n = 1 item, one reading.** The direction is not subtle — 22% against 2% is an order of
-> magnitude — but a second thin pair would make it a curve rather than a point, and the
-> haircut needs a curve. Take one more before fitting anything.
+> **n = 1 item, one reading — and the four that followed did not extend it.** The direction
+> is not subtle: 22% against 2% is an order of magnitude. But "take one more before fitting
+> anything" was answered the next day with four, and they showed Astrid's to be a point
+> rather than the head of a curve — an item 5k away in `ValueTraded` reads dead on the bid.
+> **Do not fit a curve on this reading.** Read the next subsection first.
+
+#### Four more pairs, 2026-08-02: the direction holds and **`ValueTraded` will not fit it**
+
+**Read 2026-08-01 21:31–21:37 PDT (2026-08-02 04:31–04:37Z)**, same method as Astrid's:
+both sides of the in-game book and the app's Quick Lookup within the same minute, clock
+time noted per item. The four "take one more before fitting anything" readings arrived as
+four rather than one, and they do not support the curve they were taken to fit.
+
+`ValueTraded` was pulled from a live `scout.snapshot()` at 05:01Z — 24 minutes after the
+last reading — and **every one of the four app figures reproduces to four significant
+figures** (1.8599 / 6.4402 / 1.1347 / 6.9955). The readings are transcribed correctly and
+nothing moved underneath them in that half hour.
+
+| item | pair `ValueTraded` | CE ask *(pay to buy)* | CE bid *(receive to sell)* | mid | **book width** | app | **app vs bid** | app vs ask |
+|---|---|---|---|---|---|---|---|---|
+| Astrid's Creativity *(08-01)* | 110k | 2.00 | 1.60 | 1.80 | **22.2%** | 2.45 | **+53.1%** | +22.5% |
+| Tecrod's Gaze | 115k | 7.5 | 7.0 | 7.25 | 6.9% | 7.00 | **−0.1%** | −6.7% |
+| Uhtred's Saga | 173k | 1.1 | 1.05 | 1.075 | 4.7% | 1.13 | **+8.1%** | +3.2% |
+| Expedition Logbook | 568k | 1.8 | 1.7 | 1.75 | 5.7% | 1.86 | **+9.4%** | +3.3% |
+| Cowardly Fate | 580k | 5.33 | 5.3 | 5.315 | **0.6%** | 6.44 | **+21.5%** | +20.8% |
+| Faded Crisis Fragment *(08-01)* | 1.60M | 9.5 | 9.3 | 9.4 | 2.1% | 8.754 | **−5.9%** | −7.9% |
+| Omen of Whittling *(08-01)* | 10.0M | 10.33 | 10.10 | 10.2 | 2.3% | 10.760 | **+6.5%** | +4.2% |
+| Divine ↔ Exalted *(liquid control)* | — | 407 ex | 400 ex | 403.5 | 1.7% | — | — | — |
+
+**What survives, and it is the part that matters for money.** Below ~600k `ValueTraded` the
+error has a **direction**: the app quotes at or above the bid on **5 of 5** readings, and
+above the *ask* on 4 of them. Above 1.6M it goes both ways (−5.9% / +6.5%). So the app
+systematically overstates what a thin sale realises, the *uncertain*-band "treat this as a
+ceiling" wording is correct, and a haircut of some shape is justified. Median error over the
+bid on the five sub-1M readings is **+9.4%**; the mean is +18.4%.
+
+**What does not survive: scaling the haircut on `ValueTraded`.** The 2026-08-02 plan was to
+fit a curve on liquidity. These five points cannot carry one:
+
+1. **The error is not monotone in `ValueTraded`, not even close.** Ordered by liquidity:
+   110k → **+53.1%**, 115k → **−0.1%**, 173k → +8.1%, 568k → +9.4%, 580k → **+21.5%**. The
+   two closest-matched pairs in the whole sample are the two widest divergences in it.
+   Astrid's and Tecrod's Gaze sit 5k apart in `ValueTraded` and 53 percentage points apart
+   in error. Any monotone function of `ValueTraded` fitted here has an r² near zero.
+2. **Book width is not monotone in `ValueTraded` either** (22.2% → 6.9% → 4.7% → 5.7% →
+   0.6%), so it is not an alternative axis in disguise.
+3. **Book width does not predict the error.** Cowardly Fate has the **tightest book the
+   project has ever measured** — 0.6%, tighter than the 1.7% divine↔exalted control — and
+   the **second-largest error** in the table, +21.5% over the bid and +20.8% over the ask.
+   The app is not quoting a mid on a wide book there; it is 37× the half-spread away from
+   the mid. That is a wrong *level*, exactly like the 07-30 readings, and no spread model
+   reaches it.
+4. **So Astrid's is a point, not the head of a trend.** Its 22.2% book and +53% error were
+   read as the thin end of a curve. At the same liquidity, Tecrod's Gaze is dead on the bid.
+
+**Consequence — the haircut is still on, but as a floor, not a curve.** Do not fit
+`haircut = f(ValueTraded)`; there is nothing to fit. What the data supports is the weaker,
+buildable claim: **below ~1M `ValueTraded`, believe the bid, not the quote** — apply a flat
+conservative discount (the +9.4% median is the defensible starting number, +21.5% the
+observed worst case short of Astrid's), or refuse to band a thin item *plausible* at all.
+Anything finer needs an axis this sample has not found.
+
+**The axis worth trying next is age, not liquidity.** A wrong *level* on a tight book is
+what a stale reference price looks like, and it is what the 07-30 → 08-01 collapse of Omen
+of Whittling (+37% → +6.5%, same item, same parser) already looked like. **`ce_age_s` is
+now instrumented on every whisper and has never been analysed** — that is the cheapest
+remaining test of the whole pricing question, and unlike this one it needs no game time.
 
 
 > **Read the 2026-08-01 subsection at the end before acting on this one.** The ~26%
@@ -878,6 +946,63 @@ attempts — 06:05:45Z ↔ `2026/07/31 23:05:47`.
   job the reader has to be told; *Amount / Price per / Total* is what the maintainer reached
   for unprompted, and it is the same vocabulary the in-game trade UI uses.
 
+### The first real play session on 0.8.0 — Windows, 2026-08-02
+
+**The build:** the `b8d43a8` artifact from run 30727645833, carrying the ranking refit, the
+editable rows, `FILL_PRIOR[GHOST]` and the `stock` / `ce_age_s` instrumentation. Everything
+below is the maintainer's own report from playing with it, so it settles the Windows
+verification list that had been open since 0.8.0 was written.
+
+**Confirmed working — close these, do not re-verify:**
+
+- **It starts and the tables render.** No startup crash, no mangled table. This was the
+  base risk: 0.3.0 shipped a startup `NameError` with every panel individually tested.
+- **Pinning is reachable and works.** The 30px flag button was sized for use mid-map and is
+  fine.
+- **Queue order looks sane.** The refit ships a ranking in which a big enough ghost outranks
+  a plausible; in a live queue it does not whisper nonsense first.
+
+**The app is not a mid-map tool, and the design has been assuming it is.** In the
+maintainer's words: *"this tool returns results too frequently to really use mid-map. It is
+more of a sit in town and message people app, but earnings are strong enough to warrant the
+allotted time investment."* This is a load-bearing correction to a premise that appears
+throughout this file and CLAUDE.md — "someone mid-map is looking at the headline", the 30px
+buttons, the toast-and-alert-window model, and the whole justification for interrupting at
+all. **The user is sitting in front of the app giving it full attention.** Consequences
+worth weighing before the next UI change: an interruption model built for a player who is
+busy is optimising the wrong thing, and density and throughput matter more than glanceability.
+The earnings verdict is the other half of it — the time cost is accepted, so the constraint
+is the app's rate of useful output, not its rate of interruption.
+
+- **The queue's drip is the throughput problem** — see *The offer queue*, where the
+  oldest-first presentation order and the one-per-`offer_window_s` promotion were both
+  reversed on the strength of this session.
+
+**Icon legibility fails on Windows, and matching the game's font is abandoned.** The
+dingbats (✔ ✖ ⚑ ⚐ ❐ ✎ ☾ ⊘ ✕) were chosen because emoji fall back to identical empty boxes
+and were verified by screenshot **on Linux only**. On Windows, *"detail is lost in
+rendering"*: the *Ready to whisper* icons are tolerable, the *Waiting on a reply* ones —
+the seven-action row, at the same 30px — are **illegible**. So the 0.8.0 note that "proper
+PoE2-styled icon assets remain the right answer" is superseded: **the maintainer's decision
+is to stop trying to match the game's font environment and use something clean and legible
+instead.** Bundled assets, not a different character, and not a PoE2 pastiche.
+
+**A conflicting hotkey in another app does not raise a refusal — it silently loses.** Bound
+to the same key as a Sidekick hotkey, poe2-arb's hotkey does not fire and **Sidekick simply
+takes precedence**; no `RegisterHotKey` failure is reported. So the 1409 diagnostic built in
+0.8.0 detects only the case it was actually built for — **another copy of poe2-arb itself**,
+which is the one thing that has ever genuinely blocked the key (via the updater; see
+2026-08-01, *RESOLVED*). Likely mechanism, not verified: a low-level keyboard hook runs
+ahead of the `WM_HOTKEY` delivery path and swallows the keystroke, so there is nothing for
+`RegisterHotKey` to refuse and nothing for us to observe. **Decided: stop fighting it.** A
+warning under the hotkey field in Settings — an overlapping binding in any other app, first
+or third party, will block ours silently — and no further detection work. This closes the
+"find a binding that gets refused" line of investigation.
+
+- **The 60-second retry has still never been observed firing**, and is no longer worth
+  chasing. It exists for a crashed poe2-arb holding a live pump thread; that case is real
+  but rare, and the conflict case it might have covered turns out not to be detectable.
+
 ### What the game's own log can and cannot tell us — measured 2026-07-31
 
 Asked whether trade or party history could auto-mark outcomes. Measured by joining the
@@ -1195,6 +1320,10 @@ Also worth not rediscovering:
   the delegate fills the row itself with a translucent tint from the palette's highlight.
   **The buttons themselves report no row** (0.7.0): pointing at Accept highlights Accept,
   because by then which trade it acts on is not in question.
+  **This is not what ships.** Reported with a screenshot 2026-08-02: hovering one button
+  still highlights **the whole button group for that row**. So either the 0.7.0 fix never
+  covered the in-row action widget, or it regressed under the 0.8.0 icon-button rework. Open
+  bug, not a standing decision — the decision above is the intended behaviour.
 - **Action widgets must be unparented, not just removed, on rebuild.** `removeCellWidget`
   only schedules deletion; the orphan keeps painting at its old geometry until the event
   loop catches up, which put a live Accept/Decline on top of another row's Item column.
@@ -1206,9 +1335,36 @@ Also worth not rediscovering:
   The live offer is **no longer pinned to the top** (it was until 0.6.0, which reshuffled
   the list every alert window) — it carries the ● marker and is named in the headline,
   which is where someone mid-map is looking.
+
+  > **REVERSED for *Ready to whisper* by maintainer decision, 2026-08-02 — not yet
+  > built.** Two premises under this bullet failed in the first real play session. The
+  > app is **not** used mid-map (see *The first real play session on 0.8.0*), so
+  > "where someone mid-map is looking" is not a reason for anything; and the maintainer
+  > routinely **shrinks the Ready pane to a few rows** to give the splitter's real estate
+  > to *Waiting on a reply*, at which point a presentation order that is not the hotkey's
+  > order means **the visible rows are not the ones the key will act on**. The
+  > requirement is now: **row 1 is the trade the hotkey takes, row 2 is the one after
+  > it.** Since the hotkey takes `offered` — chosen by `_next_to_offer`, i.e. **by rank**
+  > — while `available` sorts by `offered_at or queued_at`, satisfying this means sorting
+  > *Ready* by the ranking key. **The cost is real and was the reason for the old rule:**
+  > rank order reshuffles when a better candidate arrives, so rows move under the cursor.
+  > Mitigate rather than revert (row 1 is the hotkey's row, so it is the least
+  > click-sensitive; consider holding a reshuffle while the pointer is over the table).
+  > Spec in TODO, *Both queue sections*.
+
 - **The hotkey falls through to the top of Ready when nothing is live.** The alert window
   is seconds and the listed window is minutes, so most of the time there is no OFFERED
-  trade and the key did nothing while the panel was full of takeable rows.
+  trade and the key did nothing while the panel was full of takeable rows. *Note this is
+  already half of the reversal above: when nothing is OFFERED the key does take row 1, and
+  the complaint is precisely that when something **is** OFFERED it does not.*
+- **The QUEUED drip is being removed** (decided 2026-08-02, not yet built). `tick` promotes
+  one trade per `offer_window_s`, so found candidates sit invisible in QUEUED for 20s each
+  and a sweep's worth of them takes minutes to appear. The maintainer's instruction is to
+  **put every candidate into Ready as it is found**. This does not delete the OFFERED
+  state — the ● marker, the toast and the alert window are a separate concern — it stops
+  `available` being gated on promotion. Note the interaction with `cancel_pending`, which
+  drops the QUEUED backlog when *Find trades* is switched off: with no backlog to drop,
+  stopping stops adding rather than retracting, which is the intended behaviour anyway.
 - **Submissions are deduplicated against everything unfinished**, including already-
   whispered trades. Sweeps overlap, and re-offering would have the user message the same
   seller twice.
@@ -1227,8 +1383,23 @@ Also worth not rediscovering:
   `TradeQueue.revise` → `listings.replan_units`, appended to the log as an amendment. The
   correction is deliberately *not* re-optimised: the user is reporting what they bought,
   not asking for the best trade at that size.
-- **Ghosts are never queued** (`queue_ghosts=False`). Interrupting a map for something
-  measured never to fill is pure cost. They stay visible in Trades.
+- **The *Long shots* slider does two different things, and only one of them is a slide.**
+  `risk_appetite` is a single 0–1 value read in two places, which is why "what would a
+  higher setting pull in?" has a surprising answer:
+  - **A binary gate at zero.** `queue_ghosts = risk_appetite > 0.0`, so **any** setting
+    above 0 queues **every** ghost. The old note here — "ghosts are never queued
+    (`queue_ghosts=False`)" — described the default, not the behaviour, and was written
+    when the prior was 0.0 and interrupting a map for a ghost was thought to be pure cost.
+    Both premises are now gone: ghosts fill at 1.95%, and the app is not used mid-map.
+  - **A continuous re-weighting.** `fill_weight = prior + appetite × (1 − prior)`. For a
+    ghost that is 0.16 at 0%, **0.58 at 50%**, 1.0 at 100%; plausible is 1.0 throughout.
+    At 100% the priors are flattened away entirely and ranking is pure expected profit.
+
+  **So raising the slider above 50% pulls in no listing that 50% did not already queue** —
+  it only ranks the ones already there higher against plausibles. The 137.86× Rigwald's
+  Ferocity fill was taken at 50%, and at 0% it would not have been queued at all. Recorded
+  because the maintainer asked exactly this after that trade; the answer is that the
+  interesting threshold is 0-versus-anything, not 50-versus-more.
 - **A whispered trade cannot be dismissed, only resolved.** It is already recorded as an
   attempt; deleting it would bias the outcome log toward whatever the user answered.
 - **Stopping the sweep drops the QUEUED backlog and nothing else** (`cancel_pending`, added
@@ -1342,6 +1513,14 @@ Also worth not rediscovering:
   was raised to 960 to make that rare — measured with `ColumnLayout.minimum_row_width()`:
   *Waiting on a reply* wants 916 and the Trades table 896. Item and Seller get a flat 120
   regardless of their four- and six-letter headings, because their contents are names.
+  **Amended 2026-08-02 by maintainer decision: sideways scroll is not acceptable for the
+  action column.** "Below the sum of the floors, scroll" is fine for *Item* and *Seller* and
+  wrong for the buttons — an action you have to scroll to find is one you do not use. The
+  requirement is now that **every action button on a row is visible at the window's minimum
+  width**, with the action column at a fixed width and the shrink taken out of Item and
+  Seller (which keep floors of their own, from content rather than from their headings).
+  The minimum width itself should come **down**, not up: the 960 was driven by *Long shots*
+  wrapping in the bankroll bar, which has free margin to its left.
   Three things this uncovered, all measured by screenshot and all easy to reintroduce:
   - **`resizeColumnsToContents` measures the cells and ignores the heading.** "Buy" came
     back at 30px against a 49px title, so the floors have to be applied *after* it or the
@@ -1361,8 +1540,13 @@ Also worth not rediscovering:
   and where one is missing *every* button renders as the same empty box — verified by
   screenshot, which is also how the replacements (✔ ✖ ⚑ ⚐ ❐ ✎ ☾ ⊘ ✕) were checked to draw
   in a plain text font. The wording survives as the tooltip and as the button's `action`
-  property, which is what `click_action` and the tests match on. Proper PoE2-styled icon
-  assets remain the right answer and are still open.
+  property, which is what `click_action` and the tests match on. ~~Proper PoE2-styled icon
+  assets remain the right answer and are still open.~~ **Superseded 2026-08-02 by the first
+  Windows run:** the dingbats lose their detail in the game's font environment — tolerable
+  in *Ready to whisper*, **illegible** in the seven-action *Waiting on a reply* row — and
+  the maintainer's call is to **abandon matching the game's look entirely and use clean,
+  legible bundled icon assets instead.** Screenshot verification on Linux said nothing about
+  this, which is the second time a font assumption has travelled badly.
 - **A session is defined by the queue draining, not by a clock.** `session.py`: it starts
   on *Find trades* and ends only when nothing is running *and* nothing is outstanding, so
   pressing the toggle again mid-session continues it. Between sweeps the queue is

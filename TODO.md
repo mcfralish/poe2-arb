@@ -8,25 +8,32 @@ deleted rather than ticked, so this file stays worth reading start to finish.
 
 **Shipped:** v0.7.0 (2026-07-31). **v0.8.0 is written and untagged** on `field-test-4`:
 the outcome-log integrity half of the fourth session's defect list, plus the hotkey
-diagnostic, the column work, the ranking refit and the editable rows. **It has now been
-run on Windows once**, via a manual `workflow_dispatch` build, and that single run paid
-for the whole diagnostic: it caught the hotkey refusal in the act and root-caused four
-releases of failure to the app's own updater. That fix is in 0.8.0 too. Nothing else in
-it has been used in game.
+diagnostic, the column work, the ranking refit and the editable rows.
 
+> **0.8.0 has now been played on Windows, and everything on its verification list is
+> answered.** The build was the `b8d43a8` artifact from
+> [run 30727645833](https://github.com/mcfralish/poe2-arb/actions/runs/30727645833)
+> (**14-day retention — expires 2026-08-16**; re-run the workflow rather than trusting
+> the link if it has gone). Full report in [docs/FINDINGS.md](docs/FINDINGS.md), *The
+> first real play session on 0.8.0*. Headlines:
+>
+> - **It works.** No startup crash, tables render, pinning is reachable, and the refitted
+>   queue order is sane in a live queue. The three biggest risks in the build are closed.
+> - **The icons are illegible on Windows** in *Waiting on a reply*. **Matching the game's
+>   font environment is abandoned** — clean legible bundled assets instead.
+> - **The app is not a mid-map tool.** It is used sitting in town, with full attention.
+>   This invalidates a premise that runs through both doc files and several design
+>   decisions; see the *Ready to whisper* rework below, which is the first consequence.
+> - **The hotkey conflict question is closed by decision, not by a fix.** Another app's
+>   hotkey silently wins and raises no refusal we can detect. Ship a warning, stop
+>   investigating.
+>
 > **The 0.8.0 exe that was built is no longer what 0.8.0 will tag as.** Decided
 > 2026-08-01: the ranking refit was folded into 0.8.0 rather than cut as 0.9.0, because
 > nothing has shipped to users and two unreleased versions is worse bookkeeping than one.
 > The editable rows went in on the same reasoning. `__version__` and `pyproject.toml` stay
-> at 0.8.0; no bump.
->
-> **A current exe exists and has not been run.** Built 2026-08-02 from `b8d43a8` on
-> `field-test-4`: [run 30727645833](https://github.com/mcfralish/poe2-arb/actions/runs/30727645833),
-> artifact `poe2-arb-field-test-4-b8d43a8b…`, **14-day retention — expires 2026-08-16.**
-> It carries everything in 0.8.0 — the ranking refit, the editable rows,
-> `FILL_PRIOR[GHOST]`, and the `stock` / `ce_age_s` instrumentation the next field
-> test needs. **Nothing in it has been used in game.** If the artifact has expired, re-run
-> the workflow rather than trusting this link.
+> at 0.8.0; no bump. **The UI list from this session (below) is large enough that it should
+> probably land before the tag** — decide that before writing the changelog entry.
 
 **Stop counting field tests by ordinal — they no longer agree.** This file has called the
 20:49–21:29Z run of 2026-08-01 "the fifth"; the maintainer calls it the sixth, and both are
@@ -65,10 +72,12 @@ below its own heading and the row actions are icons; and the hotkey reports a re
 `RegisterHotKey` with `GetLastError`, shows *Refused* in Settings, tests a binding before
 saving it and retries in the background. Full list in [CHANGELOG.md](CHANGELOG.md).
 
-**Start here next session.** **The pricing item (6) is now the most valuable thing on this
-list** — it explains both real losses the project has made and one of them was banded
-*plausible* — but it wants one more thin-pair reading first, which needs a human in game.
-Items 2 and 3 are both maintainer decisions from using 0.8.0 and are ordinary work.
+**Start here next session.** **The pricing item (6) is still the most valuable thing on
+this list** — it explains both real losses the project has made and one of them was banded
+*plausible*. It is **no longer blocked on game time**: four more in-game readings arrived on
+2026-08-02, and what they need now is `ce_age_s` analysis against `outcomes.jsonl`, which is
+desk work. Items 2, 3 and the UI section are maintainer decisions from playing 0.8.0 and are
+ordinary work.
 
 1. ~~Make every non-derived value on a row editable — price included.~~ **Done
    2026-08-01.** Amount, Total and Result are all correctable, in the queue via *Adjust…*
@@ -94,37 +103,51 @@ Items 2 and 3 are both maintainer decisions from using 0.8.0 and are ordinary wo
    see the *Both queue sections* item below for the full spec.)* Small, and the next piece
    of queue-table work.
 5. **The Send button** (*Next*) — route **decided: keystrokes**. Unblocked, ordinary work.
-6. **Pricing** (*Next*) — **unblocked 2026-08-02, and the answer reversed the plan.** The
-   thin reading finally exists: Astrid's Creativity, a **22.2%-wide book** with the app
-   **+53% above the bid**. So the liquidity-scaled haircut is **back on** — it was killed
-   on liquid pairs, which is not where the money is lost — and freshness is a second,
-   smaller effect rather than the whole story. This is now the **biggest open item in the
-   project**: it explains both known real losses, one of them banded *plausible*. Take one
-   more thin reading before fitting a curve (n=1 today). Full write-up in
-   [docs/FINDINGS.md](docs/FINDINGS.md), *The reference price does not match what a sale
-   realises*.
+6. **Pricing** (*Next*) — **the biggest open item in the project, and the plan changed
+   twice in two days.** It explains both known real losses, one of them banded *plausible*.
+   State as of 2026-08-02, after four more in-game readings (Tecrod's Gaze 115k, Uhtred's
+   Saga 173k, Expedition Logbook 568k, Cowardly Fate 580k `ValueTraded`) joined to Astrid's
+   110k and the two liquid pairs:
+   - **The direction is confirmed and is worth acting on.** Below ~600k `ValueTraded` the
+     app quotes **at or above the bid on 5 of 5** readings and above the *ask* on 4 of
+     them; above 1.6M it goes both ways. Median error over the bid is **+9.4%**.
+   - **The `ValueTraded`-scaled haircut is dead again, this time on its own evidence.** The
+     error is **not monotone** in liquidity (110k → +53%, 115k → −0.1%, 173k → +8.1%,
+     568k → +9.4%, 580k → +21.5%) and **book width does not predict it**: Cowardly Fate has
+     the tightest book ever measured here (0.6%, tighter than the liquid control) and the
+     second-largest error. Astrid's is a point, not the head of a curve. **Do not fit a
+     curve; there is nothing to fit.**
+   - **Build the weaker claim instead:** below ~1M `ValueTraded`, believe the bid — a flat
+     conservative discount (+9.4% median, +21.5% observed worst case short of Astrid's), or
+     refuse to band a thin item *plausible* at all.
+   - **Then test age, which is the untried axis and costs no game time.** A wrong *level*
+     on a tight book is what a stale reference price looks like. **`ce_age_s` is
+     instrumented on every whisper since 0.8.0 and has never been analysed.** This is the
+     cheapest remaining test of the whole question and should be the next thing done on it.
+
+   Full write-up and the table in [docs/FINDINGS.md](docs/FINDINGS.md), *The reference
+   price does not match what a sale realises* → *Four more pairs, 2026-08-02*.
 
 **Next time you are in game, whatever else is happening.** This is not session work and
 does not compete with the list above; it is the queue of things only playing can answer.
 
-- **The rest of 0.8.0 has never been used.** The hotkey half is done and the answer was
-  worth the four releases it cost: the diagnostic fired within four seconds of the first
-  Windows run and caught **poe2-arb itself** holding the key — the updater launches the
-  installed copy while this one is still alive, so an upgrade always refused the surviving
-  process with 1409. Fixed by claiming the key after the install handover (`app.main` →
-  `MainWindow.start_hotkey`). Evidence in [docs/FINDINGS.md](docs/FINDINGS.md),
-  2026-08-01, *RESOLVED*. **Still unchecked on Windows:** whether the icon buttons render,
-  whether pinning is reachable mid-map, and whether the 60-second retry actually fires.
-  **The ranking refit and the editable rows join this list** — an exe carrying both is
-  built and waiting; see the version note above for the link.
+- ~~**The rest of 0.8.0 has never been used.**~~ **Done 2026-08-02 — the whole list is
+  answered**, including the hotkey, the icon rendering, pinning, the queue order and the
+  60-second retry. Results in [docs/FINDINGS.md](docs/FINDINGS.md), *The first real play
+  session on 0.8.0*, and folded into the UI section below. Nothing on the 0.8.0
+  verification list is outstanding.
 - ~~**Press AFK / Offline / Refused at least once.**~~ **Answered 2026-08-02: they are
   not worth having.** The queue arrives faster than a three-way judgement can be made, so
   the split reads as zero whatever the labels are. Replaced by item 2 of *Start here*.
-- ~~**Astrid's Creativity**, both sides of the book.~~ **Done 2026-08-02 and it reversed
-  the plan** — 22.2% wide, app +53% above the bid. What is wanted now is **a second thin
-  pair**, so the haircut can be fitted to a curve rather than a point. Same method: read
-  both rows of the book and the app's Quick Lookup within the same minute, and note the
-  clock time.
+- ~~**Astrid's Creativity**, both sides of the book.~~ ~~**A second thin pair, so the
+  haircut can be fitted to a curve.**~~ **Both done, and the second answer killed the
+  curve.** Four pairs read 2026-08-01 21:31–21:37 PDT. The error is not monotone in
+  `ValueTraded` and book width does not predict it, so there is no curve to fit — see item
+  6 of *Start here*. **No further in-game pricing readings are wanted right now**; the next
+  step is `ce_age_s` analysis at the desk.
+- **Just play, so the instrumentation fills up.** `stock` and `ce_age_s` are recorded on
+  every whisper since 0.8.0 and both are unanalysed. `ce_age_s` in particular is now the
+  live hypothesis for the pricing error, and it needs volume rather than attention.
 
 **Done since this file was last written (2026-08-01, no game time needed).** The editable
 rows, the counteroffer question and the ranking fit — the last two from data already on
@@ -223,54 +246,37 @@ fill rates, takings, and every trade), *Log*.
 
 ## What the next field test must measure
 
-**Answered 2026-08-01 and 2026-08-02, and neither needed a trade** — reading both sides of
-the book while standing still was enough both times, which is worth remembering next time
-this file says something is blocked on a completed trade. Results in
-[docs/FINDINGS.md](docs/FINDINGS.md).
+**The 0.8.0 verification list is closed and the pricing readings are done.** Everything
+that was in this section on 2026-08-01 has been answered, none of it needed a completed
+trade, and reading both sides of the book while standing still was enough every time.
+Results in [docs/FINDINGS.md](docs/FINDINGS.md): *The first real play session on 0.8.0* for
+the build, and *Four more pairs, 2026-08-02* for the prices.
 
-**The thin cell is filled and it reversed the conclusion.** Astrid's Creativity, 110k
-`ValueTraded`, 2026-08-01 18:35 PDT: **ask 2.00 / bid 1.60 / app 2.45** — a **22.2%-wide
-book** against 1.7% on the liquid control, with the app **+53% above the bid and above even
-the ask**. The liquidity haircut is back on. **What is wanted now:**
+**No in-game pricing readings are currently wanted.** Seven pairs now exist across
+110k–10.0M `ValueTraded` and they do not resolve into a curve; more of the same will not
+change that. If the `ce_age_s` analysis points at staleness, the reading that would test it
+is a **repeat of the same item at two known reference-price ages**, which is a different
+experiment and should be specified when it is wanted.
 
-1. **A second thin pair, any ~100k `ValueTraded` item.** One point cannot be fitted to a
-   curve, and a haircut scaled on `ValueTraded` needs at least two. Same method, same
-   minute, note the clock time.
-2. **Ideally a third at ~500k**, between the thin and liquid clusters, since everything
-   between 110k and 1.6M is currently interpolation.
+The method, for reuse when it is: in-game quotes read **"I want : I have"**, so the first
+row of a pair is what you pay to **buy** and the second is what you **receive** to sell.
+Take the app's number within a minute of the game's — the whole point is that they move —
+and note the clock time. `ValueTraded` can be recovered afterwards from a live
+`scout.snapshot()`, so it does not need reading in game.
 
-The method, for reuse: in-game quotes read **"I want : I have"**, so the first row of a
-pair is what you pay to **buy** and the second is what you **receive** to sell. Take the
-app's number within a minute of the game's — the whole point is that they move.
+**Answered 2026-08-02, kept so they are not re-asked:** the hotkey (another app's binding
+silently wins, no refusal is raised, shipping a warning instead), the icon buttons (detail
+lost on Windows; game-font matching abandoned), pinning (works), the queue order (sane),
+and the 60-second retry (never observed, no longer chased). The AFK/Offline/Refused split
+was answered from the log rather than in game — zero presses in 789 whispers.
 
-Also worth confirming, because nothing but a human can check them.
+**Still unchecked on Windows, and small:**
 
-**New in 0.8.0, and none of it has run on Windows.** This is the list to work through
-first — see item 1 of *Start here*:
-
-- ~~**The hotkey — and first, find a binding that actually gets refused.**~~ **Answered
-  2026-08-01, and the refusal reproduced itself.** Running the 0.8.0 artifact triggered the
-  in-place update, which launches the installed copy while the downloaded one is still
-  alive; the survivor was refused with 1409 because *the other poe2-arb had the key*. The
-  Sidekick hypothesis stays withdrawn and the "stale process" one is confirmed with a
-  mechanism the app creates itself on every update. Fixed; full write-up in FINDINGS.
-  **What is left of this bullet is one line: the 60-second retry has still never been
-  observed firing.** It would have recovered the refusal at ~06:33:20 on its own, but the
-  key was rebound by hand at 06:32:46 first. To see it: with the hotkey refused, leave
-  Settings closed, free the key, and wait — it must start working **without reopening
-  Settings**. No test here means anything about that path.
-- **The icon buttons render**, in the game's own font environment. They are dingbats
-  rather than emoji precisely because emoji fall back to identical empty boxes, but that
-  was verified on Linux only.
-- **Pinning is reachable mid-map** — the flag button is 30px, and the whole point of the
-  row is that it is used while playing.
-- **Expired versus AFK versus Offline is a distinction worth making by hand.** If the
-  three buttons feel like more work than the one they replaced, that is worth knowing
-  before the log fills up with a split nobody uses.
 - **The in-place editors on the Trades tab.** Verified by screenshot on Linux only: the
   Result cell's drop-down had to be widened past its own column to stop reading "No Repl",
-  and that measurement comes from the font. Worth one look on Windows — and worth checking
-  that double-clicking a *live* row still copies its whisper rather than opening an editor.
+  and that measurement comes from the font — the same class of assumption that just failed
+  on the icons, so treat it as likely wrong. Also worth checking that double-clicking a
+  *live* row still copies its whisper rather than opening an editor.
 
 **Older, still unconfirmed:**
 
@@ -316,9 +322,16 @@ which is why the original occurrence left no trace.
       moving registration out of construction into `MainWindow.start_hotkey`, called from
       `app.main` after the install handover; `tests/test_app.py` pins the order. Log
       extract and reasoning in [docs/FINDINGS.md](docs/FINDINGS.md), 2026-08-01.
-      **Still open:** the 60-second retry has never been seen to fire (see the verification
-      list above), and a crashed poe2-arb holding a live pump thread is the case it exists
-      for. *Overlay research remains optional, not blocking.* Focus was never implicated.
+      **Closed 2026-08-02, by decision rather than by a fix.** Bound against a Sidekick
+      hotkey, ours does not fire and **no refusal is raised at all** — Sidekick simply takes
+      precedence, so the 1409 diagnostic sees nothing. Likely a low-level keyboard hook
+      swallowing the key ahead of `WM_HOTKEY` delivery; unverified and not worth verifying.
+      **What is left to build is one warning label** under the hotkey field in Settings: an
+      overlapping binding in any other app, first or third party, will block ours silently.
+      The 60-second retry stays in the code and stays unobserved; it exists for a crashed
+      poe2-arb holding a live pump thread, which is real but rare, and the conflict case it
+      might also have covered turns out not to be detectable. *Overlay research remains
+      optional, not blocking.* Focus was never implicated.
 - [ ] **The reference price question is UNBLOCKED — the fork resolved to *movement*, and
       the spread branch is disproved.** Measured 2026-08-01 off both sides of the in-game
       book against the app's own snapshot minutes later; table in
@@ -327,22 +340,29 @@ which is why the original occurrence left no trace.
       and Omen of Whittling against a 1.7% liquid control, and the app's error on those two
       was **−5.9% and +6.5% — opposite signs, minutes apart.** Omen of Whittling was +37% on
       07-30 and +6.5% today. So:
-      - ~~**Do not build the liquidity-scaled haircut.**~~ **Un-killed 2026-08-02.** It was
-        declared dead on two pairs at 1.6M and 10.0M `ValueTraded`, where the book really
-        is ~2% wide. At 110k it is **22.2%** wide and the app quotes above the ask. Build
-        it, scaled on `ValueTraded`; the liquid pairs simply land near a haircut of zero.
-      - **Build freshness instead.** Show the reference price's age, and distrust or refuse
-        a stale one. `snapshot_age_s` already exists and nothing surfaces it.
+      - ~~**Do not build the liquidity-scaled haircut.**~~ ~~**Un-killed 2026-08-02**~~ —
+        **and re-killed the same day, on four more readings.** The Astrid's point stands
+        (22.2% wide, app above the ask) but it does not generalise: the error is not
+        monotone in `ValueTraded`, and Cowardly Fate has the tightest book the project has
+        measured alongside the second-largest error. **Do not scale a haircut on
+        `ValueTraded`.** What to build instead is a **flat floor below ~1M** — believe the
+        bid, not the quote. Numbers in item 6 of *Start here*.
+      - **Build freshness — now the leading hypothesis, not the consolation prize.** Show
+        the reference price's age, and distrust or refuse a stale one. `snapshot_age_s`
+        already exists and nothing surfaces it. **And analyse `ce_age_s`**, which 0.8.0
+        records on every whisper and nobody has read: a wrong *level* on a tight book is
+        exactly what a stale price looks like, and it is the only axis left that the
+        readings have not ruled out.
       - **Reset `min_gap_ratio` from the noise, not from a bias.** ±6% of error around the
         mid means a 1.05 threshold admits trades whose whole edge is inside the error bar
         on the number that found them. The old conclusion ("1.05 is too tight") survives;
         every step of the reasoning under it has been replaced.
       - **`MIN_PAIR_VALUE = 1000` still looks far too low**, but the argument for raising
         it now rests on the un-measured cell below rather than on the spread claim.
-      **The one gap left is genuinely thin items.** Both items measured carry ~1.6M and
-      10.0M `ValueTraded`; **Astrid's Creativity (110k), the item that was 65% wrong, was
-      not re-read.** Tight books are established for ~1M+ pairs and *assumed* below that.
-      One in-game reading closes it — see *What the next field test must measure*.
+      **The thin gap is closed and a different one opened.** Seven pairs now span
+      110k–10.0M `ValueTraded`. Below ~600k the app is at or above the bid on 5 of 5, so
+      thin items really are overstated; but nothing in the sample **predicts by how much**,
+      and that is the open question a haircut needs answered. Age is the untested axis.
       Interim honesty stays cheap and correct regardless: Quick Lookup calls a thin figure
       a ceiling, and the *uncertain* band tooltip says the estimate has run high — though
       that tooltip's "25% high" wording is now over-specific and one-directional, and
@@ -393,6 +413,14 @@ which is why the original occurrence left no trace.
       and worth skipping when three plausible trades are waiting. `risk_appetite` is the
       user hand-solving this. Consider making it a rate ("whispers per minute I'm willing
       to send") that the ranking spends, rather than a taste slider.
+      **Reframed 2026-08-02 by how the app is actually used.** It is a sit-in-town tool with
+      the user's full attention, and *"earnings are strong enough to warrant the allotted
+      time investment"* — so the scarce resource is **not** the user's tolerance for
+      interruption, which is what `risk_appetite` and `offer_window_s` were both built
+      around. It is **throughput**: whispers sent per minute of sitting there. That makes the
+      drip removal above a fix to the same problem, and it argues the rate framing is the
+      right one — but as a *floor the app tries to keep the queue above*, not a ceiling it
+      spends down.
 - [ ] **Split NO_REPLY using the game's own log.** Measured 2026-07-31 against 189 real
       attempts — full numbers in [docs/FINDINGS.md](docs/FINDINGS.md), "What the game's own
       log can and cannot tell us". The maintainer has lifted the "no reading game state"
@@ -473,14 +501,27 @@ which is why the original occurrence left no trace.
       `Client.txt` (checked). If this is ever built in-app, initiating it from the clicked
       row is the only unambiguous option.
 
-## Open — UI, from field test 4 (2026-08-01)
+## Open — UI, from field tests 4 and 5 (2026-08-01, 2026-08-02)
 
-The maintainer's list from the fourth session, grouped by surface. Small individually;
-several are the same change made in two places, and the two renames below collide, so read
-the whole section before starting. Screenshots of the minimum-width and bankroll problems
-were supplied in the intake conversation and are not in the repo. **The column headings and
-the row buttons were done in 0.8.0**, which also raised the window's minimum width to 960
-— below that the queue tables now scroll sideways rather than truncating a heading.
+The maintainer's list, grouped by surface, with the 2026-08-02 items merged in and marked
+**(FT5)**. Small individually; several are the same change made in two places, and the two
+renames below collide, so read the whole section before starting. Screenshots of the
+minimum-width, bankroll and button-hover problems were supplied in the intake conversations
+and are not in the repo. **The column headings and the row buttons were done in 0.8.0**,
+which also raised the window's minimum width to 960 — below that the queue tables scroll
+sideways rather than truncating a heading, and **FT5 rejects that for the action column**.
+
+> **Read this before touching anything in the queue panel.** The premise that the app is
+> glanced at mid-map is **wrong** and several decisions here were made on it. The app is
+> used sitting in town with full attention (FINDINGS, *The first real play session on
+> 0.8.0*), so **density and throughput beat glanceability**, and "a row that moves is a row
+> clicked by mistake" is a weaker constraint than it was — weaker, not gone.
+
+> **Sequencing note.** The *Ready to whisper* rework, the fixed-width action column, the
+> mirrored column widths and the *Found* column all touch `queue_panel.py` and
+> `table_items.ColumnLayout` together, and the one-button consolidation (item 2 of *Start
+> here*) changes how much width the action column needs. **Do that consolidation first** —
+> every width decision downstream depends on the final button count.
 
 **Two tabs are being renamed past each other.** *Trades* (`sweep_panel.py`) becomes
 **Results**, and today's *Results* (`results.py`) becomes **Trends**. So "Results" means a
@@ -500,6 +541,23 @@ session will read them backwards. *Trades* also moves to **second** tab position
   used inline, and the `PLAUSIBLE`/`THIN`/`GHOST` enum stays untouched (CLAUDE.md,
   *Internal band names and user-facing words are deliberately different*).
 
+### Global styling
+
+- [ ] **(FT5) Reduce the window's minimum width.** It is 960 (`main_window.py:119`), set
+  from `ColumnLayout.minimum_row_width()` — *Waiting on a reply* wants 916. The stated
+  driver was *Long shots* wrapping to a second line, and **there is free space to its left**
+  in the bankroll bar, so moving it left is the cheaper fix than keeping the window wide.
+  Pair this with the fixed action column below: the two together define what the real floor
+  is. Screenshot of the current minimum was supplied in the intake conversation.
+- [ ] **(FT5) The action buttons must never need a horizontal scroll.** Set the action
+  section on the far right of both queue tables to a **fixed width**, always fully visible,
+  including at the new minimum. Shrinking below that comes out of **Item** and **Seller**,
+  which keep floors of their own — content-derived, not the four- and six-letter heading
+  floors that `min_width` would give them. This **amends the 0.8.0 rule** that a table
+  scrolls sideways below the sum of its floors: correct for a name column, wrong for
+  buttons. `ColumnLayout` already exempts the action column from *shrinking*; what is new is
+  that the whole row must fit. Eased by the one-button consolidation — do that first.
+
 ### Opportunities
 
 - [ ] **A session timer at the top, across from the action headline** (opposite "Nothing to
@@ -507,14 +565,40 @@ session will read them backwards. *Trades* also moves to **second** tab position
 - [ ] **Bankroll bar layout.** *Long shots* drops to a second line at minimum window width
   while there is still free right margin — the wrap threshold in `bankroll_bar.py` is
   firing early, and the screenshots show the width at which it genuinely stops fitting.
+  **(FT5) Confirmed still present, and it is the thing holding the 960 minimum up** —
+  see *Global styling*.
 - [ ] **The currency letter belongs outside the spin box**, to the right of the arrows: in
   the field there should be **only the number**. Today `setSuffix(" div")` puts it inside,
   which reads as editable text. Note this collides with `_fits`/`setSpecialValueText`, which
   currently sizes the box around `"no limit (div)"` — and the special value should become an
   **infinity sign** rather than the words "no limit".
-- [ ] **A queued row can cost more than the bankroll.** Screenshot: 84 div ready to whisper
-  against a 39 div bankroll. First suspect is that candidates are sized when queued and not
-  re-checked when the bankroll spin box changes.
+- [ ] **A queued row can cost more than the bankroll. (FT5: still present in 0.8.0.)**
+  Originally: 84 div ready against a 39 div bankroll. Reproduced 2026-08-02 with a **260 div
+  / 350 ex** bankroll against a **599 div** row. First suspect is unchanged — candidates are
+  sized when queued and not re-checked when the bankroll spin box changes.
+  **Two things the new screenshot adds, and they pull in opposite directions:**
+  - The 599 div row is in ***Waiting on a reply***, i.e. already whispered. So one benign
+    explanation is live: the bankroll was larger when it was sized and was lowered
+    afterwards. **Check that before treating it as a sizing bug** — a whispered row must
+    *not* be re-planned retroactively, since it records what was actually asked for.
+  - The fix therefore belongs on the *Ready* side only: re-size or re-drop queued
+    candidates when the bankroll changes, and leave whispered rows alone.
+> **(FT5) Answered, no work needed: "what would a higher *Long shots* setting pull in?"**
+> Asked after the 137.86× Rigwald's Ferocity fill, which was taken at 50%. **Nothing extra.**
+> `risk_appetite` is read in two places and only one of them is a slide: `queue_ghosts =
+> risk_appetite > 0.0`, so **any** setting above zero queues **every** ghost, and the slider
+> then only re-weights them — `fill_weight` puts a ghost at 0.16 of a plausible at 0%, 0.58
+> at 50%, 1.0 at 100%. So 50% → 100% changes the *ranking* of ghosts already in the queue,
+> not which ones are there; the interesting threshold is 0-versus-anything. At 0% the
+> Rigwald's listing would not have been queued at all. Written up in
+> [docs/FINDINGS.md](docs/FINDINGS.md), *The offer queue*, which also corrects that file's
+> stale "ghosts are never queued" bullet.
+
+- [ ] **(FT5) The API-usage indicator stays yellow/red while idle.** The status bar's
+  request counter (bottom right, e.g. `1/5 requests per 15s`) should return to a neutral
+  colour once the window has drained and no requests have been used. Today it holds the
+  warning colour from the last burst, which reads as a live rate-limit problem when the app
+  is doing nothing.
 
 ### Both queue sections
 
@@ -529,12 +613,70 @@ session will read them backwards. *Trades* also moves to **second** tab position
   the load-bearing part**, not a nicety: a hidden row cannot be falsified, which is how
   `FILL_PRIOR[GHOST] = 0.0` survived four field tests, so the app must never hide these on
   its own. Needs a config key; `config.RETIRED_KEYS` is the pattern if it is ever dropped.
-- [ ] **The action buttons are icons but not PoE2-styled.** Done in 0.8.0: glyph buttons at
-  a fixed 30px with the full wording on hover, which is what made a seven-action row fit.
-  **Not done: the styling.** They are stock Qt buttons carrying dingbats
-  (✔ ✖ ⚑ ⚐ ❐ ✎ ☾ ⊘ ✕), chosen because emoji need a colour font and render as identical
-  empty boxes without one — see [docs/FINDINGS.md](docs/FINDINGS.md), *Operational*. Doing
-  this properly means bundled icon assets, not a different character.
+- [ ] **(FT5) The icons are illegible on Windows, and the PoE2-styling goal is dropped.**
+  Done in 0.8.0: glyph buttons at a fixed 30px with the full wording on hover, which is what
+  made a seven-action row fit. **On Windows the detail is lost** — *Ready to whisper* is
+  tolerable, *Waiting on a reply* is illegible. The old framing of this item was "they are
+  not PoE2-styled yet"; **the maintainer's decision is to stop trying to match the game's
+  font environment and use something clean and legible instead.** That means **bundled icon
+  assets** (SVG or PNG at the sizes actually drawn), not another character and not a PoE2
+  pastiche. Note the dingbats were verified by screenshot on **Linux only**, which is why
+  this shipped — the next verification has to be a Windows screenshot.
+  See [docs/FINDINGS.md](docs/FINDINGS.md), *Operational*.
+- [ ] **(FT5) Hovering one button highlights the whole button group for that row.** Screenshot
+  supplied. FINDINGS records the opposite as the intended and supposedly shipped 0.7.0
+  behaviour — "pointing at Accept highlights Accept" — so this is either a fix that never
+  covered the in-row action widget or a regression under the 0.8.0 icon rework. Real bug.
+- [ ] **(FT5) One-word tooltips on the row buttons** — *Re-copy*, *Accept*, *Decline*, …
+  0.8.0 put the **full wording** on hover; this shortens it. Keep the button's `action`
+  property as-is, since `click_action` and the tests match on it — change only the tooltip.
+- [ ] **(FT5) A minimum height for each section**, so neither collapses when the window is
+  shortened. Note this is *not* the `QSplitter` collapse-to-zero trap — `setChildrenCollapsible(False)`
+  is already set on both splitters and `_restore_ui_state` already rejects a saved zero.
+  This is about the floor being too low, and it matters more now that the maintainer
+  deliberately shrinks *Ready* to give room to *Waiting on a reply*.
+- [ ] **(FT5) Column widths mirror between the two tables.** Widening *Item* in *Ready to
+  whisper* should widen it in *Waiting on a reply* and vice versa, so the two read as one
+  table split in half. This gets more valuable with the *Found* column below, which makes
+  the two column sets very nearly parallel. Implementation note: this couples two
+  `ColumnLayout` instances that are currently independent, and both persist through
+  `saveState` in `ui-state.json` — decide whether one blob is shared or two are kept in
+  sync, and beware a feedback loop where each table's resize re-triggers the other's.
+- [ ] **(FT5) Rework *Ready to whisper* into a visible FIFO. Two changes, one goal:
+  the top row is always the trade the hotkey will take.**
+  *Why:* the maintainer keeps the *Ready* pane small to give real estate to *Waiting on a
+  reply*, and cannot see what is actually next. Reported as "FIFO instead of the previous
+  FILO"; the observable requirement is what matters — **row 1 is the hotkey's row, row 2 is
+  the one after it.**
+  - *Stop the drip.* `tick` promotes one QUEUED trade per `offer_window_s` (20s), so a
+    sweep's candidates trickle in over minutes and sit invisible meanwhile. **Put every
+    candidate into Ready as it is found.** This does not delete the OFFERED state — the ●
+    marker, the toast and the alert window are a separate concern — it stops `available`
+    being gated on promotion. Check the interaction with `cancel_pending`, which exists to
+    drop the QUEUED backlog when *Find trades* stops; with no backlog, stopping simply
+    stops adding, which is the intended behaviour anyway.
+  - *Sort Ready by the hotkey's own order.* The hotkey takes `trade_queue.offered` when one
+    exists, and `offered` is picked by `_next_to_offer` — **by rank**. `available` sorts by
+    `offered_at or queued_at`. That mismatch is the whole complaint. Sorting *Ready* by the
+    ranking key fixes it.
+  - **The cost is real and was the reason for the old rule:** rank order reshuffles when a
+    better candidate arrives, so rows move under the cursor — see
+    [docs/FINDINGS.md](docs/FINDINGS.md), *The offer queue*, where this reversal is
+    recorded. **Mitigate rather than revert.** Row 1 is the hotkey's row so it is the least
+    click-sensitive; consider holding a reshuffle while the pointer is over the table.
+
+### Ready to whisper
+
+- [ ] **(FT5) Add a *Found* column** showing when the opportunity entered the queue, in the
+  same shape as *Sent* in *Waiting on a reply* (`2m ago`). Feeds the mirrored-widths item
+  above — with this, the two tables' column sets line up almost exactly.
+
+### Waiting on a reply
+
+- [ ] **(FT5) Rename the *Auto* column to *Expires*.**
+- [ ] **(FT5) Right-click → copy just `@username`.** For following up with a seller who
+  said "give me a couple of minutes", without re-sending the pre-formatted whisper. A
+  context menu on the row; the existing *Re-copy* action stays as-is for the full template.
 
 ### Trades → Results
 
@@ -546,10 +688,42 @@ session will read them backwards. *Trades* also moves to **second** tab position
   is a different set from "what this session attempted" — a sweep boundary is not a session
   boundary, and 2026-08-01 ran four sessions in one evening.
 - [ ] **Centre every column except Item and Seller.**
+- [ ] **(FT5) *This session* does not update live.** New rows only appear after navigating
+  away from the tab and back, so the list is stale for as long as you are looking at it.
+  Likely the same root as the rename item above — `SESSION_LIVE` is rebuilt on show rather
+  than on a queue/outcome signal. **Fix these two together**, since both are about what
+  that filter is and when it is recomputed.
 
 ### Results → Trends
 
 - [ ] **Rename the tab to Trends.** Contents unchanged.
+- [ ] **(FT5) Check whether listing age beats gap as a fill predictor — from the log, not
+  from the tab.** The maintainer's read of the *By age* breakdown: *"the majority of filled
+  trades have come from the under 1h category, though it is still at a 6% fill rate, which
+  is not too much higher than other age categories."* **The observation as stated is almost
+  certainly a base-rate effect** — most listings *are* under an hour old, so most fills will
+  be, whatever the rate — and 6% against a 4.56% base rate is a weak signal. It is also
+  consistent with what has already been measured: age is a **cliff at 3 days, not a decay
+  curve**, and below that it "barely predicts anything" (6.4% → 3.1% → 7.4%, non-monotonic;
+  see [docs/FINDINGS.md](docs/FINDINGS.md), *A listing older than ~3 days has never
+  filled*). So this is **not** a finding yet. What would make it one: re-run the age buckets
+  on the current n=872+ log with fill *rates* and confidence intervals rather than fill
+  counts, and report whether <1h separates from 1h–3d at all. Cheap, desk work, and it also
+  tells us whether the Trends tab's own presentation is inviting this misreading.
+- [ ] **(FT5) "By discount" — the maintainer's note ends mid-sentence.** Intake 2026-08-02
+  listed a *By discount* heading under Results with nothing after it. **Ask before
+  building.** Best guess is a fill-rate-by-gap-bucket breakdown alongside the existing *By
+  age* one, which would be the natural companion and is data the log already carries — but
+  that is a guess and the item is not actionable until it is confirmed.
+
+### Settings
+
+- [ ] **(FT5) Warn that another app's hotkey will silently win.** A label under the hotkey
+  field: an overlapping binding in any other application, first or third party, blocks
+  poe2-arb's hotkey **without any error** — measured against Sidekick 2026-08-02, which
+  simply takes precedence with no `RegisterHotKey` refusal for the 0.8.0 diagnostic to
+  catch. This replaces further detection work, which the maintainer has called off. See
+  [docs/FINDINGS.md](docs/FINDINGS.md), *The first real play session on 0.8.0*.
 
 ### Market
 
