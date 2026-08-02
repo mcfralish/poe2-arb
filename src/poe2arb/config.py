@@ -63,6 +63,17 @@ def migrate_legacy_cache() -> Path | None:
         return None
 
 
+# Currency id -> the field that holds how much of it you have. One map, in one
+# place, because **the two names are not the same string**: the currency is
+# `divine` and the field is `bankroll_divines`. Deriving the field by
+# concatenating `bankroll_` onto the currency looks right, is right for exalted,
+# and silently dropped every edit to the divine pot — the handler logged "no
+# bankroll field for 'divine'" to a log nobody reads and returned. Found
+# 2026-08-02 while wiring the re-size that is the rest of this batch, and it is
+# the more direct explanation of the 599-against-260 row that started it.
+BANKROLL_FIELDS = {"divine": "bankroll_divines", "exalted": "bankroll_exalted"}
+
+
 @dataclass
 class Config:
     # League. None means auto-detect: first league returned by
@@ -195,8 +206,23 @@ class Config:
         An absent currency means unconstrained, so dropping the zeroes here is
         what makes "0 = no limit" work at the far end.
         """
-        pots = {"divine": self.bankroll_divines, "exalted": self.bankroll_exalted}
+        pots = {
+            currency: getattr(self, field)
+            for currency, field in BANKROLL_FIELDS.items()
+        }
         return {currency: held for currency, held in pots.items() if held > 0}
+
+    def set_bankroll(self, currency: str, held: float) -> bool:
+        """Record a pot by its currency id. False if there is no pot for it.
+
+        The inverse of `bankroll()`, and it goes through the same map for the
+        same reason — see `BANKROLL_FIELDS`.
+        """
+        field = BANKROLL_FIELDS.get(currency)
+        if field is None:
+            return False
+        setattr(self, field, held)
+        return True
 
 
 def load_config(path: Path | None = None) -> Config:

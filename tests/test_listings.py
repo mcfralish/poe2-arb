@@ -21,6 +21,7 @@ from poe2arb.listings import (
     rank_candidates,
     replan_units,
     repriced,
+    resize_to_bankroll,
     smallest_lot,
     whisper_text,
 )
@@ -844,3 +845,83 @@ def test_a_stale_listing_is_demoted_not_dropped():
     """Same reason ghosts are never hidden: a hidden row cannot be falsified."""
     ranked = rank_candidates([aged_candidate("stale", 1.0, 30 * 24 * 3600)], now=NOW)
     assert len(ranked) == 1
+
+
+# --- re-sizing a candidate to a bankroll that changed afterwards -------------
+#
+# Sizing is decided once, per listing, from the bankroll the sweep was holding
+# when it reached that item — and a sweep is fifteen minutes long. Measured
+# 2026-08-02: a 599 divine row against a 260 divine bankroll, whispered, and the
+# order could not be filled.
+
+def sized_candidate(bankroll, *, pay_amount=100.0, stock=10.0):
+    [c] = build_candidates(
+        [listing(pay_amount=pay_amount, get_amount=1.0, stock=stock)],
+        {"core-destabiliser": 379.0},
+        {},
+        min_gap=1.05,
+        max_gap=1.5,
+        bankroll=bankroll,
+    )
+    return c
+
+
+def test_a_smaller_bankroll_shrinks_the_ask_rather_than_dropping_it():
+    c = sized_candidate({"divine": 1000.0})
+    assert c.plan.lots == 10
+    smaller = resize_to_bankroll(c, {"divine": 250.0})
+    assert smaller is not None
+    assert smaller.plan.lots == 2
+    assert smaller.plan.cost_divines == 200.0
+
+
+def test_a_bigger_bankroll_grows_the_ask_back():
+    """Re-planned from the listing, so it is symmetric — the row a later sweep
+    would have found at this bankroll, not a one-way ratchet."""
+    c = sized_candidate({"divine": 250.0})
+    assert c.plan.lots == 2
+    bigger = resize_to_bankroll(c, {"divine": 1000.0})
+    assert bigger.plan.lots == 10
+
+
+def test_re_sizing_matches_what_a_fresh_sweep_would_have_found():
+    resized = resize_to_bankroll(sized_candidate({"divine": 1000.0}), {"divine": 340.0})
+    assert resized.plan == sized_candidate({"divine": 340.0}).plan
+
+
+def test_only_the_seller_s_own_currency_caps_the_trade():
+    """The pots stay separate here for the same reason they are in
+    `build_candidates`: you cannot pay an exalted seller out of divines."""
+    c = sized_candidate({})
+    assert resize_to_bankroll(c, {"exalted": 1.0}).plan.lots == 10
+
+
+def test_an_unchanged_bankroll_returns_the_candidate_itself():
+    """Callers test `is` to find the rows that actually moved."""
+    c = sized_candidate({"divine": 250.0})
+    assert resize_to_bankroll(c, {"divine": 250.0}) is c
+
+
+def test_a_bankroll_too_small_for_one_lot_drops_the_candidate():
+    assert resize_to_bankroll(sized_candidate({}), {"divine": 50.0}) is None
+
+
+def test_a_shrunken_trade_below_the_profit_floor_is_dropped():
+    """The same gate `build_candidates` applies, applied to the same trade."""
+    c = sized_candidate({"divine": 1000.0})
+    one_lot = resize_to_bankroll(c, {"divine": 100.0})
+    assert one_lot.plan.profit_divines == pytest.approx(279.0)
+    assert resize_to_bankroll(
+        c, {"divine": 100.0}, min_profit_divines=300.0
+    ) is None
+
+
+def test_re_sizing_leaves_the_gap_and_the_band_alone():
+    """Quantity is all that moves — the price per item, and therefore how far
+    under market the listing is, are facts about the listing."""
+    c = sized_candidate({"divine": 1000.0})
+    smaller = resize_to_bankroll(c, {"divine": 250.0})
+    assert smaller.gap == c.gap
+    assert smaller.band is c.band
+    assert smaller.key == c.key
+    assert smaller.settle_currency == c.settle_currency

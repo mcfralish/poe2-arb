@@ -13,7 +13,10 @@ from poe2arb.trade_queue import QueueState, TradeQueue
 T0 = datetime(2026, 7, 28, 12, 0, tzinfo=timezone.utc)
 
 
-def cand(*, item="omen", pay=11.0, ce=12.0, char="Seller", stock=1.0, whisper=True):
+def cand(
+    *, item="omen", pay=11.0, ce=12.0, char="Seller", stock=1.0, whisper=True,
+    bankroll=None,
+):
     listing = Listing(
         item_id=item,
         account=f"{char}#1",
@@ -28,7 +31,7 @@ def cand(*, item="omen", pay=11.0, ce=12.0, char="Seller", stock=1.0, whisper=Tr
     )
     out = build_candidates(
         [listing], {item: ce, "divine": 1.0}, {item: "Omen of Light"},
-        min_gap=1.05, max_gap=1.5, sale_unit_divines=0.0023,
+        min_gap=1.05, max_gap=1.5, sale_unit_divines=0.0023, bankroll=bankroll,
     )
     return out[0] if out else None
 
@@ -422,6 +425,78 @@ def test_outstanding_counts_everything_still_in_flight():
     assert q.outstanding == 1              # awaiting a reply
     q.resolve(ready.id, Outcome.NO_REPLY)
     assert q.outstanding == 0
+
+
+# --- a bankroll changed after the rows were found --------------------------
+#
+# Sizing happens once, inside build_candidates, against the bankroll the sweep
+# held when it reached that item — so a change afterwards reached nothing until
+# 0.9.0. Measured 2026-08-02: a 599 divine row against a 260 divine bankroll,
+# whispered, and the order could not be filled.
+
+def test_lowering_the_bankroll_re_sizes_what_is_already_ready():
+    q = queue()
+    q.submit([cand(char="A", stock=10.0, bankroll={"divine": 1000.0})], T0)
+    assert q.next_up.candidate.plan.units == 10.0
+
+    change = q.resize({"divine": 55.0})
+
+    assert [t.id for t in change.resized] == [q.next_up.id]
+    assert change.dropped == []
+    assert q.next_up.candidate.plan.units == 5.0
+
+
+def test_a_row_no_longer_worth_it_at_any_quantity_is_retired():
+    q = queue()
+    q.submit([cand(char="A", stock=10.0, bankroll={"divine": 1000.0})], T0)
+
+    change = q.resize({"divine": 5.0})       # not even one lot at 11
+
+    assert len(change.dropped) == 1
+    assert q.available == []
+    # Retired the way any app-side drop is, so the next sweep may offer it
+    # again once the money is back — unlike a Decline, which is remembered.
+    assert q.declined == frozenset()
+
+
+def test_a_whispered_row_is_never_re_sized():
+    """It records what was actually asked for; the seller already has it."""
+    q = queue()
+    q.submit([cand(char="A", stock=10.0, bankroll={"divine": 1000.0})], T0)
+    trade = q.next_up
+    q.take(trade.id, T0)
+
+    change = q.resize({"divine": 1.0})
+
+    assert not change.changed
+    assert trade.candidate.plan.units == 10.0
+    assert trade.state is QueueState.AWAITING
+
+
+def test_raising_the_bankroll_grows_the_ready_rows_back():
+    q = queue()
+    q.submit([cand(char="A", stock=10.0, bankroll={"divine": 55.0})], T0)
+    assert q.next_up.candidate.plan.units == 5.0
+    q.resize({"divine": 1000.0})
+    assert q.next_up.candidate.plan.units == 10.0
+
+
+def test_an_unchanged_bankroll_reports_nothing():
+    """The handler logs what it did, so a no-op must stay quiet."""
+    q = queue()
+    q.submit([cand(char="A", stock=10.0, bankroll={"divine": 55.0})], T0)
+    assert q.resize({"divine": 55.0}).changed is False
+
+
+def test_re_sizing_keeps_the_row_recognisable_to_the_next_sweep():
+    """`key` is the listing, not the quantity — so a re-sized row still
+    deduplicates against the same listing being found again."""
+    q = queue()
+    q.submit([cand(char="A", stock=10.0, bankroll={"divine": 1000.0})], T0)
+    before = q.next_up.key
+    q.resize({"divine": 55.0})
+    assert q.next_up.key == before
+    assert q.submit([cand(char="A", stock=10.0)], T0) == 0
 
 
 def test_revise_corrects_the_quantity_without_losing_the_trades_identity():

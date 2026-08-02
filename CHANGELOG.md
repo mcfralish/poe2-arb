@@ -17,6 +17,20 @@ buttons become legible on Windows.
 notes from the section matching the tag, so a tag with no matching heading fails the
 build on purpose.*
 
+### Fixed
+
+- **Typing a divine bankroll did nothing.** The box accepted the number, showed it, and
+  threw it away — so unless you only ever traded in exalted, the app has been planning
+  every trade as though you had unlimited divines. This is why a 599-divine order could
+  be offered to someone holding 260. The exalted box was never affected.
+- **Changing your bankroll now re-sizes the trades already on screen.** It used to apply
+  only to the next sweep, which is up to fifteen minutes away, so lowering it left a
+  screenful of offers asking for money you had just said you did not have. Trades are
+  re-costed for what you can afford rather than being thrown away — a listing bigger
+  than your bankroll is asked for in the quantity that fits, and only disappears if no
+  quantity of it is worth trading. Raising the bankroll grows them back. Anything you
+  have already whispered is left exactly as you sent it.
+
 ### Changed
 
 - **Everything the app finds now appears the moment it finds it.** Trades used to be

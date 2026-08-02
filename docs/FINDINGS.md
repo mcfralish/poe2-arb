@@ -1073,6 +1073,54 @@ worse copy. `results.py` carries a comment explaining why *Every trade* exists a
 precedes *Every whisper* — **that comment must go with the tabs**, or it reads as
 justification to restore them.
 
+### The bankroll reached nothing — two independent faults, root-caused 2026-08-02, fixed in 0.9.0
+
+**The symptom, from the same play session:** a **599 divine** row sat in *Ready to whisper*
+against a **260 divine** bankroll, was whispered, and the order could not be filled. Not a
+pricing error and not a ranking error — the app asked for a quantity the user could not pay
+for.
+
+Root-caused from the code, no game test needed, and it turned out to be **two faults
+stacked**, either of which alone produces the symptom:
+
+1. **The divine spin box had never worked at all.** `_bankroll_changed` derived the config
+   field by concatenation — `f"bankroll_{currency}"` — and the currency id is `divine`
+   while the field is **`bankroll_divines`**. `hasattr` failed, the handler logged *"no
+   bankroll field for 'divine'"* to a file nobody reads, and returned. Every edit to the
+   divine pot was silently discarded, for the whole life of the split pots. It is right for
+   `exalted`, which is why the one test over that box passed throughout and why nothing
+   looked wrong. Fixed by `config.BANKROLL_FIELDS` and `Config.set_bankroll`, one map that
+   both directions go through; the map looks redundant next to the concatenation and is
+   exactly what the concatenation got wrong.
+2. **Sizing was decided once and never revisited.** Even with the value recorded, the cap
+   is applied inside `build_candidates` (`max_by_bankroll = bankroll_units // lot_pay`)
+   from `cfg.bankroll()` read **per item, inside the sweep loop**. A sweep is ~15 minutes,
+   so a change lands progressively on what is *still to be fetched* and reaches nothing
+   already on screen. `_bankroll_changed`'s docstring presented this as correct — "the
+   in-memory value is what the next sweep reads, and that is already correct" — which is
+   true and is not enough. It read as decided rather than missed, which is why it survived.
+
+**The fix is to re-size, not to drop** (decided 2026-08-02). `listings.resize_to_bankroll`
+re-plans a candidate from its own listing at the new bankroll, so it shrinks *and* grows
+back and matches what a fresh sweep would have found; a row is retired only when no
+quantity clears `min_profit_divines`. It is applied on both surfaces —
+`TradeQueue.resize` for the queue the hotkey acts on, `SweepPanel.set_bankroll` for the
+Trades tab — because they hold candidates independently. **Whispered rows are exempt
+everywhere**: they record what was actually asked for, and the seller already has the
+message.
+
+Two things that look incidental and are not. The re-size is **debounced 250 ms** where the
+config write is debounced 1500 ms: the spin box steps through 2 and 26 on the way to 260,
+and re-sizing at each would rebuild both tables three times and briefly show quantities for
+a bankroll the user never had. And `queue_panel._sync_ready` had to start comparing the
+**money** on each row, not just the row ids — a re-size moves four cells without changing a
+single id, and identity alone left the old quantity on screen, which is precisely the
+quantity the whisper would then have asked for.
+
+*Verified by screenshot (offscreen, Linux):* three rows at 600/330/256 div against no
+bankroll, then 260 typed into the divine box → 220/240/256, ● moved to the new best row, and
+the Trades tab's status line followed from "best is +100.00 div" to "+60.00".
+
 ### What the game's own log can and cannot tell us — measured 2026-07-31
 
 Asked whether trade or party history could auto-mark outcomes. Measured by joining the

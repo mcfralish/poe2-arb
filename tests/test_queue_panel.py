@@ -223,6 +223,22 @@ def test_a_changed_row_set_does_rebuild(qapp):
     assert p.ready.cellWidget(0, READY_ACTION_COLUMN) is not first
 
 
+def test_a_re_sized_row_redraws_even_though_its_id_did_not_change(qapp):
+    """A bankroll change rewrites the money on a row without touching the row
+    list, so identity alone would leave the old quantity on screen — and the
+    stale quantity is exactly what the whisper would then ask for."""
+    p, q = loaded(qapp, cand(stock=10.0))
+    assert p.ready.item(0, 2).text() == "10"
+
+    q.resize({"divine": 55.0})
+    p.refresh(q, T0)
+    qapp.processEvents()
+
+    assert p.ready.rowCount() == 1
+    assert p.ready.item(0, 2).text() == "5"
+    assert p.ready.item(0, 4).text() == "55 div"
+
+
 def test_awaiting_shows_its_auto_no_reply_countdown(qapp):
     p, q = loaded(qapp, cand())
     q.take_next(T0)

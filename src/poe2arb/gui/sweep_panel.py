@@ -40,7 +40,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..format import currency_label, fmt_profit
-from ..listings import Band, rank_candidates, whisper_text
+from ..listings import Band, rank_candidates, resize_to_bankroll, whisper_text
 from ..outcomes import (
     LABELS,
     TIPS,
@@ -262,6 +262,16 @@ class SweepPanel(QWidget):
         # figure, and because after a session you need to know which currency a
         # given trade was costed against.
         self._settlement = "divine"
+        # What the user can actually pay with, by currency, and the floor a trade
+        # has to clear. Held here rather than read at display time because a
+        # sweep sizes each item against the bankroll as it reaches it — fifteen
+        # minutes of it — so the rows a pass returns can be sized against two
+        # different bankrolls, and a change after the pass reaches none of them.
+        self._bankroll: dict[str, float] = {}
+        self._min_profit = 0.0
+        # The last sweep shown, kept only so the status line under the table can
+        # be rebuilt when a bankroll change moves the profits it quotes.
+        self._last_result = None
         # The outcome log, for reviewing sessions other than the live one.
         self._history_path = None
         self._history: list = []
@@ -662,6 +672,61 @@ class SweepPanel(QWidget):
 
     # --- content -----------------------------------------------------------
 
+    def set_bankroll(
+        self,
+        bankroll: dict[str, float],
+        *,
+        min_profit_divines: float = 0.0,
+        risk_appetite: float = 0.0,
+    ) -> None:
+        """Re-size the rows on screen for a bankroll the user just changed.
+
+        The same correction the queue makes, on the other surface. Waiting for
+        the next sweep would leave the table quoting quantities the user can no
+        longer pay for, for up to a full cycle — and the Trades tab is where the
+        figures are read back afterwards, so a stale one here is a stale one in
+        the write-up.
+
+        Whispered rows are exempt, here as everywhere: `_carried` holds them
+        past the sweep that found them precisely because they record a trade
+        that was asked for, and `_attempt_ids` marks the ones this pass re-found.
+        """
+        self._bankroll = dict(bankroll)
+        self._min_profit = min_profit_divines
+        if not self._candidates:
+            return
+        carried = list(self._carried.values())
+        fresh = rank_candidates(
+            self._resized([c for c in self._candidates if c.key not in self._carried]),
+            risk_appetite=risk_appetite,
+        )
+        self._candidates = fresh + carried
+        if self.session.currentData() == SESSION_LIVE:
+            self._populate()
+            self._update_outcome_buttons()
+            if self._last_result is not None:
+                self.set_status(self._summary(self._last_result, fresh))
+
+    def _resized(self, candidates) -> list:
+        """Every candidate re-planned for the current bankroll, whispers aside.
+
+        Dropping is deliberate and rare: a listing is only removed when *no*
+        quantity of it clears `min_profit_divines` any more, which is the same
+        gate `build_candidates` applies. It is not a hiding rule — a smaller
+        bankroll shrinks the ask, it does not silence the row.
+        """
+        out = []
+        for c in candidates:
+            if c.key in self._attempt_ids:
+                out.append(c)  # whispered: this is what was actually asked for
+                continue
+            sized = resize_to_bankroll(
+                c, self._bankroll, min_profit_divines=self._min_profit
+            )
+            if sized is not None:
+                out.append(sized)
+        return out
+
     def set_result(self, result, *, risk_appetite: float = 0.0) -> None:
         """Show a sweep. Re-callable with the same result to re-rank in place.
 
@@ -669,7 +734,10 @@ class SweepPanel(QWidget):
         waiting for the next sweep is a fifteen-minute round trip to see the
         effect of dragging a slider.
         """
-        fresh = rank_candidates(list(result.candidates), risk_appetite=risk_appetite)
+        self._last_result = result
+        fresh = rank_candidates(
+            self._resized(result.candidates), risk_appetite=risk_appetite
+        )
         seen = {c.key for c in fresh}
         # Anything whispered stays on the table even once the sweep stops
         # finding it — which is what happens the moment a purchase succeeds.
@@ -699,8 +767,19 @@ class SweepPanel(QWidget):
         # change — so a check run beforehand describes the previous table and
         # can leave the verdict buttons live against a listing never whispered.
         self._update_outcome_buttons()
-        # Counted over this sweep's own candidates, never the carried ones —
-        # the line describes what the pass found.
+        if live:
+            self.set_status(self._summary(result, fresh))
+
+    def _summary(self, result, fresh) -> str:
+        """The line under the table: what this pass found, and the best of it.
+
+        Counted over the sweep's own candidates, never the carried ones — it
+        describes the pass. Split out from `set_result` because a bankroll
+        change re-sizes those candidates, and a "best is +100.00 div" left
+        standing over a table whose best row now reads +60.00 is the same
+        disagreement between two views of one fact that this file's other
+        shared helpers exist to prevent.
+        """
         plausible = sum(1 for c in fresh if c.band is Band.PLAUSIBLE)
         thin = sum(1 for c in fresh if c.band is Band.THIN)
         ghosts = sum(1 for c in fresh if c.band is Band.GHOST)
@@ -722,8 +801,7 @@ class SweepPanel(QWidget):
             parts.append("nothing worth trying this time")
         if result.errors:
             parts.append(f"{len(result.errors)} item(s) failed — see the Log tab")
-        if live:
-            self.set_status("  ·  ".join(parts))
+        return "  ·  ".join(parts)
 
     def _populate(self) -> None:
         # Sorting off while filling: Qt re-sorts on every insert otherwise, which

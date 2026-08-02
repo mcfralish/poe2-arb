@@ -320,6 +320,14 @@ class MainWindow(QMainWindow):
 
         self.sweep = SweepPanel()
         self.sweep.set_icons(self.icons)
+        # Seeded before anything is swept: an unset bankroll on the panel means
+        # *unconstrained*, so leaving it empty would let the first re-size grow
+        # every row past what the user can pay for.
+        self.sweep.set_bankroll(
+            self.cfg.bankroll(),
+            min_profit_divines=self.cfg.min_profit_divines,
+            risk_appetite=self.cfg.risk_appetite,
+        )
         self.sweep.attempt_copied.connect(self._attempt_copied)
         self.sweep.recheck_requested.connect(self._recheck)
         self._setup_hotkey()
@@ -490,7 +498,7 @@ class MainWindow(QMainWindow):
         self.countdown_timer.timeout.connect(self._tick_countdown)
         self.countdown_timer.start()
 
-        # Drives the offer countdown and promotes the next trade when one lapses.
+        # Drives the countdown on every queued row and retires the ones that lapse.
         self.queue_timer = QTimer(self)
         self.queue_timer.setInterval(1000)
         self.queue_timer.timeout.connect(self._queue_tick)
@@ -501,6 +509,15 @@ class MainWindow(QMainWindow):
         self._bankroll_save_timer.setSingleShot(True)
         self._bankroll_save_timer.setInterval(1500)
         self._bankroll_save_timer.timeout.connect(self._persist_bankroll)
+
+        # And into one re-size. Much shorter than the save, because this one is
+        # visible: typing "260" steps the box through 2 and 26, and re-sizing
+        # every row at each would rebuild both tables three times and briefly
+        # show quantities for a bankroll the user never had.
+        self._bankroll_resize_timer = QTimer(self)
+        self._bankroll_resize_timer.setSingleShot(True)
+        self._bankroll_resize_timer.setInterval(250)
+        self._bankroll_resize_timer.timeout.connect(self._apply_bankroll)
 
     def _preload_currencies(self) -> None:
         """Populate the currency list before any scan has run.
@@ -1115,18 +1132,52 @@ class MainWindow(QMainWindow):
         self.results.reload()
 
     def _bankroll_changed(self, currency: str, held: float) -> None:
-        """Take the new bankroll immediately, persist it lazily.
+        """Take the new bankroll, re-size what is on screen, persist it lazily.
 
-        The spin box fires on every step, so the config write is deferred to
-        when editing settles — the in-memory value is what the next sweep reads,
-        and that is already correct.
+        The spin box fires on every step, so both the config write and the
+        re-size are deferred to when editing settles — see `_build_timers` for
+        why they wait different lengths.
+
+        **The re-size is the point, and until 0.9.0 it was missing.** This used
+        to assign the value and start the save timer, on the reasoning that the
+        next sweep reads it and that is already correct — which is true and is
+        not enough: sizing happens once per listing, inside `build_candidates`,
+        so every row already found keeps the bankroll it was found with for up
+        to a full fifteen-minute cycle. Measured 2026-08-02, that put a 599
+        divine row in front of a 260 divine bankroll and the whisper could not
+        be filled.
         """
-        field = f"bankroll_{currency}"
-        if not hasattr(self.cfg, field):
+        if not self.cfg.set_bankroll(currency, held):
             log.warning("no bankroll field for %r", currency)
             return
-        setattr(self.cfg, field, held)
         self._bankroll_save_timer.start()
+        self._bankroll_resize_timer.start()
+
+    def _apply_bankroll(self) -> None:
+        """Re-plan every un-whispered row for the bankroll now set.
+
+        Both surfaces, because they hold candidates independently: the queue is
+        what the hotkey acts on, and the Trades tab is what the numbers are read
+        back off afterwards. Whispered rows are exempt on both — they record
+        what was actually asked for.
+        """
+        bankroll = self.cfg.bankroll()
+        change = self.trade_queue.resize(
+            bankroll, min_profit_divines=self.cfg.min_profit_divines
+        )
+        if change.changed:
+            bits = []
+            if change.resized:
+                bits.append(f"{len(change.resized)} re-sized")
+            if change.dropped:
+                bits.append(f"{len(change.dropped)} no longer worth it")
+            self._log(f"bankroll changed — {', '.join(bits)}")
+            self.queue_panel.refresh(self.trade_queue)
+        self.sweep.set_bankroll(
+            bankroll,
+            min_profit_divines=self.cfg.min_profit_divines,
+            risk_appetite=self.cfg.risk_appetite,
+        )
 
     def _apply_always_on_top(self) -> None:
         """Float the window over the game, or stop doing so.
@@ -1261,6 +1312,10 @@ class MainWindow(QMainWindow):
         self.trade_queue.available_ttl_s = self.cfg.available_ttl_s
         self.trade_queue.awaiting_timeout_s = self.cfg.awaiting_timeout_s
         self.trade_queue.queue_ghosts = self.cfg.risk_appetite > 0.0
+        # `min_profit_divines` is the other half of the sizing rule, so a change
+        # to it has to reach the rows already found the same way a bankroll
+        # change does.
+        self._apply_bankroll()
         self._apply_always_on_top()
 
         rebind = (

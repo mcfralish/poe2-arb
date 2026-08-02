@@ -19,10 +19,14 @@ published, release job green. **0.9.0 is open**: `__init__.py` and `pyproject.to
 `field-test-5` off `main`. Rename that heading to `## [0.9.0] — <date>` before tagging or
 the release job fails, which is the point of it.
 
-**Batch 1 is done** (2026-08-02) — the queue rework, the merged verdict button, the in-row
-editors and stop-and-resume all shipped to `field-test-5`. **Start with Batch 2**, which is
-small and was written to be folded in with Batch 1; then Batch 3, which now has one
-confirmed measurement waiting for it (see below).
+**Batches 1 and 2 are done** (2026-08-02) — the queue rework, the merged verdict button,
+the in-row editors, stop-and-resume, and bankroll correctness all shipped to
+`field-test-5`. **Start with Batch 3**, which has one confirmed measurement waiting for it
+(see below).
+
+Batch 2 turned up a second fault the write-up had not predicted: **the divine bankroll spin
+box had never recorded anything**, for the whole life of the split pots — see FINDINGS,
+*The bankroll reached nothing*. Both faults are fixed; nothing is left open there.
 
 Two field-test sessions have landed since 0.7.0 and both are fully written up in FINDINGS:
 *Found in the fourth session of real use* (2026-08-01) and *The first real play session on
@@ -60,6 +64,8 @@ Each was a fork the work would otherwise have guessed at.
    nobody re-derives them as arguments to restore the toast.
 3. **A Ready row whose cost outgrows the bankroll is re-sized down, not dropped** — dropped
    only if it falls below `min_profit_divines`. Whispered rows are never re-planned.
+   *Done — shipped in Batch 2, 2026-08-02, on both surfaces; it grows rows back as well as
+   shrinking them, and it uncovered the divine spin box having never recorded anything.*
 4. **Row icons become vendored Lucide SVGs (MIT).** Copy the files in with the licence
    rather than adding a dependency, and **confirm QtSvg survives the PyInstaller bundle** —
    an SVG that renders in dev and not in the exe is the same failure as the dingbats, and
@@ -74,48 +80,18 @@ Each was a fork the work would otherwise have guessed at.
 
 ## The batches
 
-Ordered by dependency, not importance. Batch 1 (the queue rework) is done; the button
-count it settled is **five** on a whispered row and **two** on a ready one, which is what
-Batch 3's width decisions are against. Batch 6 is desk work and does not compete with the
-UI batches for game time; do not let the UI list crowd it out entirely.
+Ordered by dependency, not importance. Batches 1 (the queue rework) and 2 (bankroll
+correctness) are done; the button count Batch 1 settled is **five** on a whispered row and
+**two** on a ready one, which is what Batch 3's width decisions are against. Batch 6 is
+desk work and does not compete with the UI batches for game time; do not let the UI list
+crowd it out entirely.
 
 | # | Batch | Main files |
 |---|---|---|
-| 2 | Bankroll correctness | `main_window.py`, `sweep_panel.py`, `trade_queue.py` |
 | 3 | Table and window layout | `table_items.py`, `queue_panel.py`, `bankroll_bar.py` |
 | 4 | Icons and row polish | new assets, `queue_panel.py`, `settings_dialog.py` |
 | 5 | The tab shuffle | `sweep_panel.py`, `results.py`, `main_window.py` |
 | 6 | Pricing — desk work | `scout.py`, `listings.py`, analysis |
-
----
-
-### Batch 2 — Bankroll correctness
-
-Small, subtle, and it cost a real trade. It was written to be folded into Batch 1 and was
-not — take it first.
-
-- [ ] **Changing the bankroll re-sizes nothing that already exists.** Root-caused from the
-      code 2026-08-02, no game test needed. `_bankroll_changed` (`main_window.py:1124`)
-      assigns `cfg.bankroll_divines` and starts the save timer; that is the whole handler.
-      Sizing lives in `build_candidates` (`max_by_bankroll = int(bankroll_units // lot_pay)`,
-      `listings.py:264`) from `cfg.bankroll()` at `sweep.py:179`. **The handler's docstring
-      presents this as correct**, which is why it survived — it reads as decided rather than
-      missed. Consequence measured 2026-08-02: a **599 div** row against a **260 div**
-      bankroll, whispered, and the order could not be filled.
-      - `cfg.bankroll()` is read **inside the per-item loop**, so the change lands
-        progressively — a stale row's exposure is up to a full ~15-minute cycle. Removing
-        the drip (Batch 1, done) did not fix this, as predicted.
-      - **Re-size, do not drop** (decision 3): re-plan to what the new bankroll affords, drop
-        only if that falls below `min_profit_divines`. `smallest_lot` / `replan_units`
-        already do it and a partial ask is already a supported class of whisper.
-      - **Both surfaces need it.** `trade_queue` holds submitted candidates independently of
-        the sweep panel, and *Ready* is where the bad row was. `set_result` re-*ranks* where
-        this needs re-*sizing*; `SweepResult` keeps candidates rather than listings, but
-        `Candidate` carries its own `listing`, so re-planning from
-        `[c.listing for c in result.candidates]` is cheap.
-      - **Whispered rows must be left alone** — they record what was actually asked for.
-      - *Precedent:* `_appetite_changed`, one method below, already re-ranks what is on
-        screen rather than making the user wait fifteen minutes for a slider.
 
 ---
 
@@ -415,6 +391,10 @@ Not session work; the queue of things only playing can answer.
   clicked by mistake, and whether the ● ever visibly disagrees with row 1 for long enough
   to confuse. Also worth one deliberate check: stop *Find trades* mid-sweep, start it
   again, and confirm the log line says it resumed rather than starting over.
+- **Set the divine bankroll and check it sticks.** It never has: the box took the number,
+  displayed it, and discarded it, so every session so far has planned divine trades against
+  an unlimited pot. Worth a deliberate look at whether the quantities offered now feel
+  right, and at whether lowering it mid-session visibly re-costs the rows on screen.
 - **Do the in-row editors work with a seller talking to you?** Three spin boxes per
   whispered row replaced the *Adjust…* dialog. The rebuild is held while one is busy, which
   is the part most likely to be wrong in real use — a row arriving or expiring mid-edit.

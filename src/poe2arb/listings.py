@@ -446,6 +446,56 @@ def repriced(candidate: Candidate, pay_units: float) -> Candidate:
     )
 
 
+def resize_to_bankroll(
+    candidate: Candidate,
+    bankroll: dict[str, float] | None,
+    *,
+    min_profit_divines: float = 0.0,
+) -> Candidate | None:
+    """The same listing re-planned for a bankroll that has since changed.
+
+    Sizing is decided once, inside `build_candidates`, from the bankroll the
+    sweep was reading at the moment it priced that item — and a sweep is fifteen
+    minutes long. Until 0.9.0 nothing re-applied a later change, so lowering the
+    bankroll left every row already on screen sized against the old one:
+    measured 2026-08-02, a **599 divine** row against a **260 divine** bankroll,
+    whispered, and the order could not be filled.
+
+    **Re-sized, not dropped.** A listing that no longer fits is asked for in the
+    quantity that does — `plan_trade` already caps by the bankroll rather than
+    rejecting, and a partial ask is a supported class of whisper. None is
+    returned only when no quantity clears `min_profit_divines`, which is the same
+    gate `build_candidates` applies.
+
+    Re-planned from the **listing** rather than adjusted from the plan, so the
+    result is identical to what a fresh sweep would have produced at this
+    bankroll — including growing back when the bankroll goes up. That is also why
+    this must not be pointed at a whispered row: an amended plan
+    (`replan_units`, `repriced`) records what was actually asked for and agreed,
+    and re-deriving it from the listing would throw both away.
+
+    Returns the candidate **itself** when the plan comes out identical, so a
+    caller can test `is` to find the rows that actually moved rather than
+    diffing plans.
+    """
+    listing = candidate.listing
+    plan = candidate.plan
+    resized = plan_trade(
+        pay_amount=listing.pay_amount,
+        get_amount=listing.get_amount,
+        stock=listing.stock,
+        ce_divines=candidate.ce_divines,
+        pay_unit_divines=plan.pay_unit_divines,
+        sale_unit_divines=plan.sale_unit_divines,
+        bankroll_units=(bankroll or {}).get(listing.pay_currency, 0.0),
+    )
+    if resized is None or resized.profit_divines < min_profit_divines:
+        return None
+    if resized == plan:
+        return candidate
+    return dataclasses.replace(candidate, plan=resized)
+
+
 def classify(gap: float, *, min_gap: float, max_gap: float) -> Band:
     if gap > max_gap:
         return Band.GHOST

@@ -189,6 +189,19 @@ def test_editing_one_pot_leaves_the_other_alone(window):
     assert w.cfg.bankroll_divines == 40.0
 
 
+def test_editing_the_divine_pot_actually_records_it(window):
+    """It did not, from the day the pots were split until 2026-08-02: the
+    currency is `divine` and the field is `bankroll_divines`, and the handler
+    built the field name by concatenation. Every edit to this box was dropped
+    with a warning to the log, which is why the same test over the exalted box
+    passed throughout."""
+    w = window(bankroll_divines=40.0, bankroll_exalted=9000.0)
+    w.queue_panel.bankroll.spins["divine"].setValue(260.0)
+    assert w.cfg.bankroll_divines == 260.0
+    assert w.cfg.bankroll_exalted == 9000.0
+    assert w.cfg.bankroll()["divine"] == 260.0
+
+
 def test_loading_values_is_not_mistaken_for_an_edit(window):
     """setValue fires valueChanged; startup must not look like a user edit."""
     w = window()
@@ -201,6 +214,41 @@ def test_loading_values_is_not_mistaken_for_an_edit(window):
 def test_an_unknown_currency_is_ignored_rather_than_crashing(window):
     w = window()
     w._bankroll_changed("chaos", 5.0)      # no bankroll_chaos field exists
+
+
+def test_lowering_the_bankroll_re_sizes_the_rows_already_found(window):
+    """0.9.0. Sizing happens once per listing, inside the sweep, so a change
+    afterwards used to reach nothing for up to a full fifteen-minute cycle —
+    measured 2026-08-02 as a 599 divine row against a 260 divine bankroll,
+    whispered, and unfillable."""
+    w = window(bankroll_divines=0.0)
+    _queued(w, stock=10.0)
+    assert w.trade_queue.next_up.candidate.plan.units == 10.0
+
+    w.queue_panel.bankroll.spins["divine"].setValue(55.0)
+    w._apply_bankroll()                    # the debounce, fired
+
+    assert w.trade_queue.next_up.candidate.plan.units == 5.0
+
+
+def test_editing_the_bankroll_arms_the_re_size(window):
+    """The spin box steps through 2 and 26 on the way to 260, so the re-size is
+    debounced — but it must be armed by the edit, not by the next sweep."""
+    w = window()
+    w.queue_panel.bankroll.spins["divine"].setValue(55.0)
+    assert w._bankroll_resize_timer.isActive()
+
+
+def test_a_whispered_row_is_not_re_sized_by_a_bankroll_change(window):
+    w = window(bankroll_divines=0.0)
+    _queued(w, stock=10.0)
+    trade = w.trade_queue.next_up
+    w.trade_queue.take(trade.id)
+
+    w.queue_panel.bankroll.spins["divine"].setValue(11.0)
+    w._apply_bankroll()
+
+    assert trade.candidate.plan.units == 10.0
 
 
 # --- long-shot appetite -----------------------------------------------------

@@ -312,17 +312,23 @@ def test_settings_changes_reach_the_running_queue(qapp, monkeypatch):
 
     monkeypatch.setattr("poe2arb.gui.hotkey.sys.platform", "linux")
 
+    from poe2arb.trade_queue import QueueResize
+
+    sized: list = []
     panel = SimpleNamespace(
-        set_hotkey_hint=lambda *_a: None, refresh=lambda *_a, **_k: None
+        set_hotkey_hint=lambda *_a: None,
+        refresh=lambda *_a, **_k: None,
+        set_bankroll=lambda bankroll, **_k: sized.append(bankroll),
     )
     window = SimpleNamespace(
         cfg=Config(
             trade_hotkey="ctrl+shift+f9", trade_hotkey_enabled=True,
             available_ttl_s=120.0, awaiting_timeout_s=600.0,
+            bankroll_divines=40.0,
         ),
         trade_queue=SimpleNamespace(
             available_ttl_s=60.0, awaiting_timeout_s=300.0,
-            set_bankroll=lambda *_a: None,
+            resize=lambda *_a, **_k: QueueResize(),
         ),
         _hotkey=GlobalHotkey(),
         queue_panel=panel,
@@ -330,12 +336,16 @@ def test_settings_changes_reach_the_running_queue(qapp, monkeypatch):
         _log=lambda *_a: None,
         _apply_always_on_top=lambda: None,
     )
+    window._apply_bankroll = lambda: mw.MainWindow._apply_bankroll(window)
     before = Config(trade_hotkey="ctrl+alt+d", trade_hotkey_enabled=True)
 
     mw.MainWindow._apply_queue_settings(window, before)
 
     assert window.trade_queue.available_ttl_s == 120.0
     assert window.trade_queue.awaiting_timeout_s == 600.0
+    # `min_profit_divines` is part of the sizing rule, so saved settings have to
+    # re-size what has already been found rather than waiting for a sweep.
+    assert sized == [{"divine": 40.0}]
 
 
 # --- recording a binding by pressing it ------------------------------------

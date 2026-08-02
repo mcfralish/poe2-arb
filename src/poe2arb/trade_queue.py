@@ -49,7 +49,14 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 
-from .listings import Band, Candidate, replan_units, repriced, whisper_text
+from .listings import (
+    Band,
+    Candidate,
+    replan_units,
+    repriced,
+    resize_to_bankroll,
+    whisper_text,
+)
 from .outcomes import Outcome
 
 log = logging.getLogger(__name__)
@@ -132,6 +139,26 @@ class QueueTick:
     @property
     def changed(self) -> bool:
         return bool(self.expired or self.auto_resolved)
+
+
+@dataclass
+class QueueResize:
+    """What a bankroll change did to the rows already on screen.
+
+    Reported rather than silent: the money on a row moved without the user
+    touching that row, and the one thing worse than a stale quantity is a
+    corrected one nobody was told about.
+    """
+
+    resized: list[QueuedTrade] = field(default_factory=list)
+    # No quantity of these clears `min_profit_divines` any more. Retired the way
+    # the app's own drops are — not remembered as declined, because the user
+    # judged nothing.
+    dropped: list[QueuedTrade] = field(default_factory=list)
+
+    @property
+    def changed(self) -> bool:
+        return bool(self.resized or self.dropped)
 
 
 def _now() -> datetime:
@@ -278,6 +305,44 @@ class TradeQueue:
             known.add(c.key)
             added += 1
         return added
+
+    def resize(
+        self,
+        bankroll: dict[str, float] | None,
+        *,
+        min_profit_divines: float = 0.0,
+    ) -> QueueResize:
+        """Re-size every takeable row to a bankroll that has just changed.
+
+        The sizing a row was found with is the bankroll the sweep was reading at
+        that instant, and a sweep is fifteen minutes long — so without this a
+        row can sit in *Ready* asking for more than the user has, for a quarter
+        of an hour, with the hotkey pointing at it. Measured 2026-08-02: a 599
+        divine row against a 260 divine bankroll, whispered, unfillable.
+
+        **AVAILABLE only.** A whispered row records what was actually asked for;
+        the seller already has the message, and re-sizing it would make the
+        outcome log disagree with the whisper it is the record of.
+
+        A row that no longer profits at any quantity is retired the way any
+        other app-side drop is — `remember=False`, because the user judged
+        nothing — which also means the next sweep is free to offer it again if
+        the bankroll goes back up.
+        """
+        result = QueueResize()
+        for t in list(self._trades):
+            if t.state is not QueueState.AVAILABLE:
+                continue
+            sized = resize_to_bankroll(
+                t.candidate, bankroll, min_profit_divines=min_profit_divines
+            )
+            if sized is None:
+                self.drop(t.id)
+                result.dropped.append(t)
+            elif sized is not t.candidate:
+                t.candidate = sized
+                result.resized.append(t)
+        return result
 
     # --- the clock ---------------------------------------------------------
 

@@ -211,6 +211,31 @@ The superseded rules are kept with their original reasoning in
 [docs/FINDINGS.md](docs/FINDINGS.md), *The offer queue* — read them there rather than
 re-deriving them as arguments to restore the toast.
 
+**A bankroll change re-sizes what is already on screen; it does not only apply to the next
+sweep.** Sizing is decided inside `build_candidates` from `cfg.bankroll()` read *per item*
+in the sweep loop, so before 0.9.0 a change reached nothing already found for up to a full
+~15-minute cycle — a **599 divine** row against a **260 divine** bankroll, whispered and
+unfillable (2026-08-02). `listings.resize_to_bankroll` re-plans a candidate from its own
+listing, so it shrinks *and* grows back and matches what a fresh sweep would have found;
+`TradeQueue.resize` and `SweepPanel.set_bankroll` apply it to the two surfaces, which hold
+candidates independently. Four things not to undo:
+
+- **Re-size, do not drop.** A row is retired only when no quantity clears
+  `min_profit_divines`; a partial ask is a supported class of whisper.
+- **Whispered rows are exempt on both surfaces.** They record what was actually asked for,
+  and `replan_units` / `repriced` amendments would be thrown away by a re-derivation from
+  the listing.
+- **`config.BANKROLL_FIELDS` is one map for both directions, and it is not redundant.** The
+  currency is `divine` and the field is `bankroll_divines`; deriving the field by
+  concatenation is right for exalted and **silently discarded every edit to the divine
+  pot** for the whole life of the split pots (found 2026-08-02, and the more direct cause
+  of the 599-against-260 row).
+- **`queue_panel._sync_ready` compares the row's money, not just its id.** A re-size moves
+  four cells without changing an id, and identity alone leaves the stale quantity on screen
+  — which is the quantity the whisper then asks for.
+
+Full write-up in [docs/FINDINGS.md](docs/FINDINGS.md), *The bankroll reached nothing*.
+
 **Verdict buttons: three, not five.** `Outcome.UNAVAILABLE` (0.9.0) replaced the AFK /
 Offline / Refused split on both fast surfaces after it was used properly for one session
 and then rejected — see FINDINGS, *The three-way verdict split*. It is a silence for

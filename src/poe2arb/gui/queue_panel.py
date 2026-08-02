@@ -201,6 +201,10 @@ class QueuePanel(QWidget):
         # countdown" from "the list actually changed". For Ready it is also the
         # order actually on screen, which is what a held reshuffle restores.
         self._ready_ids: list[str] = []
+        # The money each Ready row was last drawn with. A bankroll change
+        # re-sizes rows in place, which moves four cells without changing a
+        # single id — so identity alone would leave the old quantity on screen.
+        self._ready_money: list[tuple] = []
         # Identity *and* pin state: pinning changes the row's highlight, its
         # button and its countdown cell, so it has to force a rebuild the same
         # way an arriving trade does.
@@ -227,6 +231,7 @@ class QueuePanel(QWidget):
             self.ready.setRowCount(0)
             self.awaiting.setRowCount(0)
             self._ready_ids = []
+            self._ready_money = []
             self._awaiting_ids = []
             self._editors.clear()
             self.headline.setText("No trades yet")
@@ -294,9 +299,11 @@ class QueuePanel(QWidget):
 
     def _sync_ready(self, trades, next_up, now) -> None:
         ids = [t.id for t in trades]
-        if ids != self._ready_ids:
+        money = [_money_shape(t) for t in trades]
+        if ids != self._ready_ids or money != self._ready_money:
             self._rebuild_ready(trades)
             self._ready_ids = ids
+            self._ready_money = money
         for row, t in enumerate(trades):
             # A position rather than a state, since 0.9.0: it marks whichever
             # row the hotkey would take, which is row 1 except while a
@@ -750,6 +757,17 @@ def _spin(
 
 def _seller(candidate) -> str:
     return candidate.listing.character or candidate.listing.account
+
+
+def _money_shape(trade) -> tuple:
+    """Everything `_set_money` draws, so a redraw can tell whether it moved.
+
+    A re-size from a bankroll change rewrites a row's quantity and price without
+    touching its id, and `_sync_ready` only rebuilds when the row list changes —
+    so this is what makes the corrected number reach the screen.
+    """
+    plan = trade.candidate.plan
+    return (plan.units, plan.pay_units, plan.cost_divines, plan.profit_divines)
 
 
 def _clear_widgets(table: QTableWidget, column: int) -> None:

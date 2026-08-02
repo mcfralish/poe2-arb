@@ -538,6 +538,63 @@ def test_changing_settlement_relabels_existing_rows(qapp):
     assert p.table.item(0, SETTLE_COLUMN).text() == "div"
 
 
+# --- a bankroll changed after the sweep --------------------------------------
+#
+# The sweep sizes each item as it reaches it, so a bankroll changed mid-pass or
+# after it reaches nothing already on the table. Measured 2026-08-02 on the
+# other surface: a 599 divine row against a 260 divine bankroll, whispered.
+
+def test_lowering_the_bankroll_re_sizes_the_rows_on_the_table(qapp):
+    p = panel(qapp, result_from([listing("omen", 11.0, stock=10.0)]))
+    assert p.table.item(0, AMOUNT_COLUMN).text() == "10"
+
+    p.set_bankroll({"divine": 55.0})
+    qapp.processEvents()
+
+    assert p.table.item(0, AMOUNT_COLUMN).text() == "5"
+    assert p.table.item(0, TOTAL_COLUMN).value == 55.0
+
+
+def test_a_bankroll_set_before_a_sweep_sizes_what_it_finds(qapp):
+    """The sweep reads it per item; re-applying it here normalises a pass that
+    straddled a change."""
+    p = SweepPanel()
+    p.set_bankroll({"divine": 33.0})
+    p.set_result(result_from([listing("omen", 11.0, stock=10.0)]))
+    qapp.processEvents()
+    assert p.table.item(0, AMOUNT_COLUMN).text() == "3"
+
+
+def test_a_whispered_row_keeps_the_quantity_it_was_whispered_at(qapp):
+    """It is the record of a message already sent, on this surface too."""
+    p = panel(qapp, result_from([listing("omen", 11.0, stock=10.0)]))
+    p.note_attempt(p._candidates[0], "a1")
+
+    p.set_bankroll({"divine": 22.0})
+    qapp.processEvents()
+
+    assert p.table.item(0, AMOUNT_COLUMN).text() == "10"
+
+
+def test_the_status_line_follows_the_re_sized_profits(qapp):
+    """It quotes the best profit on the table, so it cannot go on quoting one
+    from a bankroll the user has just changed."""
+    p = panel(qapp, result_from([listing("omen", 11.0, stock=10.0)]))
+    assert "best is +10.00 div" in p.status.text()
+
+    p.set_bankroll({"divine": 33.0})
+    qapp.processEvents()
+
+    assert "best is +3.00 div" in p.status.text()
+
+
+def test_a_row_that_no_longer_profits_at_any_size_leaves_the_table(qapp):
+    p = panel(qapp, result_from([listing("omen", 11.0, stock=10.0)]))
+    p.set_bankroll({"divine": 5.0})
+    qapp.processEvents()
+    assert p.table.rowCount() == 0
+
+
 # --- the odds legend --------------------------------------------------------
 
 def test_the_odds_symbols_are_explained_on_screen(qapp):
