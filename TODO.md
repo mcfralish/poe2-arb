@@ -60,20 +60,44 @@ below its own heading and the row actions are icons; and the hotkey reports a re
 `RegisterHotKey` with `GetLastError`, shows *Refused* in Settings, tests a binding before
 saving it and retries in the background. Full list in [CHANGELOG.md](CHANGELOG.md).
 
-**Start here next session.** The editable rows are **done** (see below); the order that was
-decided on 2026-08-01 carries on from item 2.
+**Start here next session.** **The pricing item (6) is now the most valuable thing on this
+list** — it explains both real losses the project has made and one of them was banded
+*plausible* — but it wants one more thin-pair reading first, which needs a human in game.
+Items 2 and 3 are both maintainer decisions from using 0.8.0 and are ordinary work.
 
 1. ~~Make every non-derived value on a row editable — price included.~~ **Done
    2026-08-01.** Amount, Total and Result are all correctable, in the queue via *Adjust…*
    and on a Trades-tab history row by double-click. Details under *Done since this file was
    last written*.
-2. **A "hide listings over 3 days old" toggle, off by default.** *(Decided 2026-08-01 —
+2. **Replace AFK / Offline / Refused with one "Seller not available" button.** *(Decided
+   2026-08-02 from a measurement and the maintainer's answer to it: zero presses in 789
+   whispers, because the queue arrives faster than a three-way judgement can be made.)*
+   Its only job is to drop the row from the queue; the AFK/offline/silent split moves to
+   the `Client.txt` reader, which is where the evidence already is. Keep `Outcome.AFK` and
+   `Outcome.OFFLINE` in the enum — the log holds records under both — and add whatever the
+   new button writes. Evidence and the "what are these metrics for?" answer are in
+   [docs/FINDINGS.md](docs/FINDINGS.md), *The three-way verdict split has never once been
+   used by hand*.
+3. **Rework the counteroffer editing to inline spin-arrow fields.** *(Maintainer feedback
+   2026-08-02, after using the dialog.)* Inline with up/down arrows rather than
+   *Adjust…*, and **Total and Price per both editable, each moving the other**. The
+   obstacle is real and was the reason for the dialog: the queue tables rebuild every
+   second for the countdowns and that kills an open editor. Solve it — suppress the
+   rebuild while an editor is open, or have the tick write only the countdown cells —
+   rather than reverting to a dialog.
+4. **A "hide listings over 3 days old" toggle, off by default.** *(Decided 2026-08-01 —
    see the *Both queue sections* item below for the full spec.)* Small, and the next piece
    of queue-table work.
-3. **The Send button** (*Next*) — route **decided: keystrokes**. Unblocked, ordinary work.
-4. **Pricing** (*Next*) — one branch of it is dead: the book is tight (~2%), so the
-   liquidity haircut must not be built; the error is movement, so build freshness. Blocked
-   on one un-measured cell that **needs a human in game** — a genuinely thin item.
+5. **The Send button** (*Next*) — route **decided: keystrokes**. Unblocked, ordinary work.
+6. **Pricing** (*Next*) — **unblocked 2026-08-02, and the answer reversed the plan.** The
+   thin reading finally exists: Astrid's Creativity, a **22.2%-wide book** with the app
+   **+53% above the bid**. So the liquidity-scaled haircut is **back on** — it was killed
+   on liquid pairs, which is not where the money is lost — and freshness is a second,
+   smaller effect rather than the whole story. This is now the **biggest open item in the
+   project**: it explains both known real losses, one of them banded *plausible*. Take one
+   more thin reading before fitting a curve (n=1 today). Full write-up in
+   [docs/FINDINGS.md](docs/FINDINGS.md), *The reference price does not match what a sale
+   realises*.
 
 **Next time you are in game, whatever else is happening.** This is not session work and
 does not compete with the list above; it is the queue of things only playing can answer.
@@ -88,15 +112,14 @@ does not compete with the list above; it is the queue of things only playing can
   whether pinning is reachable mid-map, and whether the 60-second retry actually fires.
   **The ranking refit and the editable rows join this list** — an exe carrying both is
   built and waiting; see the version note above for the link.
-- **Press AFK / Offline / Refused at least once, or tell me they are not worth having.**
-  Measured 2026-08-01: **zero presses in 789 whispers.** The timer's *Expired* is doing all
-  the work, which may mean the split is unused because it is unnecessary, or because the
-  buttons are too much effort mid-map. Those two have opposite consequences and only
-  playing can tell them apart. See [docs/FINDINGS.md](docs/FINDINGS.md), *The three-way
-  verdict split has never once been used by hand*.
-- **Astrid's Creativity**, or any ~100k `ValueTraded` pair, read off both sides of the
-  book. The single measurement blocking the pricing item. Method in *What the next field
-  test must measure*.
+- ~~**Press AFK / Offline / Refused at least once.**~~ **Answered 2026-08-02: they are
+  not worth having.** The queue arrives faster than a three-way judgement can be made, so
+  the split reads as zero whatever the labels are. Replaced by item 2 of *Start here*.
+- ~~**Astrid's Creativity**, both sides of the book.~~ **Done 2026-08-02 and it reversed
+  the plan** — 22.2% wide, app +53% above the bid. What is wanted now is **a second thin
+  pair**, so the haircut can be fitted to a curve rather than a point. Same method: read
+  both rows of the book and the app's Quick Lookup within the same minute, and note the
+  clock time.
 
 **Done since this file was last written (2026-08-01, no game time needed).** The editable
 rows, the counteroffer question and the ranking fit — the last two from data already on
@@ -192,17 +215,21 @@ fill rates, takings, and every trade), *Log*.
 
 ## What the next field test must measure
 
-**Mostly answered on 2026-08-01, and it needed no trade at all** — reading both sides of
-the book while standing still was enough, which is worth remembering next time this file
-says something is blocked on a completed trade. Results in
-[docs/FINDINGS.md](docs/FINDINGS.md). **One cell is still empty:**
+**Answered 2026-08-01 and 2026-08-02, and neither needed a trade** — reading both sides of
+the book while standing still was enough both times, which is worth remembering next time
+this file says something is blocked on a completed trade. Results in
+[docs/FINDINGS.md](docs/FINDINGS.md).
 
-1. **Astrid's Creativity** — both sides of the in-game book, plus the app's Quick Lookup
-   figure read within a minute, plus the clock time. It carries 110k `ValueTraded` against
-   1.6M and 10.0M for the two items already measured, and it is the item that was **65%
-   wrong** on 07-30. Every "tight book" conclusion currently stops at ~1M and is assumed
-   below it; this is the only genuinely thin reading the project would have. Any other
-   ~100k pair does the same job if Astrid's has moved.
+**The thin cell is filled and it reversed the conclusion.** Astrid's Creativity, 110k
+`ValueTraded`, 2026-08-01 18:35 PDT: **ask 2.00 / bid 1.60 / app 2.45** — a **22.2%-wide
+book** against 1.7% on the liquid control, with the app **+53% above the bid and above even
+the ask**. The liquidity haircut is back on. **What is wanted now:**
+
+1. **A second thin pair, any ~100k `ValueTraded` item.** One point cannot be fitted to a
+   curve, and a haircut scaled on `ValueTraded` needs at least two. Same method, same
+   minute, note the clock time.
+2. **Ideally a third at ~500k**, between the thin and liquid clusters, since everything
+   between 110k and 1.6M is currently interpolation.
 
 The method, for reuse: in-game quotes read **"I want : I have"**, so the first row of a
 pair is what you pay to **buy** and the second is what you **receive** to sell. Take the
@@ -292,8 +319,10 @@ which is why the original occurrence left no trace.
       and Omen of Whittling against a 1.7% liquid control, and the app's error on those two
       was **−5.9% and +6.5% — opposite signs, minutes apart.** Omen of Whittling was +37% on
       07-30 and +6.5% today. So:
-      - **Do not build the liquidity-scaled haircut.** It corrects for a spread that is not
-        there. This was the leading candidate and it is dead.
+      - ~~**Do not build the liquidity-scaled haircut.**~~ **Un-killed 2026-08-02.** It was
+        declared dead on two pairs at 1.6M and 10.0M `ValueTraded`, where the book really
+        is ~2% wide. At 110k it is **22.2%** wide and the app quotes above the ask. Build
+        it, scaled on `ValueTraded`; the liquid pairs simply land near a haircut of zero.
       - **Build freshness instead.** Show the reference price's age, and distrust or refuse
         a stale one. `snapshot_age_s` already exists and nothing surfaces it.
       - **Reset `min_gap_ratio` from the noise, not from a bias.** ±6% of error around the

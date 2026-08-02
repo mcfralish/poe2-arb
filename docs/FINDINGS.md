@@ -109,7 +109,54 @@ Everything else about this API was tested and is untrustworthy:
 `value_traded` is used for **ranking only** — the same unit for every item, so "which
 items trade" is answerable even though "how many divines" is not.
 
-### The reference price does not match what a sale realises — measured on two real losses, revised 2026-08-01
+### The reference price does not match what a sale realises — measured on two real losses, revised 2026-08-01, and **reversed for thin items 2026-08-02**
+
+> **READ THIS FIRST. The 2026-08-01 conclusion "the book is tight, so do not build a
+> liquidity-scaled haircut" was measured on liquid pairs only, and it is wrong below them.**
+>
+> **Astrid's Creativity, 2026-08-01 18:35 PDT (01:35Z), ~110k `ValueTraded`** — the thin
+> reading the project had been blocked on since 2026-07-30, taken by reading both sides of
+> the in-game book and the app's Quick Lookup within the same minute:
+>
+> | | div |
+> |---|---|
+> | CE ask — what you **pay to buy** one | 2.00 |
+> | CE bid — what you **receive to sell** one | 1.60 |
+> | mid | 1.80 |
+> | **poe2-arb Quick Lookup** | **2.45** |
+>
+> - **The book is 22.2% wide**, against 1.7% on the liquid control and ~2% on Faded Crisis
+>   Fragment and Omen of Whittling. **Thirteen times wider.**
+> - **The app is +53.1% above the bid** — above what a resale actually realises. It is
+>   +36.1% above mid and **+22.5% above the ask**, i.e. above the price you would pay to
+>   *buy* one on the Exchange.
+>
+> **Consequences, and they reverse standing decisions:**
+>
+> 1. **The liquidity-scaled haircut is back on.** It was declared dead on 2026-08-01 —
+>    "it corrects for a spread that is not there" — on the strength of two pairs carrying
+>    1.6M and 10.0M `ValueTraded`. At 110k the spread is emphatically there. The dead
+>    branch was dead *for liquid pairs*, which is not where the app loses money.
+> 2. **Freshness is still worth building but is no longer the whole story.** Movement
+>    explains the ±6%, sign-flipping error on liquid pairs. It does not explain a
+>    one-directional +53% on a thin one; a 22% book does.
+> 3. **`MIN_PAIR_VALUE = 1000` is not merely "too low", it is the bug.** Astrid's at 110k
+>    is 110× the floor and is still this bad.
+> 4. **The band system is not protecting anyone here.** See below — the losing trade was
+>    banded *plausible*.
+>
+> **It explains both of the project's two known real losses.** The 29 Jul Astrid's trade —
+> one of the two losses that opened this section on 2026-07-30 — bought 3 at 2.00 div each
+> against a claimed reference of 2.73, logged **+2.18 profit**, and was banded
+> **`plausible` at a 1.36× gap**. At the bid measured here it clears 3 × 1.60 − 6.00 =
+> **−1.20 div**. (The 2.73 reading is from 29 Jul and prices move, so treat the exact
+> figure as indicative — but the maintainer recorded it as a real loss at the time, and a
+> 22% book is a sufficient explanation where a ±6% wobble never was.)
+>
+> **n = 1 item, one reading.** The direction is not subtle — 22% against 2% is an order of
+> magnitude — but a second thin pair would make it a curve rather than a point, and the
+> haircut needs a curve. Take one more before fitting anything.
+
 
 > **Read the 2026-08-01 subsection at the end before acting on this one.** The ~26%
 > overstatement below is real and measured, but it did **not** reproduce two days later,
@@ -481,8 +528,30 @@ and therefore that the plan to split `NO_REPLY` by reading `Client.txt` (below) 
 *only* live route to the AFK/offline distinction rather than a supplement to a button.
 Before adding a fourth button anywhere, check this table again.
 
-One session is not a habit, and the maintainer had not been told the buttons were the
-thing to exercise. Ask before treating it as settled.
+**Asked and settled, 2026-08-02.** The maintainer's answer: *"Split responses do seem
+unnecessary. Too many options to press during fast paced trading. Opportunities come in so
+fast during live scanning that it is cumbersome to click AFK or Offline instead of just
+moving on to the next opportunity."*
+
+So the zero is not indifference — it is **the queue arriving faster than a three-way
+judgement can be made**. Any design that asks the user to classify a non-reply mid-map will
+read as zero, whatever the labels are.
+
+**Decided, and it replaces the three buttons:** one **"Seller not available"** button whose
+only job is to *remove the row from the queue*, plus the `Client.txt` reader to say
+afterwards whether it was AFK, offline or genuinely silent. That is the same data at a
+fraction of the interaction cost, and it puts the classification where the evidence already
+is. `Outcome.AFK` and `Outcome.OFFLINE` stay in the enum forever — `outcomes.jsonl` holds
+records under both — but stop being things a human is asked to choose between.
+
+**And the maintainer asked the right question back: what are these metrics *for*?** The
+honest answer, so it can be judged rather than assumed: 22% of `NO_REPLY` is GGG's AFK
+auto-reply, so a quarter of the denominator under **every fill rate in the project** is a
+seller who was never reachable. If those come out, the fill rate among reachable sellers is
+materially higher than anything reported here. The second use is auditing GGG's own `afk`
+flag, which called 11 of 40 present sellers AFK — 28% wrong — and which the Results tab's
+*By seller state* split still rests on. Both are worth having; **neither is worth a click
+per whisper**, which is what this measurement establishes.
 
 ### A listing older than ~3 days has never filled — measured 2026-08-01, n=789
 
@@ -1213,13 +1282,16 @@ Also worth not rediscovering:
   re-apply the rounding floor that decided the original profit. Records written before this
   fall back to a whole divine in `outcomes.plan_correction` — the pessimistic reading, and
   the same default `plan_trade` takes.
-- **The Trades tab edits in place; the Opportunities queue uses a dialog.** Not an
-  inconsistency: the queue tables rebuild on a one-second timer for the countdowns, which
-  destroys an open editor mid-keystroke, and they are used with a map on screen. The Trades
-  tab reads from the log, redraws only on a user action, and is where a row is corrected
-  hours later. Editing there is confined to **history rows** — a live sweep row is a
-  listing nobody has acted on, there is nothing to correct about it, and the same
-  double-click has to keep copying its whisper.
+- **The Trades tab edits in place; the Opportunities queue uses a dialog — and the dialog
+  is now overruled.** The original reasoning still describes a real constraint: the queue
+  tables rebuild on a one-second timer for the countdowns, which destroys an open editor
+  mid-keystroke. **The maintainer tried it and wants inline editing with spin arrows
+  anyway** (2026-08-02), which makes the rebuild a problem to solve rather than a reason to
+  avoid inline editing — suppress the rebuild while an editor is open, or make the tick
+  update only the countdown cells it owns. Also decided: **Total and Price per must both be
+  editable and each must move the other.** Editing stays confined to **history rows** on
+  the Trades tab — a live sweep row is a listing nobody has acted on, there is nothing to
+  correct about it, and the same double-click has to keep copying its whisper.
 - **A whispered row is editable in the queue while it is live, and on the Trades tab
   afterwards — not on the live sweep table.** Decided 2026-08-01. A listing you whispered
   this session is *carried* on the live Trades table so a verdict has a row to land on, and

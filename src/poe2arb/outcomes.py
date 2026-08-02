@@ -147,6 +147,17 @@ class Attempt:
     expected_profit_divines: float
     listing_age_s: float | None
     afk: bool
+    # How many the seller advertised. Without it there is no way to tell a
+    # whole-lot ask from an affordable fraction of one after the fact, which is
+    # exactly the comparison "do partial asks get answered?" needs. Absent
+    # before 2026-08-02; TODO claimed the log could already answer that question
+    # and it could not.
+    stock: float | None = None
+    # How old the CE reference price was when the whisper went out. The pricing
+    # error is the reference *moving* (~±6% on liquid pairs, far worse on thin
+    # ones), and freshness is the only surviving hypothesis for it — untestable
+    # without dating the number each attempt was priced against.
+    ce_age_s: float | None = None
     outcome: Outcome = Outcome.PENDING
     resolved_at: datetime | None = None
     # What the trade actually cleared, when the user tells us. Left None on a
@@ -267,6 +278,7 @@ def record_attempt(
     *,
     session_id: str | None = None,
     league: str | None = None,
+    ce_age_s: float | None = None,
     retention_days: float = 0.0,
 ) -> str:
     """Log a copied whisper as a pending attempt. Returns its id."""
@@ -300,6 +312,11 @@ def record_attempt(
         "settle_currency": candidate.settle_currency,
         "listing_age_s": listing.age_s(),
         "afk": listing.afk,
+        # What the seller advertised, against `units` asked for: the two differ
+        # whenever the bankroll could only afford part of the listing.
+        "stock": listing.stock,
+        # Age of the CE reference price this was costed against.
+        "ce_age_s": ce_age_s,
         "outcome": Outcome.PENDING.value,
     }
     _append(path, row, retention_days)
@@ -598,6 +615,8 @@ def read_attempts(path: Path) -> list[Attempt]:
                     float(row["listing_age_s"]) if row.get("listing_age_s") is not None else None
                 ),
                 afk=bool(row.get("afk")),
+                stock=_opt_float(row.get("stock")),
+                ce_age_s=_opt_float(row.get("ce_age_s")),
                 outcome=outcome,
                 resolved_at=_parse_ts(row.get("resolved_at")),
                 actual_profit_divines=(

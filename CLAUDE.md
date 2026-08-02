@@ -116,10 +116,16 @@ wide** (Faded Crisis Fragment, Omen of Whittling) against a 1.7% liquid control,
 app's error on those two was **−5.9% and +6.5% — opposite signs**. Omen of Whittling was
 +37% on 07-30 and +6.5% today. So the reference price is **noisy (~±6%), not biased**, the
 **spread explanation is disproved**, and the cause is price *movement*. Consequences for
-anyone touching this: **do not build a liquidity-scaled haircut**, build freshness instead;
-`min_gap_ratio = 1.05` is still known-wrong but now because 5% is *inside the noise*, not
-because of a 26% bias. Genuinely thin pairs (~100k `ValueTraded`) remain unmeasured — both
-items above carry 1.6M and 10.0M. See [docs/FINDINGS.md](docs/FINDINGS.md), "The reference
+anyone touching this: build freshness, and `min_gap_ratio = 1.05` is still known-wrong but
+now because 5% is *inside the noise*, not because of a 26% bias.
+
+**All of the above is true of liquid pairs only, and 2026-08-02 reversed it below them.**
+Astrid's Creativity (~110k `ValueTraded`) was read off both sides of the book: the book is
+**22.2% wide** against a 1.7% liquid control, and the app sits **+53% above the bid** —
+above even the *ask*. So **the liquidity-scaled haircut is back on**; it was killed on
+evidence from pairs at 1.6M and 10.0M, which is not where the app loses money. It explains
+both known real losses, one of which was banded *plausible*. Do not re-kill it by quoting
+the liquid numbers. See [docs/FINDINGS.md](docs/FINDINGS.md), "The reference
 price does not match what a sale realises".
 
 ### The pipeline

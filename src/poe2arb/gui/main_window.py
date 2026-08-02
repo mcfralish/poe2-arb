@@ -870,6 +870,7 @@ class MainWindow(QMainWindow):
             self.cfg.outcomes_path, taken.candidate,
             session_id=self.session.begin(),
             league=self._league(),
+            ce_age_s=self._ce_age_s(),
             retention_days=self.cfg.history_retention_days,
         )
         c = taken.candidate
@@ -891,6 +892,22 @@ class MainWindow(QMainWindow):
         )
         self.results.reload()
         self.queue_panel.refresh(self.trade_queue)
+
+    def _ce_age_s(self) -> float | None:
+        """How stale the CE reference price is, right now, in seconds.
+
+        Logged on every whisper because the pricing error is the reference
+        *moving*: ~±6% on liquid pairs and far worse on thin ones, where the
+        book itself is wide. Freshness is the only hypothesis left standing
+        after the spread explanation was disproved on liquid pairs, and it
+        cannot be tested against outcomes unless each attempt says how old the
+        number it was priced against was. None before the first sweep, and on
+        results built before `ce_fetched_at` existed.
+        """
+        fetched = getattr(self._last_sweep, "ce_fetched_at", None)
+        if fetched is None:
+            return None
+        return (datetime.now(timezone.utc) - fetched).total_seconds()
 
     def _league(self) -> str | None:
         """The league a whisper is being sent in, for the outcome log.
@@ -1056,6 +1073,7 @@ class MainWindow(QMainWindow):
             self.cfg.outcomes_path, candidate,
             session_id=self.session.begin(),
             league=self._league(),
+            ce_age_s=self._ce_age_s(),
             retention_days=self.cfg.history_retention_days,
         )
         self.sweep.note_attempt(candidate, attempt_id)

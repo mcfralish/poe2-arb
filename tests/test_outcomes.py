@@ -473,3 +473,30 @@ def test_silence_covers_the_old_value_too():
     assert {o for o in Outcome if o.is_silence} == {
         Outcome.NO_REPLY, Outcome.EXPIRED, Outcome.AFK, Outcome.OFFLINE
     }
+
+
+# --- instrumentation the field test needs ------------------------------------
+
+def test_an_attempt_records_the_sellers_stock(log_path):
+    """Without it a partial ask is indistinguishable from a whole-lot one."""
+    record_attempt(log_path, candidate(pay=1.0, stock=18.0))
+    [a] = read_attempts(log_path)
+    assert a.stock == 18.0
+    assert a.units == 18.0          # whole lot here; a partial ask has units < stock
+
+
+def test_an_attempt_records_how_stale_its_reference_price_was(log_path):
+    """Freshness is the surviving explanation for the pricing error."""
+    record_attempt(log_path, candidate(), ce_age_s=612.0)
+    [a] = read_attempts(log_path)
+    assert a.ce_age_s == 612.0
+
+
+def test_both_are_none_on_records_written_before_they_existed(log_path):
+    log_path.write_text(
+        '{"kind": "attempt", "id": "x", "ts": "%s", "item_id": "omen", '
+        '"gap": 1.2, "band": "plausible"}\n' % NOW.isoformat(),
+        encoding="utf-8",
+    )
+    [a] = read_attempts(log_path)
+    assert a.stock is None and a.ce_age_s is None
