@@ -941,6 +941,17 @@ attempts — 06:05:45Z ↔ `2026/07/31 23:05:47`.
 - **A Ready-to-whisper row cost 84 div against a 39 div bankroll** (screenshot, 0.7.0). Not
   yet diagnosed; the bankroll spin box had been lowered during the session, so the first
   suspect is that queued candidates are not re-checked when the bankroll changes.
+  **Reproduced on 0.8.0, 2026-08-02, and this time it cost a whisper.** A **599 div** row
+  against a **260 div / 350 ex** bankroll, and it was in *Waiting on a reply* — so the app
+  had the maintainer offer a seller an amount he could not settle, and he *"was surprised
+  when I couldn't fill the order."* That is the consequence: not a display glitch, a spent
+  whisper and a trade that could not complete. His hypothesis is that the candidate was
+  queued-but-not-yet-presented when he lowered the bankroll. **Note for whoever fixes it:
+  removing the QUEUED drip narrows that window from minutes to instant but does not close
+  it** — a row already sitting in *Ready* when the spin box moves is still sized against the
+  old bankroll, and a sweep runs ~15 minutes. Re-sizing queued candidates on a bankroll
+  change is still needed; whispered rows must be left alone, since they record what was
+  actually asked for.
 - **Column headers were misread by their own author.** `Buy 5 / Each 1 div / Cost 5 div /
   Profit +38` was read back as "I bought 1 for 5 div". Three of the four words are doing a
   job the reader has to be told; *Amount / Price per / Total* is what the maintainer reached
@@ -1002,6 +1013,27 @@ or third party, will block ours silently — and no further detection work. This
 - **The 60-second retry has still never been observed firing**, and is no longer worth
   chasing. It exists for a crashed poe2-arb holding a live pump thread; that case is real
   but rare, and the conflict case it might have covered turns out not to be detectable.
+
+**The Results panel's three breakdowns are working; its two list tabs are being removed.**
+The maintainer's read at n=872+: *"all 3 of the categories we are tracking are reflective of
+our hypotheses"*, and **By discount is now telling** where it was not on the smaller sample
+— the two tighter bands fill significantly better than the stretch bands. Two qualifications
+that matter more than the observation:
+
+- **By discount corroborates; it does not add.** It is the same log and the same split
+  `FILL_PRIOR` is already fitted to (plausible 13.4% / ghost 1.95%, n=872). A coherence
+  check, not independent evidence, and **not a reason to re-tune the prior** — the ±0.02
+  stability warning in *Negative results* 1 is unaffected by looking at the same numbers
+  through a different tab.
+- **By seller state rests on a flag measured to be 28% wrong** — GGG's API called 11 of 40
+  AFK sellers present. Keep the tab; do not act on its numbers until the flag is audited.
+
+**Every trade and Every whisper are being deleted, reversing a field request 2 days old.**
+Both were added on 2026-07-31 because "what did I actually buy" took two steps; the tab
+being renamed *Trades → Results* now answers it in a better structure, so they are a second,
+worse copy. `results.py` carries a comment explaining why *Every trade* exists and why it
+precedes *Every whisper* — **that comment must go with the tabs**, or it reads as
+justification to restore them.
 
 ### What the game's own log can and cannot tell us — measured 2026-07-31
 

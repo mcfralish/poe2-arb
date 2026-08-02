@@ -576,13 +576,27 @@ session will read them backwards. *Trades* also moves to **second** tab position
   Originally: 84 div ready against a 39 div bankroll. Reproduced 2026-08-02 with a **260 div
   / 350 ex** bankroll against a **599 div** row. First suspect is unchanged — candidates are
   sized when queued and not re-checked when the bankroll spin box changes.
-  **Two things the new screenshot adds, and they pull in opposite directions:**
-  - The 599 div row is in ***Waiting on a reply***, i.e. already whispered. So one benign
-    explanation is live: the bankroll was larger when it was sized and was lowered
-    afterwards. **Check that before treating it as a sizing bug** — a whispered row must
-    *not* be re-planned retroactively, since it records what was actually asked for.
-  - The fix therefore belongs on the *Ready* side only: re-size or re-drop queued
-    candidates when the bankroll changes, and leave whispered rows alone.
+  **The 599 div row is in *Waiting on a reply*, i.e. it was whispered — and the maintainer
+  could not fill the order.** That is the consequence that makes this worth fixing rather
+  than tidying: the app had him offer a seller 599 div against a 260 div bankroll, so the
+  whisper was spent and the trade could not be completed.
+
+  **Maintainer's hypothesis (2026-08-02), still to be tested in game:** the candidate had
+  been *queued but not yet presented* when the bankroll was lowered, so it was sized against
+  the old figure and surfaced afterwards. **Plausible and worth confirming** — but note the
+  correction below, because it changes what needs building:
+
+  - **Removing the drip narrows the window; it does not close it.** With candidates landing
+    in *Ready* as they are found, "sized before you changed the bankroll" shrinks from
+    *minutes* to *instant* — but any row **already sitting in Ready** when the spin box
+    moves is still sized against the old bankroll, and a sweep is ~15 minutes long. So the
+    no-queue model makes this rarer and does **not** fix it.
+  - **The fix is still needed, and belongs on the *Ready* side only:** when the bankroll
+    changes, re-size or drop the queued candidates. Whispered rows must be left alone —
+    they record what was actually asked for, and re-planning one retroactively would
+    falsify the attempt.
+  - If the maintainer's test shows the bankroll was *not* changed during that session, the
+    original suspect is back and it is a sizing bug in `build_candidates`, not staleness.
 > **(FT5) Answered, no work needed: "what would a higher *Long shots* setting pull in?"**
 > Asked after the 137.86× Rigwald's Ferocity fill, which was taken at 50%. **Nothing extra.**
 > `risk_appetite` is read in two places and only one of them is a slide: `queue_ghosts =
@@ -697,6 +711,28 @@ session will read them backwards. *Trades* also moves to **second** tab position
 ### Results → Trends
 
 - [ ] **Rename the tab to Trends.** Contents unchanged.
+- [ ] **(FT5) Remove the *Every trade* and *Every whisper* tabs.** *Decided 2026-08-02.*
+  The tab that is being renamed *Trades → Results* now presents the same rows in a better
+  structure, so these two are a second, worse copy of it. **This reverses a request made
+  from the field on 2026-07-31**, and `results.py:122-126` carries a comment explaining why
+  *Every trade* was added and why it sits before *Every whisper* — **delete that comment
+  with the tabs**, or the next reader will restore them from it. What is left in the panel
+  is the three analytic breakdowns, which is what it is for. Sequence this **after** the
+  Trades → Results rename, so the replacement exists before the copy is removed.
+- [ ] **(FT5) The three breakdowns are earning their keep — keep all three.** The
+  maintainer's read as of 2026-08-02: *"all 3 of the categories we are tracking are
+  reflective of our hypotheses."* Specifically **By discount is now telling**, where it was
+  not on the smaller sample — the two tighter bands fill significantly better than the
+  stretch bands. Two notes before this is treated as evidence:
+  - *By discount corroborates rather than adds.* It is the same log and the same split the
+    ranking is already fitted to (plausible 13.4%, thin, ghost 1.95% at n=872 — see
+    [docs/FINDINGS.md](docs/FINDINGS.md), *Negative results* 1). Good as a coherence check;
+    **not** an independent confirmation, and not a reason to re-tune `FILL_PRIOR` — the
+    stability warning there still stands.
+  - ***By seller state* rests on a source measured to be wrong.** GGG's API called 11 of 40
+    AFK sellers present — 28% wrong, in the direction that matters (FINDINGS, *What the
+    game's own log can and cannot tell us*). The tab is worth keeping; its numbers are not
+    worth acting on until the `afk` flag is audited on a bigger sample.
 - [ ] **(FT5) Check whether listing age beats gap as a fill predictor — from the log, not
   from the tab.** The maintainer's read of the *By age* breakdown: *"the majority of filled
   trades have come from the under 1h category, though it is still at a 6% fill rate, which
@@ -710,11 +746,6 @@ session will read them backwards. *Trades* also moves to **second** tab position
   on the current n=872+ log with fill *rates* and confidence intervals rather than fill
   counts, and report whether <1h separates from 1h–3d at all. Cheap, desk work, and it also
   tells us whether the Trends tab's own presentation is inviting this misreading.
-- [ ] **(FT5) "By discount" — the maintainer's note ends mid-sentence.** Intake 2026-08-02
-  listed a *By discount* heading under Results with nothing after it. **Ask before
-  building.** Best guess is a fill-rate-by-gap-bucket breakdown alongside the existing *By
-  age* one, which would be the natural companion and is data the log already carries — but
-  that is a guess and the item is not actionable until it is confirmed.
 
 ### Settings
 
