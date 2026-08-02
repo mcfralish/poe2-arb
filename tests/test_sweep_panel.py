@@ -8,14 +8,18 @@ import pytest
 
 pytest.importorskip("PySide6")
 
+from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtGui import QGuiApplication  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from poe2arb.gui.sweep_panel import (  # noqa: E402
     AGE_COLUMN,
+    AMOUNT_COLUMN,
     BAND_COLUMN,
     PROFIT_COLUMN,
     SELLER_COLUMN,
+    SETTLE_COLUMN,
+    TOTAL_COLUMN,
     SweepPanel,
 )
 from poe2arb.listings import (  # noqa: E402
@@ -24,6 +28,7 @@ from poe2arb.listings import (  # noqa: E402
     build_candidates,
     rank_candidates,
 )
+from poe2arb.outcomes import Outcome  # noqa: E402
 from poe2arb.sweep import SweepResult  # noqa: E402
 
 NOW = datetime.now(timezone.utc)
@@ -88,8 +93,6 @@ def visible_rows(p) -> int:
 
 def band_at(p, row) -> Band:
     """Band of the candidate on a *view* row, which sorting reorders."""
-    from PySide6.QtCore import Qt
-
     return p.table.item(row, BAND_COLUMN).data(Qt.ItemDataRole.UserRole).band
 
 
@@ -484,7 +487,7 @@ def test_an_empty_filter_explains_itself(qapp):
 
 
 def test_a_whispered_listing_survives_the_next_sweep(qapp):
-    """Otherwise "Ones I bought" empties itself the moment a purchase succeeds.
+    """Otherwise "Trades" empties itself the moment a purchase succeeds.
 
     A listing you bought is by definition gone from the next sweep, and the
     verdicts were being cleared alongside it — so both history filters were
@@ -505,7 +508,7 @@ def test_a_whispered_listing_survives_the_next_sweep(qapp):
     _select_mode(p, SHOW_BOUGHT)
     qapp.processEvents()
     assert visible_rows(p) == 1
-    # ...but "Everything found" still means what it says.
+    # ...but "All Results" still means what it says.
     _select_mode(p, SHOW_ALL)
     qapp.processEvents()
     assert visible_rows(p) == 1
@@ -613,7 +616,7 @@ def test_a_past_session_lists_its_whispers_from_the_log(qapp, tmp_path):
     assert p.table.rowCount() == 1
     assert p.table.item(0, SELLER_COLUMN).text() == "Seller0"
     # The Settle in column carries the verdict on a past session.
-    assert p.table.item(0, 9).text() == "traded"
+    assert p.table.item(0, 9).text() == "Traded"
     # Nothing to copy: the listing is long gone.
     assert p.selected_candidate() is None
 
@@ -662,3 +665,238 @@ def test_a_sweep_does_not_yank_a_history_view_away(qapp, tmp_path):
     qapp.processEvents()
     assert p.table.rowCount() == 1
     assert p.table.item(0, SELLER_COLUMN).text() == "Seller0"
+
+
+# --- correcting a logged trade in place --------------------------------------
+#
+# Item 1 of TODO's "Start here": every non-derived value on a row editable,
+# price included. This is the only route back to a row the timer wrote down
+# wrong, and the only way a counteroffered trade stops logging a profit it lost.
+
+def _history_panel(qapp, tmp_path, rows=None, *, session="s1"):
+    path = tmp_path / "outcomes.jsonl"
+    _log(path, rows or _attempt(0, session, "Abyssal", "expired"))
+    p = SweepPanel()
+    # Answered without a dialog by default; the prompt has its own test.
+    p.confirm_amendment = lambda _a: True
+    p.set_history_path(path)
+    p.session.setCurrentIndex(p.session.findData(session))
+    qapp.processEvents()
+    return p, path
+
+
+def test_a_live_row_is_not_editable(qapp):
+    """There is nothing to correct about a listing nobody has acted on."""
+    from PySide6.QtWidgets import QAbstractItemView
+
+    p = panel(qapp, result_from([listing("omen", 11.0)]))
+    assert p.table.editTriggers() == QAbstractItemView.EditTrigger.NoEditTriggers
+    for column in (AMOUNT_COLUMN, TOTAL_COLUMN, SETTLE_COLUMN):
+        assert not p.table.item(0, column).flags() & Qt.ItemFlag.ItemIsEditable
+
+
+def test_a_history_row_edits_the_three_non_derived_cells(qapp, tmp_path):
+    from PySide6.QtWidgets import QAbstractItemView
+
+    p, _ = _history_panel(qapp, tmp_path)
+    assert p.table.editTriggers() & QAbstractItemView.EditTrigger.DoubleClicked
+    for column in (AMOUNT_COLUMN, TOTAL_COLUMN, SETTLE_COLUMN):
+        assert p.table.item(0, column).flags() & Qt.ItemFlag.ItemIsEditable
+    # Derived, and therefore read-only: profit, gap, the Exchange reference.
+    for column in (PROFIT_COLUMN, 4, 5):
+        assert not p.table.item(0, column).flags() & Qt.ItemFlag.ItemIsEditable
+
+
+def test_editing_the_result_reports_the_verdict(qapp, tmp_path):
+    """The Rigwald's Ferocity case: the biggest trade, logged as expired."""
+    p, _ = _history_panel(qapp, tmp_path)
+    seen = []
+    p.outcome_reported.connect(lambda i, o: seen.append((i, o)))
+    p.table.item(0, SETTLE_COLUMN).setText("Traded")
+    qapp.processEvents()
+    assert seen == [("id0", Outcome.FILLED)]
+
+
+def test_a_result_set_to_what_it_already_says_writes_nothing(qapp, tmp_path):
+    p, _ = _history_panel(qapp, tmp_path)
+    seen = []
+    p.outcome_reported.connect(lambda *a: seen.append(a))
+    p.table.item(0, SETTLE_COLUMN).setText("Expired")
+    qapp.processEvents()
+    assert seen == []
+
+
+def test_an_unrecognised_verdict_is_ignored(qapp, tmp_path):
+    """The drop-down cannot produce one, but a stray setText must not log it."""
+    p, _ = _history_panel(qapp, tmp_path)
+    seen = []
+    p.outcome_reported.connect(lambda *a: seen.append(a))
+    p.table.item(0, SETTLE_COLUMN).setText("Sort of")
+    qapp.processEvents()
+    assert seen == []
+
+
+def test_editing_the_amount_re_costs_the_trade(qapp, tmp_path):
+    """Whispered for 2 at 2.4 div each; only 1 was there."""
+    p, _ = _history_panel(qapp, tmp_path)
+    seen = []
+    p.correction_requested.connect(lambda i, c: seen.append((i, c)))
+    p.table.item(0, AMOUNT_COLUMN).setText("1")
+    qapp.processEvents()
+    [(attempt_id, correction)] = seen
+    assert attempt_id == "id0"
+    assert correction.units == 1.0
+    assert correction.cost_divines == pytest.approx(2.4)
+
+
+def test_editing_the_total_is_the_counteroffer_case(qapp, tmp_path):
+    p, _ = _history_panel(qapp, tmp_path)
+    seen = []
+    p.correction_requested.connect(lambda i, c: seen.append((i, c)))
+    p.table.item(0, TOTAL_COLUMN).setText("9.0")
+    qapp.processEvents()
+    [(_, correction)] = seen
+    assert correction.units == 2.0                       # quantity untouched
+    assert correction.cost_divines == pytest.approx(9.0)
+    # Proceeds were 6.2; paying 9 for them is a loss, and the log must say so.
+    assert correction.expected_profit_divines < 0
+
+
+def test_a_total_typed_as_nonsense_changes_nothing_and_says_so(qapp, tmp_path):
+    p, _ = _history_panel(qapp, tmp_path)
+    seen = []
+    p.correction_requested.connect(lambda *a: seen.append(a))
+    p.table.item(0, TOTAL_COLUMN).setText("about nine")
+    qapp.processEvents()
+    assert seen == []
+    assert "isn't a number" in p.status.text()
+
+
+def test_retyping_the_same_figure_writes_nothing(qapp, tmp_path):
+    p, _ = _history_panel(qapp, tmp_path)
+    seen = []
+    p.correction_requested.connect(lambda *a: seen.append(a))
+    p.table.item(0, AMOUNT_COLUMN).setText("2")
+    qapp.processEvents()
+    assert seen == []
+
+
+def test_declining_the_confirmation_leaves_the_record_alone(qapp, tmp_path):
+    p, _ = _history_panel(qapp, tmp_path)
+    p.confirm_amendment = lambda _a: False
+    seen = []
+    p.correction_requested.connect(lambda *a: seen.append(a))
+    p.outcome_reported.connect(lambda *a: seen.append(a))
+    p.table.item(0, AMOUNT_COLUMN).setText("1")
+    p.table.item(0, SETTLE_COLUMN).setText("Traded")
+    qapp.processEvents()
+    assert seen == []
+
+
+def test_a_fresh_record_is_amended_without_a_prompt(qapp, tmp_path):
+    """Inside an hour the correction is part of the trade you are still doing."""
+    path = tmp_path / "outcomes.jsonl"
+    _log(path, _attempt(0, "s1", "Abyssal", "expired", ts=NOW))
+    p = SweepPanel()
+    p.set_history_path(path)
+    p.session.setCurrentIndex(p.session.findData("s1"))
+    qapp.processEvents()
+    # No monkeypatching: a QMessageBox here would hang the test.
+    assert p.confirm_amendment(p._attempt_at(0)) is True
+
+
+def test_an_old_record_asks_first(qapp, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    old = NOW - timedelta(days=3)
+    p, _ = _history_panel(
+        qapp, tmp_path, rows=_attempt(0, "s1", "Abyssal", "no_reply", ts=old)
+    )
+    del p.confirm_amendment                      # back to the real one
+    asked = []
+    monkeypatch.setattr(
+        QMessageBox, "question",
+        lambda *a, **k: asked.append(a) or QMessageBox.StandardButton.No,
+    )
+    assert p.confirm_amendment(p._attempt_at(0)) is False
+    assert asked and "3 days ago" in asked[0][2]
+
+
+def test_an_amended_row_says_what_changed(qapp, tmp_path):
+    rows = _attempt(0, "s1", "Abyssal", "filled") + [
+        {"kind": "amend", "id": "id0", "ts": NOW.isoformat(),
+         "units": 1.0, "cost_divines": 9.0, "pay_units": 9.0,
+         "expected_profit_divines": -2.8, "lots": 1},
+    ]
+    p, _ = _history_panel(qapp, tmp_path, rows=rows)
+    tip = p.table.item(0, 1).toolTip()
+    assert "asked for 2, traded 1" in tip
+    assert "listed at 4.8 div, paid 9 div" in tip
+
+
+def test_a_losing_trade_is_shown_as_a_loss(qapp, tmp_path):
+    """It used to read "+-2.80" — or, before the amendment, "+38.00"."""
+    rows = _attempt(0, "s1", "Abyssal", "filled") + [
+        {"kind": "amend", "id": "id0", "ts": NOW.isoformat(),
+         "cost_divines": 9.0, "expected_profit_divines": -2.8},
+    ]
+    p, _ = _history_panel(qapp, tmp_path, rows=rows)
+    assert p.table.item(0, PROFIT_COLUMN).text() == "-2.80"
+
+
+def test_the_result_editor_offers_the_verdicts_that_are_still_written(qapp, tmp_path):
+    from poe2arb.gui.sweep_panel import VerdictDelegate
+
+    p, _ = _history_panel(qapp, tmp_path)
+    delegate = p.table.itemDelegateForColumn(SETTLE_COLUMN)
+    assert isinstance(delegate, VerdictDelegate)
+    index = p.table.model().index(0, SETTLE_COLUMN)
+    editor = delegate.createEditor(p.table, None, index)
+    offered = [editor.itemText(i) for i in range(editor.count())]
+    assert "Traded" in offered and "AFK" in offered
+    assert "No Reply" not in offered          # never written any more
+    assert "Waiting" not in offered
+
+
+def test_the_editor_keeps_a_legacy_verdict_it_cannot_offer(qapp, tmp_path):
+    """A No Reply row is exactly the row being corrected."""
+    from poe2arb.gui.sweep_panel import VerdictDelegate
+
+    p, _ = _history_panel(
+        qapp, tmp_path, rows=_attempt(0, "s1", "Abyssal", "no_reply")
+    )
+    delegate = p.table.itemDelegateForColumn(SETTLE_COLUMN)
+    index = p.table.model().index(0, SETTLE_COLUMN)
+    editor = delegate.createEditor(p.table, None, index)
+    assert editor.itemText(0) == "No Reply"
+    delegate.setEditorData(editor, index)
+    assert editor.currentText() == "No Reply"
+
+
+def test_the_verdict_editor_is_not_clipped_by_a_narrow_column(qapp, tmp_path):
+    """Caught by screenshot: it opened reading "No Repl" with the arrow on the y."""
+    from PySide6.QtCore import QRect
+    from PySide6.QtWidgets import QStyleOptionViewItem
+
+    p, _ = _history_panel(qapp, tmp_path)
+    delegate = p.table.itemDelegateForColumn(SETTLE_COLUMN)
+    index = p.table.model().index(0, SETTLE_COLUMN)
+    editor = delegate.createEditor(p.table, None, index)
+    option = QStyleOptionViewItem()
+    option.rect = QRect(0, 0, 20, 24)          # far narrower than the drop-down
+    delegate.updateEditorGeometry(editor, option, index)
+    assert editor.width() >= editor.sizeHint().width()
+
+
+def test_changing_the_settlement_currency_does_not_paint_over_a_verdict(qapp, tmp_path):
+    """That column is Settle in on a live row and Result on a history one."""
+    p, _ = _history_panel(qapp, tmp_path)
+    assert p.table.item(0, SETTLE_COLUMN).text() == "Expired"
+    p.set_settlement_currency("exalted")
+    qapp.processEvents()
+    assert p.table.item(0, SETTLE_COLUMN).text() == "Expired"
+    # Still remembered, and applied the moment the live sweep is shown again.
+    p.set_result(result_from([listing("omen", 11.0)]))
+    p.session.setCurrentIndex(p.session.findData("live"))
+    qapp.processEvents()
+    assert p.table.item(0, SETTLE_COLUMN).text() == "ex"

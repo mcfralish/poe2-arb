@@ -1,287 +1,461 @@
 # poe2-arb — TODO
 
-What is **not** done. Shipped work is in [CHANGELOG.md](CHANGELOG.md); measured findings
-and standing invariants are in [docs/FINDINGS.md](docs/FINDINGS.md). Completed items are
-deleted rather than ticked, so this file stays worth reading start to finish.
+What is **not** done, batched into session-sized units. Shipped work is in
+[CHANGELOG.md](CHANGELOG.md); measured evidence and standing decisions are in
+[docs/FINDINGS.md](docs/FINDINGS.md). **Completed items are deleted rather than ticked** —
+if it is still here, it is still open.
+
+> **Before quoting any number in this file, re-read `outcomes.jsonl`.** `read_attempts(path)`
+> and a count is fifteen seconds. The project has three times written a conclusion over the
+> top of data it had not read — most recently on 2026-08-02, when the log went 789 → 872
+> *during* the session that had just checked it was current. The operator's summary is not
+> the record, and neither is this file.
 
 ## State of play
 
-**Shipped:** v0.7.0 (2026-07-31). Three field tests behind it; the last two sessions were
-profitable, and 0.7.0 is mostly the defect list the third one produced.
+**Shipped:** v0.7.0 (2026-07-31). **v0.8.0 is written, verified in game on Windows, and
+ready to tag** on `field-test-4` — that is Batch 0 below.
 
-**Start here next session.** In order of what unblocks what:
+Two field-test sessions have landed since 0.7.0 and both are fully written up in FINDINGS:
+*Found in the fourth session of real use* (2026-08-01) and *The first real play session on
+0.8.0* (2026-08-02). The log holds **872 attempts** as of 2026-08-02. Identify a session by
+its **id**, not by an ordinal — "field test N" has meant a sitting, an evening and a build
+in different paragraphs, and the log holds six session ids on 01 Aug alone.
 
-1. **Confirm the hotkey finally fires** — third attempt, Windows-only, no test can cover
-   it, and it is the cheapest check on the list. Bind it, tick the box, press OK, reopen
-   Settings and press the key: the line under the field says whether it fired. That
-   separates "the key never reached us" from "the queue had nothing to take", which the
-   two previous attempts could not.
-2. **The Send button / hotkey** (*Next*, first item) — agreed for this patch, researched,
-   with a route decision waiting on the maintainer: sanctioned keystrokes versus the
-   trade site's own endpoint and a session cookie. The table in that item is the whole
-   argument; nothing else needs re-deriving.
-3. **Fit the ranking to the outcome log** — still unblocked, still the best-powered data
-   the project has (n=131 on the ghost result).
+**Two premises were overturned on 2026-08-02 and a lot of design rested on them:**
 
-**What 0.7.0 changed, in one paragraph.** Two of 0.6.0's fixes were wrong rather than
-incomplete: the hotkey had still never fired (Qt is now out of the delivery path
-entirely), and the bankroll holdback is reverted because 79%+ of whispers go unanswered so
-it suppressed more real trades than double-spends it prevented. Plus: listings are ratios
-rather than bundles, so a 100-divine listing is buyable on a 20-divine bankroll;
-opportunities queue as they are found rather than all at once; quantities are correctable
-after the fact without erasing the original ask; sessions and leagues are stamped on every
-whisper and the Trades tab reviews any of them; Results gained *Every trade*; columns
-reorder, resize and persist. Full list in [CHANGELOG.md](CHANGELOG.md).
+1. **The app is not used mid-map.** It is a sit-in-town tool with the user's full
+   attention. The toast, the alert window, the 30px buttons and `risk_appetite`-as-
+   interruption-tolerance were all built for a player who is busy. Throughput beats
+   glanceability.
+2. **The reference-price error does not scale with liquidity.** Thin items really are
+   overstated, but not by an amount `ValueTraded` or book width predicts. There is no curve
+   to fit.
 
-**The 147 fully-resolved whispers from the second session still stand** and still
-**overturn the project's second-biggest finding**: ghosts fill at 2.3% (n=131), not at 0%
-— including one at 10.94× — and they earned 71% of that session's divines on a fat tail.
-Plausible still wins per whisper sent (0.40 div vs 0.113), so the ranking stands, but
-`FILL_PRIOR[GHOST] = 0.0` is measurably wrong. Full tables in
-[docs/FINDINGS.md](docs/FINDINGS.md), *Negative results* 1.
+## Decisions taken 2026-08-02 — do not re-open
 
-**What the 2026-07-31 log analysis added, so it is not re-derived.** `Client.txt` was read
-end to end and joined against `outcomes.jsonl` — details in FINDINGS, the sections dated
-2026-07-31. The short version: auto-marking *fills* is not worth building (all 11 were
-already hand-marked correctly), splitting *NO_REPLY* is (76% silent / 22% AFK / the rest
-replies and stale listings), GGG's API called 11 of 40 AFK sellers present, there is no
-party roster in the log, and GGG publishes a Currency Exchange API carrying both sides of
-the book that a desktop client cannot reach.
+Each was a fork the work would otherwise have guessed at.
 
-*What the next field test must measure* below still blocks the **pricing** item — that
-one needs a human in game and cannot be recovered from any log.
+1. **0.8.0 tags now; the FT5 UI batch is 0.9.0.**
+2. **The toast and the alert window are removed; the ● marker stays, re-defined.** ● stops
+   being a state (`OFFERED`) and becomes a position — **row 1 of *Ready*, which after the
+   re-sort is the trade the hotkey takes**. `offer_window_s` and `alert_until` go; retire
+   the config key via `config.RETIRED_KEYS` and drop its Settings row. `expires_at` starts
+   when a candidate enters *Ready* rather than at promotion, and the
+   floor-at-the-alert-window rule goes with the window. **Rows still expire** —
+   `available_ttl_s` and `awaiting_timeout_s` are untouched. Superseded rules are kept with
+   their original reasoning in [docs/FINDINGS.md](docs/FINDINGS.md), *The offer queue*, so
+   nobody re-derives them as arguments to restore the toast.
+3. **A Ready row whose cost outgrows the bankroll is re-sized down, not dropped** — dropped
+   only if it falls below `min_profit_divines`. Whispered rows are never re-planned.
+4. **Row icons become vendored Lucide SVGs (MIT).** Copy the files in with the licence
+   rather than adding a dependency, and **confirm QtSvg survives the PyInstaller bundle** —
+   an SVG that renders in dev and not in the exe is the same failure as the dingbats, and
+   only a Windows build proves it.
 
-> **The app is not trustworthy for live trading on thin items.** It overstates resale by
-> ~26% on anything that isn't liquid currency, and it doesn't know gold exists. Both are
-> quantified in [docs/FINDINGS.md](docs/FINDINGS.md). The UI says so in the *uncertain* band
-> tooltip and in Quick Lookup; the arithmetic underneath is still wrong.
+## The batches
 
-**The shape of the app.** Toolbar: *Find trades* (a toggle — sweeps, waits, sweeps again)
-and *Settings*. Tabs: *Opportunities* (the queue, plus bankroll, settlement, long-shots and
-Quick Lookup), *Market* (the whole economy from poe.ninja), *Trades* (what the current
-session found, or any past session read back from the log), *Results* (the whisper log —
-fill rates, takings, and every trade), *Log*.
+Ordered by dependency, not importance. **Batch 1 must come first** — the button count it
+settles drives every width decision in Batch 3. Batch 6 is desk work and does not compete
+with the UI batches for game time; do not let the UI list crowd it out entirely.
 
-## What the next field test must measure
+| # | Batch | Main files |
+|---|---|---|
+| 0 | Ship 0.8.0 | tag only |
+| 1 | The queue rework | `trade_queue.py`, `queue_panel.py`, `main_window.py`, `config.py` |
+| 2 | Bankroll correctness | `main_window.py`, `sweep_panel.py`, `trade_queue.py` |
+| 3 | Table and window layout | `table_items.py`, `queue_panel.py`, `bankroll_bar.py` |
+| 4 | Icons and row polish | new assets, `queue_panel.py`, `settings_dialog.py` |
+| 5 | The tab shuffle | `sweep_panel.py`, `results.py`, `main_window.py` |
+| 6 | Pricing — desk work | `scout.py`, `listings.py`, analysis |
 
-The top item in *Next* is blocked on one observation, and it is cheap to collect but only
-**while in game with a trade in front of you** — it cannot be recovered afterwards from any
-API. If a trade is made in v0.5.0, record all four in the same session:
+---
 
-1. The **CE rate the app showed** for the item, and the settlement currency.
-2. What the CE **actually paid** on the sale.
-3. Both sides of the in-game book for that item if visible — the rate to **buy** it and the
-   rate to **sell** it. This is the discriminator: a ~26% gap between those two says the
-   error is *spread*, and a tight book says it is not.
-4. The **time** of each reading, since one candidate explanation is a same-day price move.
+### Batch 0 — Ship 0.8.0
 
-Also worth confirming, because v0.7.0 changed them and nothing but a human can check:
+Everything the tag needs is done: `CHANGELOG.md` has a `[0.8.0]` section, `__init__.py` and
+`pyproject.toml` both read `0.8.0`, and the changelog's user-facing pricing caveat and ghost
+statistics were corrected on 2026-08-02 to match current measurements.
 
-- **The hotkey actually fires now.** Third attempt; it has never worked in any build, and
-  the code is Windows-only so no test can cover it. **Check it in Settings first** — bind
-  it, tick the box, press OK, reopen Settings and press the key: the line under the field
-  says whether it fired. That separates "the key isn't reaching us" from "the queue had
-  nothing to take", which the last two attempts could not.
-- **Partial asks get answered.** Listings bigger than the bankroll are now whispered for
-  the affordable fraction. Worth knowing whether the reply rate on those is materially
-  worse than on whole-lot asks — it is a new class of whisper and the log can measure it,
-  but only once some have been sent.
-- Always-on-top floats over the game in borderless windowed.
+- [ ] **Check the changelog date.** The section reads `2026-08-02`; if the tag slips past
+      that day, change it.
+- [ ] **Push `v0.8.0`** and let `.github/workflows/release.yml` do the rest.
 
-**If the install error recurs:** `%LOCALAPPDATA%\poe2-arb\poe2-arb.log`, grep for
-`install to ... failed` or `Start Menu shortcut`. The `--windowed` exe has no console,
-which is why the original occurrence left no trace.
+---
 
-## Next
+### Batch 1 — The queue rework
 
-- [ ] **The reference price is ~26% high on thin items, and that is why the first two real
-      trades lost money.** Full evidence in [docs/FINDINGS.md](docs/FINDINGS.md), "The
-      reference price overstates thin items by ~26%". Not a parsing bug — we reproduce
-      poe2scout's own number to 1.006×; the source is above what a thin sale realises.
-      **Blocked on one question before any code:** the maintainer's later spot-check found
-      poe2scout within ~10 ex of live, which can't be squared with the 3,361 seen at trade
-      time unless the two readings were different sides of the book, or the price genuinely
-      moved 34% in a day. That fork decides the fix:
-      - *spread* → haircut proceeds, scaled by the item's own liquidity, and raise
-        `MIN_PAIR_VALUE` (Astrid's cleared 1,000 by 67× and was still 65% wrong);
-      - *which side was read in game* → guidance only, no pricing change;
-      - *movement* → freshness, and show the price's age.
-      Do **not** tune a constant before that is settled. Interim honesty is cheap and worth
-      doing regardless: Quick Lookup already calls a thin figure a ceiling, and the
-      *uncertain* band tooltip says the estimate has run 25% high.
+The largest single change and the one the rest sits on. Decision 2 above is the spec.
+
+- [ ] **Replace AFK / Offline / Refused with one "Seller not available" button.** *(Decided
+      2026-08-02: zero presses in 789 whispers, because the queue arrives faster than a
+      three-way judgement can be made.)* Its only job is to drop the row; the
+      AFK/offline/silent split moves to the `Client.txt` reader, where the evidence already
+      is. **Keep `Outcome.AFK` and `Outcome.OFFLINE` in the enum** — the log holds records
+      under both and `Outcome` never renames members — and add whatever the new button
+      writes. **Choose that new member's name carefully: it is permanent in the log.**
+      Evidence in [docs/FINDINGS.md](docs/FINDINGS.md), *The three-way verdict split has
+      never once been used by hand*.
+- [ ] **Rework *Ready to whisper* into a visible FIFO.** Goal: **row 1 is always the trade
+      the hotkey will take, row 2 is the one after it.** The maintainer keeps the pane small
+      to give room to *Waiting on a reply* and cannot see what is next.
+      - *Stop the drip.* `tick` promotes one QUEUED trade per `offer_window_s`, so a sweep's
+        candidates trickle in over minutes and sit invisible meanwhile. **Put every candidate
+        into Ready as it is found.** Check `cancel_pending`, which exists to drop the QUEUED
+        backlog when *Find trades* stops — with no backlog, stopping simply stops adding,
+        which is the intended behaviour anyway.
+      - *Sort Ready by the hotkey's own order.* The hotkey takes `trade_queue.offered`,
+        picked by `_next_to_offer` **by rank**, while `available` sorts by
+        `offered_at or queued_at`. That mismatch is the whole complaint.
+      - *Drop the toast and the alert window with it* — decision 2.
+      - **The cost is real and was the reason for the old rule:** rank order reshuffles when
+        a better candidate arrives, so rows move under the cursor. **Mitigate rather than
+        revert** — row 1 is the hotkey's row so it is the least click-sensitive; consider
+        holding a reshuffle while the pointer is over the table.
+- [ ] **Rework the counteroffer editing to inline spin-arrow fields.** *(Maintainer
+      feedback 2026-08-02, after using the dialog.)* Inline up/down arrows rather than
+      *Adjust…*, with **Total and Price per both editable, each moving the other**. The
+      obstacle is real and was the reason for the dialog: the queue tables rebuild every
+      second for the countdowns and that kills an open editor. Solve it — suppress the
+      rebuild while an editor is open, or have the tick write only the countdown cells —
+      rather than reverting to a dialog.
+- [ ] **A restart of *Find trades* re-scans the same items immediately.** The remaining half
+      of the duplicate-whisper problem; suppressing a *resolved* listing shipped in 0.8.0.
+      The maintainer uses the toggle as a pause when replies pile up and gets a fresh sweep
+      of the same items for it. Either resume the sweep where it stopped or build an explicit
+      **Pause** that holds the queue without ending the session. `session.py` already treats
+      a mid-session toggle as *continue*, so the session boundary is not what needs changing.
+
+---
+
+### Batch 2 — Bankroll correctness
+
+Small, subtle, and it cost a real trade — fold into Batch 1 if it lands early.
+
+- [ ] **Changing the bankroll re-sizes nothing that already exists.** Root-caused from the
+      code 2026-08-02, no game test needed. `_bankroll_changed` (`main_window.py:1124`)
+      assigns `cfg.bankroll_divines` and starts the save timer; that is the whole handler.
+      Sizing lives in `build_candidates` (`max_by_bankroll = int(bankroll_units // lot_pay)`,
+      `listings.py:264`) from `cfg.bankroll()` at `sweep.py:179`. **The handler's docstring
+      presents this as correct**, which is why it survived — it reads as decided rather than
+      missed. Consequence measured 2026-08-02: a **599 div** row against a **260 div**
+      bankroll, whispered, and the order could not be filled.
+      - `cfg.bankroll()` is read **inside the per-item loop**, so the change lands
+        progressively — a stale row's exposure is up to a full ~15-minute cycle. **Removing
+        the drip does not fix this.**
+      - **Re-size, do not drop** (decision 3): re-plan to what the new bankroll affords, drop
+        only if that falls below `min_profit_divines`. `smallest_lot` / `replan_units`
+        already do it and a partial ask is already a supported class of whisper.
+      - **Both surfaces need it.** `trade_queue` holds submitted candidates independently of
+        the sweep panel, and *Ready* is where the bad row was. `set_result` re-*ranks* where
+        this needs re-*sizing*; `SweepResult` keeps candidates rather than listings, but
+        `Candidate` carries its own `listing`, so re-planning from
+        `[c.listing for c in result.candidates]` is cheap.
+      - **Whispered rows must be left alone** — they record what was actually asked for.
+      - *Precedent:* `_appetite_changed`, one method below, already re-ranks what is on
+        screen rather than making the user wait fifteen minutes for a slider.
+
+---
+
+### Batch 3 — Table and window layout
+
+- [ ] **The action buttons must never need a horizontal scroll.** Fixed width for the action
+      section on both queue tables, fully visible at the window minimum. Shrinking comes out
+      of **Item** and **Seller**, which keep content-derived floors rather than their four-
+      and six-letter heading floors. **This amends the 0.8.0 rule** that a table scrolls
+      sideways below the sum of its floors: right for a name column, wrong for buttons.
+- [ ] **Reduce the window's minimum width** from 960 (`main_window.py:119`). The driver was
+      *Long shots* wrapping in the bankroll bar, and there is free margin to its left — move
+      it rather than keeping the window wide. Defines the real floor together with the item
+      above.
+- [ ] **Column widths mirror between the two queue tables.** Widening *Item* in one widens it
+      in the other, so they read as one table split in half. Couples two `ColumnLayout`
+      instances that are currently independent and both persist through `saveState` in
+      `ui-state.json` — decide whether one blob is shared or two are kept in sync, and beware
+      a feedback loop where each table's resize re-triggers the other's.
+- [ ] **Add a *Found* column to *Ready to whisper*** showing when the opportunity entered the
+      queue, in the same shape as *Sent* (`2m ago`). Makes the two column sets line up almost
+      exactly, which is what makes the mirroring worth having.
+- [ ] **Rename the *Auto* column to *Expires*.**
+- [ ] **A minimum height for each queue section**, so neither collapses when the window is
+      shortened. *Not* the `QSplitter` collapse-to-zero trap — `setChildrenCollapsible(False)`
+      is already set and `_restore_ui_state` already rejects a saved zero. The floor is
+      simply too low, and it matters more now the maintainer deliberately shrinks *Ready*.
+- [ ] **The API-usage indicator stays yellow/red while idle.** The status bar's request
+      counter should return to neutral once the window has drained and nothing has been used;
+      today it holds the last burst's warning colour, which reads as a live rate-limit
+      problem when the app is doing nothing.
+- [ ] **The currency letter belongs outside the spin box**, right of the arrows — only the
+      number in the field. `setSuffix(" div")` puts it inside, which reads as editable text.
+      Collides with `_fits`/`setSpecialValueText`, which sizes the box around
+      `"no limit (div)"`; the special value should become an **infinity sign**.
+- [ ] **A session timer at the top, across from the action headline.** `session.py` already
+      has the start.
+- [ ] **A "Hide Listings Over 3 Days Old" toggle, off by default.** *Decided 2026-08-01 from
+      the measurement behind it: 0 fills in 102 whispers at that age, in every band — 13% of
+      every message the app has ever suggested.* Ranking already demotes them and the Age
+      column already shows `6d`, so this is purely about reclaiming that 13% on a busy
+      session. Mirror the *Hide the too-good-to-be-true ones* checkbox exactly. **Off by
+      default is load-bearing, not a nicety:** a hidden row cannot be falsified, which is how
+      `FILL_PRIOR[GHOST] = 0.0` survived four field tests. Needs a config key.
+
+---
+
+### Batch 4 — Icons and row polish
+
+- [ ] **Replace the dingbat glyphs with vendored Lucide SVGs.** On Windows the detail is
+      lost — *Ready to whisper* is tolerable, the seven-action *Waiting on a reply* row is
+      **illegible**. **Matching the game's font environment is abandoned** (decision 4); the
+      goal is clean and legible. The dingbats were verified by screenshot on **Linux only**,
+      which is why this shipped — the next verification has to be a Windows screenshot.
+      Confirm QtSvg survives the PyInstaller bundle.
+- [ ] **Hovering one button highlights the whole button group for that row.** **A regression,
+      not an unfinished fix** — 0.7.0's changelog ships it as user-visible ("It now
+      highlights the button you're pointing at"), so it worked and broke under the 0.8.0
+      icon-button rework, where the row's action widget was rebuilt. Look there first.
+- [ ] **One-word tooltips on the row buttons** — *Re-copy*, *Accept*, *Decline*, … 0.8.0 put
+      the full wording on hover; this shortens it. Change only the tooltip: `click_action`
+      and the tests match on the button's `action` property.
+- [ ] **Right-click → copy just `@username`** in *Waiting on a reply*, for following up with
+      a seller who said "give me a couple of minutes" without re-sending the whisper. The
+      existing *Re-copy* stays as-is for the full template.
+- [ ] **Warn in Settings that another app's hotkey will silently win.** A label under the
+      hotkey field: an overlapping binding in any other application, first or third party,
+      blocks ours **with no error**. Measured against Sidekick 2026-08-02 — it simply takes
+      precedence and the 0.8.0 diagnostic sees nothing, probably a low-level keyboard hook
+      ahead of `WM_HOTKEY`. This replaces further detection work, which is called off.
+
+---
+
+### Batch 5 — The tab shuffle
+
+**Two tabs are renamed past each other, so "Results" means different things before and
+after.** *Trades* (`sweep_panel.py`) becomes **Results**; today's *Results* (`results.py`)
+becomes **Trends**. So `results.py` will be the Trends tab while `sweep_panel.py` is the
+Results tab. **Rename the modules in the same commit** or the next session reads them
+backwards. Order becomes Opportunities, Results, Market, Trends, Log.
+
+- [ ] **Rename *Trades* → *Results* and move it to second position**; *Market* becomes third.
+- [ ] **Rename *Results* → *Trends*.** Contents otherwise unchanged.
+- [ ] **"This session" is neither this session nor all of it, and it does not update live.**
+      Rename to **Current Session**, offer it *only while a session is in progress*, and fix
+      the staleness — new rows appear only after navigating away and back. Likely one root
+      cause: `SESSION_LIVE` means "what the last sweep found" (its own tooltip says so),
+      which is a different set from "what this session attempted", and it is rebuilt on show
+      rather than on a queue/outcome signal. **Fix both together.**
+- [ ] **Centre every column except Item and Seller** on the Results tab.
+- [ ] **Remove the *Every trade* and *Every whisper* tabs.** The renamed *Results* tab now
+      presents the same rows in a better structure. **This reverses a field request from
+      2026-07-31**, and `results.py` carries a comment explaining why *Every trade* was added
+      — **delete that comment with the tabs**, or the next reader restores them from it.
+      Sequence after the rename, so the replacement exists before the copy goes.
+- [ ] **Title Case every remaining piece of user-facing text** — section labels, status-bar
+      lines, Settings rows, the Market and Trends tabs. 0.8.0 did the verdict vocabulary, the
+      column headings, the row action names and the Trades filters. **Does not extend to the
+      band vocabulary**: *worth trying* / *uncertain* / *too good to be true* are sentence
+      fragments used inline, and the enum stays untouched.
+- [ ] **Add 7-Day Trend, Volume/hour and Most Popular columns to Market from poe.ninja.**
+      Check what the endpoint the app already calls returns first — the universe fetch may
+      carry the sparkline and volume fields already, in which case this is display only.
+      "Most Popular" needs defining against whatever poe.ninja actually publishes.
+
+**Keep all three Trends breakdowns.** As of 2026-08-02 *By discount* is telling where it was
+not on the smaller sample — the two tighter bands fill well above the stretch bands. Two
+qualifications: it **corroborates rather than adds** (same log, same split `FILL_PRIOR` is
+already fitted to, so **not** grounds to re-tune the prior), and ***By seller state* rests on
+a flag measured 28% wrong** — GGG's API called 11 of 40 AFK sellers present. Keep the tab;
+do not act on its numbers until the flag is audited.
+
+---
+
+### Batch 6 — Pricing (desk work, no game time)
+
+**The biggest open item in the project.** It explains both known real losses, one of them
+banded *plausible*. Full table in [docs/FINDINGS.md](docs/FINDINGS.md), *The reference price
+does not match what a sale realises* → *Four more pairs, 2026-08-02*.
+
+Seven pairs now span 110k–10.0M `ValueTraded`. Below ~600k the app quotes **at or above the
+bid on 5 of 5** readings and above the *ask* on 4; above 1.6M it goes both ways. Median error
+over the bid **+9.4%**. But the error is **not monotone** in liquidity (110k → +53%,
+115k → −0.1%, 173k → +8.1%, 568k → +9.4%, 580k → +21.5%) and **book width does not predict
+it** — Cowardly Fate has the tightest book ever measured here (0.6%) alongside the
+second-largest error.
+
+- [ ] **Analyse `ce_age_s` against `outcomes.jsonl`. Do this first.** 0.8.0 records it on
+      every whisper and nobody has read it. A wrong *level* on a tight book is exactly what a
+      stale reference price looks like, and it is the only axis the readings have not ruled
+      out. Cheapest remaining test of the whole question.
+- [ ] **Build a flat conservative floor below ~1M `ValueTraded`** — believe the bid, not the
+      quote (+9.4% median, +21.5% observed worst case short of Astrid's), or refuse to band a
+      thin item *plausible* at all. **Do not fit `haircut = f(ValueTraded)`; there is nothing
+      to fit.**
+- [ ] **Surface reference-price freshness.** `snapshot_age_s` exists and nothing shows it.
+      Distrust or refuse a stale one.
+- [ ] **Reset `min_gap_ratio` from the noise.** 56 whispers below 1.10× fill at 14%, so *fill
+      behaviour* gives no reason to raise it — **do not read that 14% as vindicating 1.05.**
+      The reason to raise it is that at a 1.05 gap the whole edge is inside the reference
+      price's error bar. Same measurement problem wearing a different hat.
+- [ ] **`MIN_PAIR_VALUE = 1000` still looks far too low.** Astrid's cleared it by 110× and
+      was 53% wrong.
+- [ ] **Fix the one-directional wording.** The *uncertain* band tooltip and Quick Lookup say
+      the estimate "runs high" / "25% high", which is over-specific. It carries ~±6% on liquid
+      pairs and more, one-directional, on thin ones.
+- [ ] **`FILL_PRIOR[Band.THIN] = 0.5` is still a guess.** n=10, under `MIN_SAMPLES`, and its
+      raw 20% fill rate would imply a weight above 1.0 — two fills' worth of noise.
+- [ ] **Let the user apply `suggested_gap_band` from the Trends tab**, which already computes
+      `value_per_attempt` — the right objective, and the one that revealed the ghost result.
+
+> **Do not re-tune `FILL_PRIOR[GHOST]` on new fills without reading the stability warning in
+> FINDINGS.** The ratio read 0.162 / 0.175 / 0.146 in one day, all resting on thirteen ghost
+> fills; the estimate is worth ±0.02 and moving the constant on the middle reading was
+> over-fitting. The **value** ratio is worse (0.66 → 1.25 → 0.82 in a day, crossing parity
+> and returning on 83 whispers with no new ghost fills) and must never be quoted without its
+> range.
+
+---
+
+## Backlog — not batched
+
+Real work, none of it blocking the batches above.
+
 - [ ] **Model gold, then let the app pick the settlement currency.** Measured 2026-07-30:
-      ~120 gold per exalted, ~800 per divine. Exalted minimises the rounding floor and
-      maximises the gold bill — settling ~3,000 exalted costs ~360,000 gold where the same
-      value as ~7 divine costs ~5,600, and the maintainer ran dry mid-session. So the *Settle
-      in* dropdown asks the user to solve a two-variable problem the app has the numbers for.
-      Replace it with a recommendation: **the finest denomination whose gold cost fits the
-      gold you hold.** Gold can't be bought for currency, so it is a constraint, not a term
-      subtracted from profit — do not "convert gold to divines". Needs a gold-on-hand input
-      (there is no API for it; the user must type it) and the per-orb rates confirmed across
-      more than one price point, since 120/ex and 800/div may not be flat.
-- [ ] **Fit the ranking to the outcome log. Unblocked — the data is already on disk**
-      (156 resolved whispers in `outcomes.jsonl`; tables in
-      [docs/FINDINGS.md](docs/FINDINGS.md), *Negative results* 1). Three separate pieces,
-      in order of how well the evidence supports them:
-      - *`FILL_PRIOR[GHOST] = 0.0` is measurably wrong* and is the one clear fix. Measured
-        ratio is ~0.11 on fill rate, ~0.28 on value per whisper. n=131, so this is the
-        best-powered number the project has. Pick which of the two the prior should
-        express — `fill_weight` currently reads as a probability but is used to discount
-        profit, which is the value-per-whisper question.
-      - *`max_gap_ratio = 1.50` survives.* The fill-rate cliff sits between 1.5× and 2×.
-        Leave it alone; the error was in what happens beyond it, not where it is.
-      - *`min_gap_ratio = 1.05` is still unmeasured* — 2 whispers below 1.10×. It comes
-        from our own price error and stays there until the pricing item lands.
-      Then let the user apply `suggested_gap_band` from the Results tab, which already
-      computes `value_per_attempt` — the right objective, and the one that reveals the
-      ghost result. **Do not fit `min_gap` and the pricing correction independently:** both
-      are the same measurement error wearing different hats.
-- [ ] **The whisper budget is the real constraint, and nothing models it.** 131 ghost
-      whispers in 63 minutes is ~2/minute, and that is why chasing a 2.3% fill rate paid:
-      the message is nearly free. So "is this worth whispering?" has no answer that doesn't
-      depend on how much session is left — a ghost is worth sending when the queue is empty
-      and worth skipping when three plausible trades are waiting. `risk_appetite` is the
-      user hand-solving this. Consider making it a rate ("whispers per minute I'm willing
-      to send") that the ranking spends, rather than a taste slider.
-- [ ] **Split NO_REPLY using the game's own log.** Measured 2026-07-31 against 189 real
-      attempts — full numbers in [docs/FINDINGS.md](docs/FINDINGS.md), "What the game's own
-      log can and cannot tell us". The maintainer has lifted the "no reading game state"
-      constraint for passive log reading (2026-07-31); what remains is worth deciding on
-      the evidence, because the obvious feature is the worthless one:
-      - *Auto-marking fills is not worth building.* All 11 fills in the sample were already
-        hand-marked correctly; the log adds no trade the user missed. It would save clicks
-        and nothing else.
-      - *Splitting NO_REPLY is worth building.* 22% of it is GGG's AFK auto-reply, which
-        lands within a second of the whisper rather than after a ten-minute timeout, and
-        another ~2% is a reply or an "already gone". A quarter of the denominator under
-        every fill rate in the project is currently one bucket that is really three.
-      - *It also audits a source we already trust.* GGG's API called 11 of 40 AFK sellers
-        present — 28% wrong, in the direction that matters — so the Results tab's *By
-        seller state* split rests on a bad flag. Worth confirming on a bigger sample
-        before changing anything that reads `afk`.
-      Keep it **read-only and advisory**: mark a suggestion the user confirms, never write
-      a verdict straight to the log. Tail from a stored offset (194 MB, append-only),
-      prefer `LatestClient.txt` for a live session, derive the local-time offset by
-      correlating rather than trusting the machine's zone, and match the AFK reply against
-      the localised set — one log alone carries it in six languages.
+      ~120 gold per exalted, ~800 per divine, **confirmed flat 2026-08-01** whatever the
+      quantity — so the bill is units-settled × rate, no rate table needed. Exalted minimises
+      the rounding floor and maximises the gold bill: settling ~3,000 exalted costs ~360,000
+      gold where the same value as ~7 divine costs ~5,600, and the maintainer ran dry
+      mid-session. The *Settle in* dropdown asks the user to solve a two-variable problem the
+      app has the numbers for. Replace it with a recommendation: **the finest denomination
+      whose gold cost fits the gold you hold.** Gold cannot be bought for currency, so it is a
+      constraint, not a term subtracted from profit — do not "convert gold to divines". Needs
+      a gold-on-hand input; there is no API for it, the user must type it.
 - [ ] **A Send button that whispers the seller, instead of only filling the clipboard.**
-      Agreed 2026-07-31 for the next patch; **research done, nothing built.** Evidence in
-      [docs/FINDINGS.md](docs/FINDINGS.md), "GGG's trade site sends whispers server-side".
+      **Route decided 2026-08-01: keystrokes.** `POESESSID` and the trade site's endpoint are
+      off the table — drop that branch if it resurfaces. What the endpoint would have bought
+      is worth remembering rather than re-arguing: it logs a *true* attempt (4 of 189 logged
+      attempts were never actually sent) and a failed whisper doubles as a listing re-check.
+      Both are now problems the keystroke route must solve another way, or accept.
+      Evidence in [docs/FINDINGS.md](docs/FINDINGS.md), *GGG's trade site sends whispers
+      server-side*.
 
-      **The route is a real decision and the research reversed the obvious answer.**
-      Confirmed: the trade site delivers whispers server-side, on the Bulk Item Exchange
-      as well as item search — the maintainer's tests appear in `Client.txt` before the
-      game regains focus. But GGG's developer docs have **no trade, whisper or messaging
-      scope, and no trade endpoint at all**, and `service:*` scopes are closed to public
-      clients, which is what a desktop exe is. So:
+      *Implementing it:* a button in the app means the app has focus, so this is the case
+      needing `SetForegroundWindow` — Windows grants it only to a process that received the
+      last input event, it is asynchronous, and sending before the switch lands is exactly how
+      these tools type into the wrong window. **Verify the foreground actually changed, with a
+      timeout, and abort rather than send blind.** Then Enter → Ctrl+A → paste → Enter,
+      pasting rather than typing because the whisper is GGG's own localised template (the log
+      carries Korean, Chinese, Russian, Portuguese and Spanish). A hotkey pressed *in game*
+      needs none of this — the game is already in front — so button and hotkey are two
+      different problems and the hotkey is the easy one.
 
-      | | keystrokes | the site's endpoint |
-      |---|---|---|
-      | sanctioned | **yes** — "one action per key press", staff-confirmed | undocumented; impersonates the website |
-      | credentials | none | `POESESSID`, a full account session, inside a shipped exe |
-      | needs focus | yes — and from a *button*, needs `SetForegroundWindow` | no |
-      | wrong-window risk | real | none |
-      | logs a true attempt | only if the paste lands | always (4 of 189 logged attempts were never actually sent) |
-      | tells you the listing died | no | yes — a failed whisper *is* the re-check, for free |
-
-      **Recommendation: keystrokes, unless the maintainer is comfortable shipping a
-      session cookie.** The UX of the endpoint is better on every axis except the one that
-      decides whether it should exist. If it is chosen anyway: never write `POESESSID` to
-      the TOML config or any log, keep it in Windows Credential Manager / DPAPI, and treat
-      a 401 as "re-authenticate", not as a failed trade.
-
-      *If keystrokes:* a button in the app means the app has focus, so this is the case
-      that needs `SetForegroundWindow` — Windows grants it only to a process that received
-      the last input event, it is asynchronous, and sending before the switch lands is
-      exactly how these tools type into the wrong window. Verify the foreground actually
-      changed, with a timeout, and abort rather than send blind. Then Enter → Ctrl+A →
-      paste → Enter, pasting rather than typing because the whisper is GGG's own localised
-      template (this log carries Korean, Chinese, Russian, Portuguese and Spanish).
-      A hotkey pressed *in game* needs none of this — the game is already in front — so
-      button and hotkey are two different problems and the hotkey is the easy one.
-
-      **Either way it changes a hard constraint.** Rewrite CLAUDE.md and FINDINGS'
-      *The line the app does not cross* in the same change, to:
-
-      > one keypress or one click → exactly one message. Never on a timer, never in
-      > reaction to a reply, never more than one action per press.
-
+      **It changes a hard constraint.** Rewrite CLAUDE.md and FINDINGS' *The line the app does
+      not cross* in the same change, to: *one keypress or one click → exactly one message.
+      Never on a timer, never in reaction to a reply, never more than one action per press.*
       Default **off**, `trade_hotkey_action = "copy" | "send"`, copy stays the shipped
-      behaviour. And it is Windows-only and untestable here — the shape of code that
-      shipped broken twice — so carry the Settings press-counter idea forward and log
-      every message the app sends.
-
-- [ ] **Thanking a seller to mark the trade — parked, and here is why.** The maintainer
-      will use Sidekick's auto-thank rather than build this. Worth knowing before relying
-      on it: measured 2026-07-31, "answer the last whisper **received**" is right in
-      **7 of 11** real trades — much better than "last whisper sent" (2 of 11), and two of
-      the four misses would thank a seller whose last message was `This player is AFK.`,
-      an auto-reply that landed in between. Harmless as a message; it does mean **a "ty"
-      in the log is not proof of a trade**, so those lines must not be parsed back as fill
-      markers. Party scanning cannot fix it either — there is no party roster in
-      `Client.txt` (checked). If this is ever built in-app, initiating it from the clicked
-      row is the only unambiguous option.
+      behaviour. Windows-only and untestable here — the shape of code that shipped broken
+      twice — so carry the Settings press-counter idea forward and log every message sent.
+- [ ] **Split NO_REPLY using the game's own log.** Measured 2026-07-31 against 189 attempts;
+      numbers in [docs/FINDINGS.md](docs/FINDINGS.md), *What the game's own log can and cannot
+      tell us*. The maintainer lifted the "no reading game state" constraint for passive log
+      reading. The obvious feature is the worthless one:
+      - *Auto-marking fills is not worth building.* All 11 fills were already hand-marked
+        correctly; it would save clicks and nothing else.
+      - *Splitting NO_REPLY is.* 22% of it is GGG's AFK auto-reply, landing within a second
+        of the whisper rather than after a ten-minute timeout, and ~2% is a reply or an
+        "already gone". A quarter of the denominator under every fill rate in the project is
+        one bucket that is really three.
+      - *It also audits a source we trust.* GGG's API called 11 of 40 AFK sellers present.
+      Keep it **read-only and advisory** — mark a suggestion the user confirms, never write a
+      verdict straight to the log. Tail from a stored offset (194 MB, append-only), prefer
+      `LatestClient.txt` for a live session, derive the local-time offset by correlating
+      rather than trusting the machine's zone, and match the AFK reply against the localised
+      set — one log alone carries it in six languages.
+- [ ] **The whisper budget is the real constraint and nothing models it.** ~2 whispers a
+      minute is why chasing a 2% fill rate pays: the message is nearly free. So "is this worth
+      whispering?" depends on how much session is left. **Reframed 2026-08-02:** the scarce
+      resource is *not* interruption tolerance — that premise is dead — it is **throughput**,
+      whispers sent per minute of sitting there. The rate framing is right, but as a *floor
+      the app keeps the queue above*, rather than a ceiling it spends down.
+- [ ] **Thanking a seller to mark the trade — parked.** The maintainer will use Sidekick's
+      auto-thank. Worth knowing before relying on it: "answer the last whisper **received**"
+      is right in 7 of 11 real trades (vs 2 of 11 for "last sent"), and two misses would thank
+      a seller whose last message was `This player is AFK.` Harmless as a message, but **a
+      "ty" in the log is not proof of a trade** — those lines must not be parsed back as fill
+      markers. There is no party roster in `Client.txt` (checked), so party scanning cannot
+      fix it either.
 
 ## Open — UX
 
-- [ ] **Items the exchange trades but poe.ninja doesn't price are missing.** The game
-  shows five Zarokh's Reliquary Keys; we show one. **126 of GGG's 753 tradeable items have
-  no poe.ninja price** (Runes 70, Waystones 16, Fragments 9, Essences 8, Expedition 6,
-  Breach 5, Verisium 4, Ritual 4, Currency 2, Abyss 1, Gems 1). *Fix:* merge GGG's
-  `/api/trade2/data/static` catalogue into the universe, unpriced rows showing an em-dash.
-  **Not quick** — `Item.value_divine` is a float that sorting, adaptive units and
-  `convert()` all assume is real, so unpriced items need a `priced` flag and a guard at
-  each. Also: GGG's `sep` entries are separators, not items; and its groups don't map to
-  in-game tabs for items poe.ninja doesn't categorise.
-- [ ] **Org tree structures** in `src/poe2arb/gui/OrgTrees/*.txt`, one file per in-game
-  tab, regenerated by `tools/dump_org_trees.py`. **Manual pass in progress** — the
-  generated output is flat two-level, and each file is being hand-nested by group.
-  `Currency.txt` is done and is the reference for the intended shape; the rest are
-  partially through. Known weakness still to fix: `AtzirisTemple.txt` splits on the word
-  "Vaal", which isn't a real distinction.
-- [ ] **Hover tooltips explaining each item.** *Blocked on a source:* the exchange
-  endpoint exposes only `id`, `name`, `image`, `category`, `detailsId` — no description
-  text. Investigate a poe.ninja detail endpoint keyed on `detailsId`, or poedb. Decide
-  before building.
-- [ ] Large values read oddly in fixed non-adaptive units (a Mirror in `ex`). Adaptive
-  mode covers the default case; decide whether fixed modes need scaling.
-- [ ] **Quick Lookup's four denominations are hardcoded** (`lookup.DENOMINATIONS`). They are
-  the ones the Exchange has depth in, which is a judgement that will age. poe2scout's
-  `/ReferenceCurrencies` endpoint publishes the real reference set — exalted at exactly 1.0,
-  chaos and divine alongside it — and would be the honest source.
-- [ ] **GGG's own Currency Exchange API has both sides of the book — and we cannot reach
-  it yet.** Found 2026-07-31; full detail in [docs/FINDINGS.md](docs/FINDINGS.md), "GGG
-  publishes an official Currency Exchange API". `service:cxapi` returns per-pair
-  `lowest_ratio` / `highest_ratio` / stock / volume, which is **exactly the both-sides
-  measurement the pricing item above is blocked on** — poe2scout has no bid, no ask and no
-  depth. Blocked on client type, not on effort: it is a confidential-client scope and a
-  distributed exe is a public client. The public CDN URL in the docs serves a stale
-  July-2024 PoE1 snapshot whatever `realm` or `id` you pass. Re-test when GGG widens PoE2
-  API coverage; a small backend would unblock the project's biggest open question.
-- [ ] **poe2scout endpoints we never used.** `/openapi/v1.json` lists
-  `Currencies/ByCategory` (paged, and it takes a `referenceCurrency`, so it answers "what is
-  this worth in annul?" directly), `Currencies/{apiId}` with `PriceLogs` and `CurrentPrice`,
-  `ReferenceCurrencies`, and `Items/PriceHistory`. `SnapshotPairs` is the only one the app
-  reads, and it is the one that needs a derivation to be trusted. Worth evaluating as a
-  replacement — `CurrentPrice` needs no `rel/base` arithmetic at all.
-- [ ] Windows 11 hides new tray icons in the overflow, so closing the window while
-  watching can look like the app vanished.
+- [ ] **Items the exchange trades but poe.ninja doesn't price are missing.** The game shows
+      five Zarokh's Reliquary Keys; we show one. **126 of GGG's 753 tradeable items have no
+      poe.ninja price** (Runes 70, Waystones 16, Fragments 9, Essences 8, Expedition 6, Breach
+      5, Verisium 4, Ritual 4, Currency 2, Abyss 1, Gems 1). *Fix:* merge GGG's
+      `/api/trade2/data/static` catalogue into the universe, unpriced rows showing an em-dash.
+      **Not quick** — `Item.value_divine` is a float that sorting, adaptive units and
+      `convert()` all assume is real, so unpriced items need a `priced` flag and a guard at
+      each. Also: GGG's `sep` entries are separators, not items, and its groups don't map to
+      in-game tabs for items poe.ninja doesn't categorise.
+- [ ] **Org tree structures** in `src/poe2arb/gui/OrgTrees/*.txt`, one file per in-game tab,
+      regenerated by `tools/dump_org_trees.py`. **Manual pass in progress** — generated output
+      is flat two-level and each file is being hand-nested by group. `Currency.txt` is done
+      and is the reference shape. Known weakness: `AtzirisTemple.txt` splits on the word
+      "Vaal", which isn't a real distinction.
+- [ ] **Hover tooltips explaining each item.** *Blocked on a source:* the exchange endpoint
+      exposes only `id`, `name`, `image`, `category`, `detailsId` — no description text.
+      Investigate a poe.ninja detail endpoint keyed on `detailsId`, or poedb. Decide before
+      building.
+- [ ] **Quick Lookup's four denominations are hardcoded** (`lookup.DENOMINATIONS`) — a
+      judgement about where the Exchange has depth, and it will age. poe2scout's
+      `/ReferenceCurrencies` publishes the real reference set and would be the honest source.
+- [ ] **poe2scout endpoints we never used.** `/openapi/v1.json` lists `Currencies/ByCategory`
+      (paged, takes a `referenceCurrency`, so it answers "what is this worth in annul?"
+      directly), `Currencies/{apiId}` with `PriceLogs` and `CurrentPrice`,
+      `ReferenceCurrencies`, and `Items/PriceHistory`. `SnapshotPairs` is the only one the app
+      reads and the only one needing a derivation to be trusted — `CurrentPrice` needs no
+      `rel/base` arithmetic at all.
+- [ ] **GGG's own Currency Exchange API has both sides of the book — and we cannot reach it.**
+      `service:cxapi` returns per-pair `lowest_ratio` / `highest_ratio` / stock / volume,
+      exactly the both-sides measurement Batch 6 wants. **Blocked on client type, not effort:**
+      it is a confidential-client scope and a distributed exe is a public client. The public
+      CDN URL in the docs serves a stale July-2024 PoE1 snapshot whatever `realm` or `id` you
+      pass. Re-test when GGG widens PoE2 coverage.
+- [ ] Large values read oddly in fixed non-adaptive units (a Mirror in `ex`). Adaptive mode
+      covers the default; decide whether fixed modes need scaling.
+- [ ] Windows 11 hides new tray icons in the overflow, so closing the window while watching
+      can look like the app vanished.
 
 ## Open — distribution
 
-- [ ] Install flow unverified end-to-end on a real frozen exe. The v0.2.4 crash was
-  exactly this gap — worth a manual run before relying on it.
+- [ ] Install flow unverified end-to-end on a real frozen exe. The v0.2.4 crash was exactly
+      this gap. **If it recurs:** `%LOCALAPPDATA%\poe2-arb\poe2-arb.log`, grep for
+      `install to ... failed` or `Start Menu shortcut`. The `--windowed` exe has no console,
+      which is why the original occurrence left no trace.
 - [ ] **Distribution hardening**: Microsoft false-positive submission (free), code-signing
-  certificate (~$100–400/yr), `--onedir` as the free fallback.
+      certificate (~$100–400/yr), `--onedir` as the free fallback.
 - [ ] **Mobile push on a good trade.** Needs a delivery path — ntfy, Pushover, Telegram —
-  plus a decision on whether the desktop app pushes directly.
-- [ ] **Bump the release workflow's actions off Node 20.** GitHub warned on the v0.7.0
-  build (2026-08-01): `actions/checkout@v4` and `actions/setup-python@v5` target Node 20
-  and are being forced onto Node 24, per
-  [the deprecation notice](https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/).
-  Four `uses:` lines in `.github/workflows/release.yml` — checkout and setup-python appear
-  once each in both the `test` and `build-windows-exe` jobs; `softprops/action-gh-release@v2`
-  was not flagged. Warning only today, so the release still builds; it becomes a broken
-  release the day the forcing stops, and the only way to find out is to tag. Worth doing
-  on a quiet day rather than discovering it mid-release.
+      plus a decision on whether the desktop app pushes directly.
 - [ ] Packaging beyond one exe — PyPI for the CLI, Scoop/winget manifests.
+
+## Next time you are in game
+
+Not session work; the queue of things only playing can answer.
+
+- **Just play, so the instrumentation fills up.** `stock` and `ce_age_s` are recorded on every
+  whisper since 0.8.0 and both are unanalysed. `ce_age_s` is the live hypothesis for the
+  pricing error and needs volume rather than attention.
+- **No in-game pricing readings are wanted right now.** Seven pairs across 110k–10.0M do not
+  resolve into a curve and more of the same will not change that. If `ce_age_s` points at
+  staleness, the experiment is a **repeat of one item at two known reference-price ages** —
+  a different design, to be specified when wanted.
+  *Method, for reuse:* in-game quotes read **"I want : I have"**, so the first row is what you
+  pay to **buy** and the second what you **receive** to sell. Take the app's number within a
+  minute of the game's and note the clock time. `ValueTraded` can be recovered afterwards from
+  a live `scout.snapshot()`.
+- **The in-place editors on the Trades tab** are verified by screenshot on **Linux only**. The
+  Result drop-down was widened past its own column to stop reading "No Repl", and that
+  measurement comes from the font — the same assumption that just failed on the icons, so
+  treat it as likely wrong. Also check that double-clicking a *live* row still copies its
+  whisper rather than opening an editor.
+- **Partial asks get answered?** Listings bigger than the bankroll are whispered for the
+  affordable fraction. Worth knowing whether the reply rate is materially worse than on
+  whole-lot asks — a new class of whisper the log can measure, once some have been sent.
+- **Always-on-top floats over the game** in borderless windowed.

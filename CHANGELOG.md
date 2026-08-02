@@ -6,6 +6,101 @@ says what changed for you and, where it matters, why.
 Versions follow `MAJOR.MINOR.PATCH`. Until 1.0 the minor number moves for
 anything user-visible.
 
+## [0.8.0] — 2026-08-02
+
+The first half of the fourth session's defect list. The headline is that **the app was
+writing down trades that happened as trades that didn't** — and every fill rate it
+reports is computed from that file.
+
+> **Prices are still optimistic on rarely-traded items, and this release does not fix
+> it.** Measured against both sides of the in-game exchange on seven pairs: on
+> heavily-traded currency the app is accurate to about ±6% either way, but on **thinly
+> traded items it reads high — at or above what a sale actually fetches on every thin
+> pair measured, by as much as 53%.** How much it overshoots is *not* predictable from how
+> rarely an item trades, so there is no correction in this release to apply. Treat the
+> figure on a thin item as a ceiling, not a price; the *uncertain* rating marks them.
+
+### Fixed
+
+- **A trade that went through was being recorded as "no reply", three and a half minutes
+  after it completed.** The five-minute timer wrote a verdict over the top of the biggest
+  trade this app has found. Two changes: the timer now writes **Expired**, which claims
+  only that nobody said what happened, and a row can be **pinned** so it never expires at
+  all. Pin one the moment a seller answers — it jumps to the top of *Waiting on a reply*,
+  holds its own highlight, and stops counting down.
+- **A verdict the app got wrong could not be corrected, and now can.** The row above is
+  only half a fix: the timer stops writing "no reply" over completed trades, but the rows
+  it already got wrong stayed wrong, including the biggest trade this app has found. In
+  the Trades tab, pick a past session and **double-click the Result** — it becomes a
+  drop-down. The correction is appended to the trade log rather than written over the top,
+  so the original verdict is still in the file.
+- **A trade that lost money was recorded as +38.00 divines earned.** The seller
+  counteroffered, and the app could record a changed *quantity* but not a changed *price*
+  — so the log kept the price you were quoted rather than the one you paid. **Amount,
+  Price per and Total are all correctable now**: from *Adjust…* on a waiting row, and by
+  double-clicking the Amount or Total cell on a past session in the Trades tab. Profit is
+  recalculated, and it is allowed to come out negative — which is the point. What you were
+  originally asked for is kept alongside the correction, so you can still see how often a
+  seller has fewer than they listed or wants more than they advertised. Corrections to a
+  record more than an hour old ask before they go through.
+- **The same stale listing was being whispered over and over.** Measured across the
+  fourth session: one listing went out **five times in three and a half hours**, twice to
+  a seller the game had already said was offline and once to a seller it had already been
+  bought from. A Bulk listing doesn't disappear when the stock does, so anything marked
+  Traded, Already Sold, Offline or Refused is now suppressed for the rest of the session.
+- **Column headings truncated into different words** at narrow window widths — `Profit`
+  read as "rofit", `Expires` as "xpire". No column will now shrink below its own heading,
+  and Item and Seller get room for a real name. The window's minimum width went up to
+  match what the tables actually need.
+- **Updating the app broke its own hotkey — and this is almost certainly why the hotkey
+  never worked.** When a new version updates the installed copy, it starts that copy and
+  closes itself. Both are running for a second or two, and Windows gives a hotkey to
+  whichever program asks for it first — so the copy that was closing took the key and the
+  copy you were left with couldn't have it. Since the way you get a new version is to run
+  it, the hotkey was broken on exactly the launch you'd test it on. It is now claimed after
+  the handover, by the copy that's staying. Found by the diagnostic added below, four
+  seconds into the first Windows run of this release.
+
+### Changed
+
+- **The verdict buttons say what you mean.** *No Reply* is gone: by hand it meant either
+  **AFK** or **Offline**, and those are now the two buttons. The timeout's **Expired** is
+  a third, separate thing. Old records still read back correctly and still say "No Reply".
+- **`Buy` / `Each` / `Cost` are now `Amount` / `Price per` / `Total`**, in the queue and
+  in the Trades tab. The old headings were misread by the person who wrote them: "Buy 5 ·
+  Each 1 div · Cost 5 div" reads back as "I bought 1 for 5 div", and a losing trade got
+  explained as a bug in the profit column because of it.
+- **The Trades tab's filters are renamed** to *All Results*, *Attempts* and *Trades*.
+- **The row buttons are icons rather than words**, with the full wording on hover. Seven
+  actions as words was wider than the rest of the table.
+- **The order trades are offered in has been fitted to what actually filled** — 872
+  whispers, five times the evidence the last ordering had. Two changes you will see:
+  - **Long shots are no longer pinned to the bottom.** The app used to score a "too good
+    to be true" listing at zero, on the grounds that they never fill. They do — 1.95% of
+    666 of them — and the ones that land are large, so a long shot now has to be worth
+    roughly six ordinary trades before it is offered first, rather than never being
+    offered first at all. It is still a demotion, just an honest one. Nothing is hidden,
+    and the *long shots* switch works as before.
+  - **A listing that has sat unsold for three days now sorts last**, whatever it is worth.
+    Of 102 whispers sent to listings that old, **none has ever produced a trade** — the
+    oldest listing that ever sold was under three days. Those whispers were 13% of every
+    message the app has ever suggested. They are still shown, just no longer first.
+
+### Added
+
+- **The hotkey says when Windows refuses it.** The thing three releases could not see:
+  `RegisterHotKey` was being turned down, and the refusal was thrown away — so a key
+  another program had taken looked exactly like a key you hadn't set. Settings now shows a
+  third state, *Refused*, with the reason; a binding is **tested before it saves**, so you
+  find out in the dialog rather than after a trade goes past; and a refused key is retried
+  in the background, so it starts working on its own once whatever held it lets go.
+  Hotkeys are first-come-first-served, so if yours ever stops working, a different
+  combination — or restarting this app — is the fix.
+  **One case this cannot see:** some programs (Path of Exile overlays among them) claim a
+  key in a way Windows never reports to us, so if another tool is bound to the same
+  combination it will simply win and the app will show no error at all. If your hotkey
+  does nothing and Settings says it registered fine, check what else is bound to it.
+
 ## [0.7.0] — 2026-07-31
 
 A third session of real use, and the defect list it produced. Two things in 0.6.0 turned

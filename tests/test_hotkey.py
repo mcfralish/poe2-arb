@@ -114,7 +114,7 @@ class FakeMsg:
         self.wParam = 0
 
 
-def fake_win32(monkeypatch, *, registers: bool):
+def fake_win32(monkeypatch, *, registers: bool, error: int = 1409):
     """Stand in for the Win32 calls the pump thread makes.
 
     The hotkey now owns a thread that registers the key and runs its own
@@ -157,7 +157,12 @@ def fake_win32(monkeypatch, *, registers: bool):
 
     windll = FakeWindll()
     windll.user32 = user32
-    windll.kernel32 = SimpleNamespace(GetCurrentThreadId=lambda: 4242)
+    windll.kernel32 = SimpleNamespace(
+        GetCurrentThreadId=lambda: 4242,
+        # The call three releases went without. A refused RegisterHotKey sets
+        # 1409 when another program owns the combination.
+        GetLastError=lambda: error,
+    )
     monkeypatch.setattr(ctypes, "windll", windll, raising=False)
     monkeypatch.setattr("poe2arb.gui.hotkey.MSG", FakeMsg, raising=False)
     monkeypatch.setattr(ctypes, "byref", lambda x: x, raising=False)
@@ -165,14 +170,27 @@ def fake_win32(monkeypatch, *, registers: bool):
 
 
 def test_a_taken_combination_reports_which_one(qapp, monkeypatch):
-    """The usual failure: another program already owns the keys."""
+    """The usual failure: another program already owns the keys.
+
+    Three releases could not see it because the false return from
+    `RegisterHotKey` was swallowed without calling `GetLastError`. *Which*
+    program holds the key is not knowable from here and the message must not
+    guess — an earlier draft named Sidekick on a confounded test and was
+    withdrawn the same day (FINDINGS, 2026-08-01).
+    """
     fake_win32(monkeypatch, registers=False)
     seen = []
     hk = GlobalHotkey()
     hk.error.connect(seen.append)
-    assert hk.register("ctrl+alt+d") is False
-    assert seen and "already taken" in seen[0]
-    assert "CTRL + ALT + D" in seen[0]
+    assert hk.register("ctrl+alt+d", retry=False) is False
+    joined = " ".join(seen)
+    assert "another program already owns" in joined
+    assert "CTRL + ALT + D" in joined
+    # Names no program: Win32 has no "who owns this key?" query, so any specific
+    # culprit in this string is a guess that sends people to close something
+    # innocent. The actionable advice is "pick another combination".
+    assert "Sidekick" not in joined
+    assert "combination" in joined
 
 
 def test_a_successful_registration_reports_its_binding(qapp, monkeypatch):
@@ -405,3 +423,103 @@ def test_escape_cancels_recording_and_keeps_the_old_binding(qapp):
     qapp.processEvents()
     assert w.binding() == "ctrl+alt+d"
     assert not w._recording
+
+
+# --- the refusal has to speak -----------------------------------------------
+# Diagnosed 2026-08-01: `RegisterHotKey` was returning 0 and the app rendered
+# that as "Not listening…", which is also what an unbound key looks like. The
+# three fixes before this one were all in the delivery half of the path.
+
+
+def test_a_refusal_is_remembered_with_its_reason(qapp, monkeypatch):
+    fake_win32(monkeypatch, registers=False)
+    hk = GlobalHotkey()
+    assert hk.register("ctrl+alt+d", retry=False) is False
+    assert not hk.active
+    assert hk.refused == "ctrl+alt+d"
+    assert "another program already owns" in hk.refusal_reason
+
+
+def test_an_unknown_refusal_still_carries_its_error_number(qapp, monkeypatch):
+    fake_win32(monkeypatch, registers=False, error=87)
+    hk = GlobalHotkey()
+    hk.register("ctrl+alt+d", retry=False)
+    assert "87" in hk.refusal_reason
+
+
+def test_a_working_binding_is_not_refused(qapp, monkeypatch):
+    fake_win32(monkeypatch, registers=True)
+    hk = GlobalHotkey()
+    assert hk.register("ctrl+alt+d") is True
+    assert hk.refused is None and hk.refusal_reason == ""
+    hk.unregister()
+
+
+def test_a_refused_key_is_retried_and_recovers(qapp, monkeypatch):
+    """Ownership is first-come-first-served, so it comes back on its own.
+
+    A refusal is as often transient as permanent — whoever asked first keeps the
+    key only until it exits — which is why the retry matters more than the
+    pre-check.
+    """
+    fake_win32(monkeypatch, registers=False)
+    hk = GlobalHotkey()
+    recovered = []
+    hk.recovered.connect(recovered.append)
+    assert hk.register("ctrl+alt+d") is False
+    assert hk._retry is not None and hk._retry.isActive()
+
+    fake_win32(monkeypatch, registers=True)   # the other program closed
+    hk._try_again()
+    assert hk.active and hk.binding == "ctrl+alt+d"
+    assert recovered == ["ctrl+alt+d"]
+    assert not hk._retry.isActive()
+    hk.unregister()
+
+
+def test_the_retry_keeps_going_while_it_is_still_refused(qapp, monkeypatch):
+    fake_win32(monkeypatch, registers=False)
+    hk = GlobalHotkey()
+    hk.register("ctrl+alt+d")
+    hk._try_again()
+    assert hk.refused == "ctrl+alt+d"
+    assert hk._retry.isActive()
+    hk.unregister()
+    assert not hk._retry.isActive()
+
+
+# --- testing a binding before it is saved -----------------------------------
+
+def test_probe_says_a_free_key_is_free(qapp, monkeypatch):
+    fake_win32(monkeypatch, registers=True)
+    hk = GlobalHotkey()
+    assert hk.probe("ctrl+alt+d") == ""
+
+
+def test_probe_reports_a_taken_key(qapp, monkeypatch):
+    fake_win32(monkeypatch, registers=False)
+    hk = GlobalHotkey()
+    assert "another program already owns" in hk.probe("ctrl+alt+d")
+
+
+def test_probe_does_not_report_our_own_live_binding_as_taken(qapp, monkeypatch):
+    """Trap (a): testing the key we hold would fail every working hotkey."""
+    fake_win32(monkeypatch, registers=True)
+    hk = GlobalHotkey()
+    assert hk.register("ctrl+alt+d") is True
+    assert hk.probe("ctrl+alt+d") == ""
+    hk.unregister()
+
+
+def test_probe_rejects_an_unusable_binding(qapp, monkeypatch):
+    fake_win32(monkeypatch, registers=True)
+    hk = GlobalHotkey()
+    assert "modifier" in hk.probe("d")
+
+
+def test_probe_is_silent_off_windows(qapp):
+    """Nothing to test, and a dialog must not refuse a save because of it."""
+    hk = GlobalHotkey()
+    if hk.supported:      # only meaningful on the platforms that lack support
+        pytest.skip("this machine is Windows")
+    assert hk.probe("ctrl+alt+d") == ""

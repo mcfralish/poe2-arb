@@ -19,8 +19,9 @@ Two things here look like bugs and are not:
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QRect, QTimer, Qt, Signal
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -30,15 +31,26 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
+    QStyledItemDelegate,
     QTableWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from ..format import currency_label
+from ..format import currency_label, fmt_profit
 from ..listings import Band, rank_candidates, whisper_text
-from ..outcomes import Outcome, leagues, read_attempts, sessions
+from ..outcomes import (
+    LABELS,
+    TIPS,
+    Outcome,
+    label_for,
+    leagues,
+    plan_correction,
+    read_attempts,
+    sessions,
+)
 from .bands import (
     BAND_LABEL,
     BAND_TIP,
@@ -58,19 +70,19 @@ COLUMNS = [
         "Whether this is the kind of discount that has been seen to work out.\n"
         "●  worth trying — a real seller pricing under market.\n"
         "○  uncertain — the discount is no bigger than our price estimate's error.\n"
-        "×  too good to be true — never once worked.",
+        "×  too good to be true — works about 1 time in 50, but pays well when it does.",
     ),
     ("Item", "What you'd be buying."),
     (
-        "Listed",
-        "Price per item in divines, whatever currency the seller wants. "
+        "Price per",
+        "Price of one item in divines, whatever currency the seller wants. "
         "Converted so rows stay comparable.",
     ),
     ("Pay with", "The currency the seller wants — you can only pay in this."),
     ("Exchange", "What one is worth on the in-game Currency Exchange."),
     ("Gap", "How far under Exchange value the listing is. 1.20x means 20% under."),
-    ("Buy", "How many to ask for — the most that stock and your bankroll allow."),
-    ("Cost", "Divines you'd spend."),
+    ("Amount", "How many to ask for — the most that stock and your bankroll allow."),
+    ("Total", "Divines you'd spend."),
     (
         "Profit",
         "Divines you'd clear, after rounding down to a whole unit of whatever "
@@ -87,10 +99,38 @@ COLUMNS = [
 ]
 
 BAND_COLUMN = 0
+AMOUNT_COLUMN = 6
+TOTAL_COLUMN = 7
 PROFIT_COLUMN = 8
 SETTLE_COLUMN = 9
 AGE_COLUMN = 10
 SELLER_COLUMN = 11
+
+# The three cells a history row lets you correct: how many you got, what it
+# cost, and what came of it. Everything else on the row is either a fact about
+# a listing that no longer exists (item, seller, when) or derived from these
+# (profit, gap, the Exchange reference), and a derived cell you can type into is
+# a cell that disagrees with the row it is in.
+EDITABLE_HISTORY_COLUMNS = (AMOUNT_COLUMN, TOTAL_COLUMN, SETTLE_COLUMN)
+
+# Verdicts the Result drop-down offers. `NO_REPLY` is missing on purpose: it is
+# never written any more (see `outcomes.Outcome`), and correcting a row *away*
+# from it is most of what this exists for. `PENDING` is missing because putting
+# a resolved trade back on the clock is not a correction anyone means to make.
+EDITABLE_OUTCOMES = (
+    Outcome.FILLED,
+    Outcome.SOLD,
+    Outcome.DECLINED,
+    Outcome.EXPIRED,
+    Outcome.AFK,
+    Outcome.OFFLINE,
+)
+
+# Past this, amending a record asks first. Inside an hour a correction is part
+# of the trade you are still doing; a day later it is archaeology, and the row
+# under the cursor is easily not the row you meant. Deliberately a prompt rather
+# than a refusal — the record this feature exists to fix is days old.
+AMEND_CONFIRM_AGE_S = 3600
 
 # What the Trades table is showing. "Whispered" and "Bought" are the two the
 # field test asked for: after a session it was hard to find what the items you
@@ -101,9 +141,9 @@ SHOW_WHISPERED = "whispered"
 SHOW_BOUGHT = "bought"
 
 SHOW_MODES = (
-    (SHOW_ALL, "Everything found", "Every listing the last pass turned up."),
-    (SHOW_WHISPERED, "Ones I messaged", "Listings whose whisper you copied."),
-    (SHOW_BOUGHT, "Ones I bought", "Listings you recorded as an actual trade."),
+    (SHOW_ALL, "All Results", "Every listing the last pass turned up."),
+    (SHOW_WHISPERED, "Attempts", "Listings whose whisper you copied."),
+    (SHOW_BOUGHT, "Trades", "Listings you recorded as an actual trade."),
 )
 
 # What the session picker is pointed at. LIVE is the sweep in front of you;
@@ -125,16 +165,59 @@ _ATTEMPT_ROLE = Qt.ItemDataRole.UserRole + 1
 
 # What the Settle in column says on a history row: the verdict, since the
 # settlement currency was never recorded per attempt and what happened is the
-# more useful thing to have there.
-_RESULT_LABEL = {
-    Outcome.PENDING: "waiting",
-    Outcome.FILLED: "traded",
-    Outcome.SOLD: "already sold",
-    Outcome.NO_REPLY: "no reply",
-    Outcome.DECLINED: "declined",
-}
+# more useful thing to have there. The wording comes from `outcomes.label_for`,
+# which the Results tab reads too — this module and that one carried the same
+# dict twice until 0.8.0.
 
 
+
+class VerdictDelegate(QStyledItemDelegate):
+    """A drop-down of verdicts for the Result column.
+
+    Typed text would be the wrong editor here: the log stores an enum value and
+    `outcomes.LABELS` is the only place that maps it to words, so a free-text
+    cell would let the user write a verdict that resolves to nothing. The list
+    keeps whatever the row already says at the top when it is a value nobody
+    writes any more — a `No Reply` row is exactly the row being corrected, and
+    an editor that could not show its current value would read as a bug.
+    """
+
+    def createEditor(self, parent, option, index):  # noqa: N802 (Qt naming)
+        combo = QComboBox(parent)
+        labels = [label_for(o) for o in EDITABLE_OUTCOMES]
+        current = index.data() or ""
+        if current and current not in labels:
+            labels.insert(0, current)
+        combo.addItems(labels)
+        return combo
+
+    def setEditorData(self, editor, index):  # noqa: N802 (Qt naming)
+        editor.setCurrentIndex(max(0, editor.findText(index.data() or "")))
+
+    def setModelData(self, editor, model, index):  # noqa: N802 (Qt naming)
+        model.setData(index, editor.currentText(), Qt.ItemDataRole.EditRole)
+
+    def updateEditorGeometry(self, editor, option, index):  # noqa: N802 (Qt naming)
+        """Let the drop-down overhang a column too narrow to hold it.
+
+        Qt sizes an editor to its cell, and this column is sized to the widest
+        verdict *text* — which is narrower than the same text plus a drop-down
+        arrow. Caught by screenshot: the editor opened reading "No Repl" with
+        the arrow sitting on the y, on the one row this feature exists to fix.
+        Widening the column instead would cost every other row the space
+        permanently, for an editor that is open for a second at a time.
+        """
+        rect = QRect(option.rect)
+        rect.setWidth(max(rect.width(), editor.sizeHint().width()))
+        editor.setGeometry(rect)
+
+
+def outcome_for_label(text: str) -> Outcome | None:
+    """The verdict a piece of user-facing wording names, if any."""
+    for outcome, label in LABELS.items():
+        if label == text:
+            return outcome
+    return None
 
 
 class SweepPanel(QWidget):
@@ -143,6 +226,8 @@ class SweepPanel(QWidget):
     attempt_copied = Signal(object)          # Candidate
     recheck_requested = Signal(object)       # Candidate
     outcome_reported = Signal(str, object)   # (attempt id, Outcome)
+    # (attempt id, outcomes.Correction) — a logged trade re-costed in place.
+    correction_requested = Signal(str, object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -160,9 +245,9 @@ class SweepPanel(QWidget):
         self._outcomes: dict[tuple, Outcome] = {}
         # Candidates kept alive past the sweep that found them, because they
         # were whispered. A listing you *bought* is by definition absent from
-        # the next sweep, so without this "Ones I bought" empties itself the
+        # the next sweep, so without this "Trades" empties itself the
         # moment the purchase succeeds — the exact case it exists to answer.
-        # Held out of "Everything found", which means what it says.
+        # Held out of "All Results", which means what it says.
         self._carried: dict[tuple, object] = {}
         # What sales are priced in. Shown per row because it decides the Profit
         # figure, and because after a session you need to know which currency a
@@ -172,6 +257,9 @@ class SweepPanel(QWidget):
         self._history_path = None
         self._history: list = []
         self._live_session: str | None = None
+        # Set while the table is being filled, so `itemChanged` can tell a cell
+        # the user typed into from the several hundred this writes itself.
+        self._loading = False
 
         layout = QVBoxLayout(self)
 
@@ -221,7 +309,7 @@ class SweepPanel(QWidget):
             )
         self.show_mode.setToolTip(
             "Which of these to list.\n\n"
-            "Everything found is what the last pass saw. The other two narrow it "
+            "All Results is what the last pass saw. The other two narrow it "
             "to what you did about it, which is how you check afterwards what a "
             "trade you actually made was valued at."
         )
@@ -259,9 +347,13 @@ class SweepPanel(QWidget):
         # — not just the one that used to be stretched.
         self.columns = flexible_columns(self.table)
         self.table.setWordWrap(False)
-        # Double-click is the fast path; the button is for discoverability.
+        # Double-click is the fast path; the button is for discoverability. On a
+        # history row there is nothing to copy — the listing is gone — so the
+        # same gesture opens an editor instead, wired below.
         self.table.itemDoubleClicked.connect(lambda _: self.copy_selected())
         self.table.itemSelectionChanged.connect(self._selection_changed)
+        self.table.itemChanged.connect(self._cell_edited)
+        self.table.setItemDelegateForColumn(SETTLE_COLUMN, VerdictDelegate(self.table))
         layout.addWidget(self.table)
 
         bottom = QHBoxLayout()
@@ -288,14 +380,19 @@ class SweepPanel(QWidget):
         # disabled until a whisper has actually been copied — there is nothing
         # to report a verdict on before that.
         self._outcome_btns: dict[Outcome, QPushButton] = {}
-        for outcome, label, tip in (
-            (Outcome.FILLED, "Traded", "The trade went through."),
-            (Outcome.SOLD, "Already sold", "They replied that it's gone."),
-            (Outcome.NO_REPLY, "No reply", "No response."),
-            (Outcome.DECLINED, "Refused", "They replied but wouldn't honour the price."),
+        # The same four verdicts the Opportunities queue offers, from the same
+        # source. No Reply is gone from both: the timer writes Expired on its
+        # own, and by hand the two things ever actually meant were AFK and
+        # Offline.
+        for outcome in (
+            Outcome.FILLED, Outcome.SOLD, Outcome.AFK, Outcome.OFFLINE,
+            Outcome.DECLINED,
         ):
-            btn = QPushButton(label)
-            btn.setToolTip(tip + "  Recorded so the ranking can learn which listings fill.")
+            btn = QPushButton(label_for(outcome))
+            btn.setToolTip(
+                TIPS[outcome]
+                + "  Recorded so the ranking can learn which listings fill."
+            )
             btn.setEnabled(False)
             btn.clicked.connect(lambda _=False, o=outcome: self._report(o))
             bottom.addWidget(btn)
@@ -427,6 +524,16 @@ class SweepPanel(QWidget):
         self.table.horizontalHeaderItem(AGE_COLUMN).setToolTip(
             COLUMNS[AGE_COLUMN][1] if live else "When you copied the whisper."
         )
+        # A live row is a listing nobody has acted on yet: there is nothing to
+        # correct, and the same double-click has to keep copying its whisper.
+        # A history row is a logged attempt, and correcting one is the only
+        # route back to a trade the app wrote down wrong.
+        self.table.setEditTriggers(
+            QAbstractItemView.EditTrigger.NoEditTriggers
+            if live
+            else QAbstractItemView.EditTrigger.DoubleClicked
+            | QAbstractItemView.EditTrigger.EditKeyPressed
+        )
         if live:
             self._populate()
         else:
@@ -452,6 +559,7 @@ class SweepPanel(QWidget):
         the whole point: what a trade you actually made was valued at.
         """
         attempts = self._selected_attempts()
+        self._loading = True
         self.table.setSortingEnabled(False)
         self.table.setRowCount(len(attempts))
         for row, a in enumerate(attempts):
@@ -467,11 +575,8 @@ class SweepPanel(QWidget):
                 icon = self._icons.icon(a.item_id)
                 if icon is not None:
                     name.setIcon(icon)
-            if a.amended and a.asked_units:
-                name.setToolTip(
-                    f"Corrected after the fact: asked for {a.asked_units:g}, "
-                    f"traded {a.units:g}."
-                )
+            if a.amended:
+                name.setToolTip(_amendment_note(a))
             self.table.setItem(row, 1, name)
             self.table.setItem(
                 row, 2,
@@ -480,22 +585,39 @@ class SweepPanel(QWidget):
             self.table.setItem(row, 3, TextItem(_pay_label(a.pay_currency)))
             self.table.setItem(row, 4, NumericItem(_div(a.ce_divines), a.ce_divines))
             self.table.setItem(row, 5, NumericItem(f"{a.gap:.2f}x", a.gap))
-            self.table.setItem(row, 6, NumericItem(f"{a.units:g}", a.units))
             self.table.setItem(
-                row, 7, NumericItem(_div(a.cost_divines), a.cost_divines)
+                row, AMOUNT_COLUMN,
+                _editable(
+                    NumericItem(f"{a.units:g}", a.units),
+                    "How many you actually got. Double-click to correct it — the "
+                    "total follows at the same price per item.",
+                ),
+            )
+            self.table.setItem(
+                row, TOTAL_COLUMN,
+                _editable(
+                    NumericItem(_div(a.cost_divines), a.cost_divines),
+                    "Divines you actually paid. Double-click to correct it — a "
+                    "seller who counteroffers changes this, not the quantity.",
+                ),
             )
             profit = (
                 a.actual_profit_divines
                 if a.actual_profit_divines is not None
                 else a.expected_profit_divines
             )
+            # Signed: an amended trade is allowed to have lost money, which is
+            # the whole reason the two cells above are editable.
             self.table.setItem(
-                row, PROFIT_COLUMN, NumericItem(f"+{_div(profit)}", profit)
+                row, PROFIT_COLUMN, NumericItem(fmt_profit(profit), profit)
             )
             # The verdict, where the live table shows the settlement currency.
-            # On a past session what happened is the column worth having, and
-            # the settlement currency is not recorded per attempt.
-            verdict = TextItem(_RESULT_LABEL.get(a.outcome, a.outcome.value))
+            # On a past session what happened is the column worth having.
+            verdict = _editable(
+                TextItem(label_for(a.outcome)),
+                "What came of the whisper. Double-click to change it — this is "
+                "the only way back to a row the timer got wrong.",
+            )
             verdict.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.table.setItem(row, SETTLE_COLUMN, verdict)
             stamp = a.ts.astimezone()
@@ -505,6 +627,7 @@ class SweepPanel(QWidget):
                 row, SELLER_COLUMN, TextItem(a.character or a.account)
             )
         self.table.setSortingEnabled(True)
+        self._loading = False
         self.columns.size_to_contents()
         self._apply_filter()
         self._describe_history(attempts)
@@ -549,8 +672,8 @@ class SweepPanel(QWidget):
         }
         self._candidates = fresh + list(self._carried.values())
         # `_attempt_ids` and `_outcomes` deliberately survive a sweep. They used
-        # to be cleared here, which emptied "Ones I messaged" and "Ones I
-        # bought" every ten minutes — so by the time a session was worth
+        # to be cleared here, which emptied "Attempts" and "Trades"
+        # every ten minutes — so by the time a session was worth
         # reviewing, both filters were blank (reported from the field
         # 2026-07-31). They are keyed on candidate identity, not on row, so a
         # re-found listing carries its own history back onto the new table; keys
@@ -597,6 +720,7 @@ class SweepPanel(QWidget):
     def _populate(self) -> None:
         # Sorting off while filling: Qt re-sorts on every insert otherwise, which
         # both scrambles row indices mid-loop and is quadratic.
+        self._loading = True
         self.table.setSortingEnabled(False)
         self.table.setRowCount(len(self._candidates))
         for row, c in enumerate(self._candidates):
@@ -642,6 +766,7 @@ class SweepPanel(QWidget):
                 row, SELLER_COLUMN, TextItem(listing.character or listing.account)
             )
         self.table.setSortingEnabled(True)
+        self._loading = False
         self.columns.size_to_contents()
         self._apply_filter()
 
@@ -680,8 +805,8 @@ class SweepPanel(QWidget):
     def _hide_attempt(self, a, mode, hide_ghosts, needle) -> bool:
         """The same filters against a logged whisper.
 
-        "Ones I messaged" matches everything here — the log only holds whispers
-        that were sent — so the mode that does any work is "Ones I bought".
+        "Attempts" matches everything here — the log only holds whispers
+        that were sent — so the mode that does any work is "Trades".
         """
         if hide_ghosts and a.band == Band.GHOST.value:
             return True
@@ -697,7 +822,7 @@ class SweepPanel(QWidget):
             return candidate.key in self._attempt_ids
         if mode == SHOW_BOUGHT:
             return self._outcomes.get(candidate.key) is Outcome.FILLED
-        # "Everything found" is the last pass, not the last pass plus history.
+        # "All Results" is the last pass, not the last pass plus history.
         return candidate.key not in self._carried
 
     def _note_empty_filter(self, mode: str, shown: int) -> None:
@@ -717,6 +842,121 @@ class SweepPanel(QWidget):
             self.set_status(
                 "Nothing here yet — this lists listings whose whisper you copied."
             )
+
+    # --- correcting a logged trade -----------------------------------------
+
+    def _attempt_at(self, row: int):
+        """The logged attempt a history row carries, or None on a live row."""
+        item = self.table.item(row, BAND_COLUMN)
+        if item is None:
+            return None
+        return item.data(_ATTEMPT_ROLE)
+
+    def _cell_edited(self, item) -> None:
+        """Commit an in-place correction to a logged attempt.
+
+        Nothing here writes to the log directly — the amendment goes out as a
+        signal and the window appends it, the same route the queue's Adjust
+        dialog takes. The log stays append-only either way: an attempt is never
+        mutated, and a later record wins.
+        """
+        if self._loading:
+            return
+        attempt = self._attempt_at(item.row())
+        if attempt is None:
+            return
+        column = item.column()
+        if column == SETTLE_COLUMN:
+            self._verdict_edited(attempt, item)
+        elif column in (AMOUNT_COLUMN, TOTAL_COLUMN):
+            self._number_edited(attempt, item, column)
+
+    def _verdict_edited(self, attempt, item) -> None:
+        outcome = outcome_for_label(item.text())
+        if outcome is None or outcome is attempt.outcome:
+            self._redraw_soon()
+            return
+        if not self.confirm_amendment(attempt):
+            self._redraw_soon()
+            return
+        self.outcome_reported.emit(attempt.id, outcome)
+        self._redraw_soon(
+            f"{attempt.item_name} from {attempt.character or attempt.account} "
+            f"is now recorded as {label_for(outcome)} — was "
+            f"{label_for(attempt.outcome)}."
+        )
+
+    def _number_edited(self, attempt, item, column: int) -> None:
+        value = _parse_number(item.text())
+        if value is None or value < 0:
+            self._redraw_soon(
+                f"{item.text()!r} isn't a number — nothing was changed."
+            )
+            return
+        correction = plan_correction(
+            attempt,
+            units=value if column == AMOUNT_COLUMN else None,
+            cost_divines=value if column == TOTAL_COLUMN else None,
+        )
+        # Snapping the quantity to a whole lot can land back on what was already
+        # there, and so can retyping the same figure. Neither is worth a record.
+        if _same(correction.units, attempt.units) and _same(
+            correction.cost_divines, attempt.cost_divines
+        ):
+            self._redraw_soon()
+            return
+        if not self.confirm_amendment(attempt):
+            self._redraw_soon()
+            return
+        self.correction_requested.emit(attempt.id, correction)
+        self._redraw_soon(
+            f"{attempt.item_name}: corrected to {correction.units:g} for "
+            f"{_div(correction.cost_divines)} div  ·  profit now "
+            f"{fmt_profit(correction.expected_profit_divines)} div"
+        )
+
+    def confirm_amendment(self, attempt) -> bool:
+        """Ask before rewriting a record old enough to be archaeology.
+
+        A prompt rather than a refusal, and the age is deliberately generous:
+        the record this exists to fix is days old and is the biggest trade the
+        project has made. What it guards against is the other case — scrolling
+        an old session and typing into the wrong row.
+        """
+        ts = attempt.ts
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        age = (datetime.now(timezone.utc) - ts).total_seconds()
+        if age < AMEND_CONFIRM_AGE_S:
+            return True
+        answer = QMessageBox.question(
+            self,
+            "Amend an old record?",
+            f"This whisper was logged {_ago(age)}, on "
+            f"{ts.astimezone().strftime('%d %b at %H:%M')}.\n\n"
+            f"Amending it changes what the trade log says happened — which is "
+            f"what every fill rate in the app is measured from.\n\nGo ahead?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return answer == QMessageBox.StandardButton.Yes
+
+    def _redraw_soon(self, note: str | None = None) -> None:
+        """Re-read the log and rebuild, once the edit that triggered it is over.
+
+        Deferred by one event-loop pass on purpose: this runs from inside
+        `itemChanged`, and rebuilding the model from its own signal handler is
+        how a table ends up deleting the item Qt is still holding. `note` is
+        applied *after* the rebuild, because repopulating writes its own status
+        line and would otherwise swallow the only confirmation the edit gets.
+        """
+        QTimer.singleShot(0, lambda: self._redraw_history(note))
+
+    def _redraw_history(self, note: str | None = None) -> None:
+        if self.session.currentData() != SESSION_LIVE:
+            self.reload_history()
+        if note:
+            self.set_status(note)
 
     def _candidate_at(self, row: int):
         """Map a view row back to its candidate.
@@ -756,18 +996,15 @@ class SweepPanel(QWidget):
         attempt_id = self._attempt_ids.get(c.key)
         if attempt_id is None:
             return
-        # Kept here as well as in the outcome log, so the "Ones I bought" filter
+        # Kept here as well as in the outcome log, so the "Trades" filter
         # can work without re-reading the file.
         self._outcomes[c.key] = outcome
         self._apply_filter()
         self.outcome_reported.emit(attempt_id, outcome)
-        verdict = {
-            Outcome.FILLED: "Recorded as traded",
-            Outcome.SOLD: "Recorded as already sold",
-            Outcome.NO_REPLY: "Recorded as no reply",
-            Outcome.DECLINED: "Recorded as refused",
-        }[outcome]
-        self.set_status(f"{verdict} — {c.item_name} from {c.listing.character or c.listing.account}.")
+        self.set_status(
+            f"Recorded as {label_for(outcome)} — {c.item_name} from "
+            f"{c.listing.character or c.listing.account}."
+        )
 
     def note_attempt(self, candidate, attempt_id: str) -> None:
         """Remember which log row a copied whisper produced.
@@ -819,10 +1056,18 @@ class SweepPanel(QWidget):
         Only redraws the column, not the table: the profit figures come from the
         sweep and are recomputed there, so re-populating here would be both
         wasteful and a chance for the two to disagree.
+
+        **Only while the table is showing the live sweep.** That column carries
+        the verdict on a history row, and this used to paint "ex" over it —
+        changing the settlement dropdown while reviewing a past session
+        overwrote every Result in the table. The value is still remembered, so
+        switching back to the live sweep shows the new one.
         """
         if currency == self._settlement:
             return
         self._settlement = currency
+        if self.session.currentData() != SESSION_LIVE:
+            return
         label = _pay_label(currency)
         for row in range(self.table.rowCount()):
             cell = self.table.item(row, SETTLE_COLUMN)
@@ -884,6 +1129,56 @@ class SweepPanel(QWidget):
             f"for {_div(c.plan.cost_divines)} div  (+{_div(c.profit_divines)} div)"
             f"   ·  then tell me how it went"
         )
+
+
+def _editable(item, tip: str):
+    """Let the user type into a cell. `NumericItem` and `TextItem` both refuse
+    by default, which is right for every other table in the app."""
+    item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
+    item.setToolTip(tip)
+    return item
+
+
+def _parse_number(text: str) -> float | None:
+    """A figure as typed. Thousands separators are what the cell showed."""
+    try:
+        return float(text.strip().replace(",", ""))
+    except (AttributeError, ValueError):
+        return None
+
+
+def _same(a: float, b: float) -> bool:
+    """Close enough that the difference is the formatter, not the user."""
+    return abs(a - b) <= 1e-9 * max(1.0, abs(a), abs(b))
+
+
+def _amendment_note(attempt) -> str:
+    """What a correction changed, for the tooltip on an amended row."""
+    bits = []
+    if attempt.asked_units is not None and not _same(
+        attempt.asked_units, attempt.units
+    ):
+        bits.append(f"asked for {attempt.asked_units:g}, traded {attempt.units:g}")
+    if attempt.asked_cost_divines is not None and not _same(
+        attempt.asked_cost_divines, attempt.cost_divines
+    ):
+        bits.append(
+            f"listed at {_div(attempt.asked_cost_divines)} div, paid "
+            f"{_div(attempt.cost_divines)} div"
+        )
+    if not bits:
+        return "Corrected after the fact."
+    return "Corrected after the fact: " + "; ".join(bits) + "."
+
+
+def _ago(seconds: float) -> str:
+    if seconds >= 86400:
+        days = seconds / 86400
+        return f"{days:.0f} day{'s' if round(days) != 1 else ''} ago"
+    if seconds >= 3600:
+        hours = seconds / 3600
+        return f"{hours:.0f} hour{'s' if round(hours) != 1 else ''} ago"
+    return f"{seconds / 60:.0f} minutes ago"
 
 
 def _div(value: float) -> str:

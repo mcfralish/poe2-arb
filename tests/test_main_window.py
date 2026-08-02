@@ -63,15 +63,42 @@ def test_it_opens_again_with_the_hotkey_enabled(window):
     tab exists. First launch was fine because the hotkey defaults to off, so
     the logging path was never reached until the user turned it on — and then
     the app would not start at all.
+
+    `start_hotkey` is called explicitly because registration no longer happens
+    during construction; without it this exercises neither logging path.
     """
     w = window(trade_hotkey_enabled=True, trade_hotkey="ctrl+alt+d")
+    w.start_hotkey()
     assert w.tabs.count() > 0
 
 
 def test_startup_notices_survive_into_the_log(window):
     """Buffered lines must be flushed, not dropped on the floor."""
     w = window(trade_hotkey_enabled=True, trade_hotkey="ctrl+alt+d")
+    w.start_hotkey()
     assert w._pending_log == []
+
+
+def test_building_the_window_does_not_claim_the_hotkey(window, monkeypatch):
+    """Constructing is not the same event as deciding to keep this process.
+
+    The updater launches the installed copy and lets this one exit, so an
+    upgrade briefly runs two poe2-arb processes. A global hotkey is owned per
+    process and Windows gives it to whoever asks first, so registering during
+    construction meant the surviving copy was refused with 1409 — the app
+    locking itself out of its own hotkey on every update (observed 2026-08-01).
+    Registration belongs to `start_hotkey`, which the handover path never runs.
+    """
+    tried: list[str] = []
+    monkeypatch.setattr(
+        mw.GlobalHotkey, "register", lambda self, text, **kw: tried.append(text) or True
+    )
+    # Otherwise `start_hotkey` returns at the platform check and proves nothing.
+    monkeypatch.setattr(mw.GlobalHotkey, "supported", property(lambda self: True))
+    w = window(trade_hotkey_enabled=True, trade_hotkey="ctrl+alt+d")
+    assert tried == []
+    w.start_hotkey()
+    assert tried == ["ctrl+alt+d"]
 
 
 def test_logging_before_the_widget_exists_does_not_raise(qapp):
@@ -566,3 +593,68 @@ def test_revising_a_trade_rewrites_the_logged_quantity(window):
     assert logged.asked_units == 18.0
     assert logged.amended is True
     assert w.trade_queue.get(live.id).candidate.plan.units == 3.0
+
+
+def test_a_counteroffered_price_reaches_the_log(window):
+    """Measured 1 fill in 36 (2026-08-01); the one that happened logged +38.00
+    divines on a trade that lost money, because price had nowhere to go."""
+    from poe2arb.outcomes import read_attempts
+
+    w = window()
+    _queued(w, chars=("A",), stock=18.0)
+    live = w.trade_queue.offered
+    w._queue_take(live.id)
+
+    w._queue_revise(live.id, 18.0, 260.0)
+    [logged] = read_attempts(w.cfg.outcomes_path)
+    assert logged.units == 18.0                  # quantity untouched
+    assert logged.cost_divines == 260.0
+    assert logged.asked_cost_divines == 198.0    # the original ask survives
+    assert logged.expected_profit_divines < 0    # the log can now say it lost
+
+
+def test_the_trades_tab_corrects_a_verdict_the_timer_got_wrong(window):
+    """The route back to a row the queue can no longer reach."""
+    from poe2arb.outcomes import Outcome, read_attempts
+    from poe2arb.gui.sweep_panel import SETTLE_COLUMN
+
+    w = window()
+    _queued(w, chars=("A",), stock=1.0)
+    live = w.trade_queue.offered
+    w._queue_take(live.id)
+    w._queue_outcome(live.id, Outcome.EXPIRED)
+
+    w.sweep.confirm_amendment = lambda _a: True
+    w.sweep.session.setCurrentIndex(w.sweep.session.findData("all"))
+    w.sweep.reload_history()
+    QApplication.processEvents()
+    assert w.sweep.table.rowCount() == 1
+    w.sweep.table.item(0, SETTLE_COLUMN).setText("Traded")
+    QApplication.processEvents()
+
+    [logged] = read_attempts(w.cfg.outcomes_path)
+    assert logged.outcome is Outcome.FILLED
+
+
+def test_the_trades_tab_amends_a_quantity_in_the_log(window):
+    from poe2arb.outcomes import Outcome, read_attempts
+    from poe2arb.gui.sweep_panel import AMOUNT_COLUMN
+
+    w = window()
+    _queued(w, chars=("A",), stock=18.0)
+    live = w.trade_queue.offered
+    w._queue_take(live.id)
+    w._queue_outcome(live.id, Outcome.FILLED)
+
+    w.sweep.confirm_amendment = lambda _a: True
+    w.sweep.session.setCurrentIndex(w.sweep.session.findData("all"))
+    w.sweep.reload_history()
+    QApplication.processEvents()
+    w.sweep.table.item(0, AMOUNT_COLUMN).setText("3")
+    QApplication.processEvents()
+
+    [logged] = read_attempts(w.cfg.outcomes_path)
+    assert logged.units == 3.0
+    assert logged.asked_units == 18.0
+    assert logged.cost_divines == pytest.approx(33.0)
+    assert logged.outcome is Outcome.FILLED      # the verdict is not disturbed

@@ -19,12 +19,15 @@ PoE2 has **two currency economies that do not share prices.**
 | depth | millions of units | single digits |
 | who uses it | effectively everyone | effectively nobody |
 
-**The 1% spread is one measurement on one liquid item, and the thesis leans on it.** The
-whole edge is "buy on Bulk, resell into the CE", which assumes the resale lands near the
-reference price. On the two thin items actually traded, what the CE paid was ~26% below that
-reference (see "The reference price overstates thin items"). Whether that gap *is* spread is
-the open question, but either way **do not carry ~1% across to illiquid items** — it was
-never measured there, and the sweep selects for exactly the items it wasn't measured on.
+**The spread is now measured on more than one item, and it is tight.** Read 2026-08-01
+from both sides of the in-game book: **2.1%** on Faded Crisis Fragment, **2.25%** on Omen
+of Whittling, against **1.7%** on the Divine↔Exalted control. So the whole edge — "buy on
+Bulk, resell into the CE" — does survive contact with the book on items in the ~1M+
+`ValueTraded` range, and the ~26% shortfall measured on two real trades on 2026-07-30 is
+**not** spread. See "The reference price does not match what a sale realises", whose
+2026-08-01 subsection settles this and reassigns the cause to price movement. Still
+unmeasured, and the one place the old worry may survive: genuinely thin pairs around 100k
+`ValueTraded`, where nothing has been read off the book.
 
 **`POST /api/trade2/exchange/{league}` serves the abandoned one.** The pooled book is
 not exposed on it at all. Three structural proofs:
@@ -106,7 +109,128 @@ Everything else about this API was tested and is untrustworthy:
 `value_traded` is used for **ranking only** — the same unit for every item, so "which
 items trade" is answerable even though "how many divines" is not.
 
-### The reference price overstates thin items by ~26% — measured on two real losses
+### The reference price does not match what a sale realises — measured on two real losses, revised 2026-08-01, and **reversed for thin items 2026-08-02**
+
+> **READ THIS FIRST. The 2026-08-01 conclusion "the book is tight, so do not build a
+> liquidity-scaled haircut" was measured on liquid pairs only, and it is wrong below them.**
+>
+> **Astrid's Creativity, 2026-08-01 18:35 PDT (01:35Z), ~110k `ValueTraded`** — the thin
+> reading the project had been blocked on since 2026-07-30, taken by reading both sides of
+> the in-game book and the app's Quick Lookup within the same minute:
+>
+> | | div |
+> |---|---|
+> | CE ask — what you **pay to buy** one | 2.00 |
+> | CE bid — what you **receive to sell** one | 1.60 |
+> | mid | 1.80 |
+> | **poe2-arb Quick Lookup** | **2.45** |
+>
+> - **The book is 22.2% wide**, against 1.7% on the liquid control and ~2% on Faded Crisis
+>   Fragment and Omen of Whittling. **Thirteen times wider.**
+> - **The app is +53.1% above the bid** — above what a resale actually realises. It is
+>   +36.1% above mid and **+22.5% above the ask**, i.e. above the price you would pay to
+>   *buy* one on the Exchange.
+>
+> **Consequences, and they reverse standing decisions:**
+>
+> 1. **A haircut is back on — but *not* scaled on `ValueTraded`.** It was declared dead on
+>    2026-08-01 — "it corrects for a spread that is not there" — on the strength of two
+>    pairs carrying 1.6M and 10.0M `ValueTraded`. At 110k the spread is emphatically there,
+>    so the dead branch was dead *for liquid pairs*, which is not where the app loses money.
+>    **Four more readings the next day then killed the *scaling* while confirming the
+>    direction** — the error is not monotone in `ValueTraded` and book width does not
+>    predict it. See *Four more pairs, 2026-08-02* immediately below before building
+>    anything; what it supports is a flat floor under ~1M, not a curve.
+> 2. **Freshness is still worth building but is no longer the whole story.** Movement
+>    explains the ±6%, sign-flipping error on liquid pairs. It does not explain a
+>    one-directional +53% on a thin one; a 22% book does.
+> 3. **`MIN_PAIR_VALUE = 1000` is not merely "too low", it is the bug.** Astrid's at 110k
+>    is 110× the floor and is still this bad.
+> 4. **The band system is not protecting anyone here.** See below — the losing trade was
+>    banded *plausible*.
+>
+> **It explains both of the project's two known real losses.** The 29 Jul Astrid's trade —
+> one of the two losses that opened this section on 2026-07-30 — bought 3 at 2.00 div each
+> against a claimed reference of 2.73, logged **+2.18 profit**, and was banded
+> **`plausible` at a 1.36× gap**. At the bid measured here it clears 3 × 1.60 − 6.00 =
+> **−1.20 div**. (The 2.73 reading is from 29 Jul and prices move, so treat the exact
+> figure as indicative — but the maintainer recorded it as a real loss at the time, and a
+> 22% book is a sufficient explanation where a ±6% wobble never was.)
+>
+> **n = 1 item, one reading — and the four that followed did not extend it.** The direction
+> is not subtle: 22% against 2% is an order of magnitude. But "take one more before fitting
+> anything" was answered the next day with four, and they showed Astrid's to be a point
+> rather than the head of a curve — an item 5k away in `ValueTraded` reads dead on the bid.
+> **Do not fit a curve on this reading.** Read the next subsection first.
+
+#### Four more pairs, 2026-08-02: the direction holds and **`ValueTraded` will not fit it**
+
+**Read 2026-08-01 21:31–21:37 PDT (2026-08-02 04:31–04:37Z)**, same method as Astrid's:
+both sides of the in-game book and the app's Quick Lookup within the same minute, clock
+time noted per item. The four "take one more before fitting anything" readings arrived as
+four rather than one, and they do not support the curve they were taken to fit.
+
+`ValueTraded` was pulled from a live `scout.snapshot()` at 05:01Z — 24 minutes after the
+last reading — and **every one of the four app figures reproduces to four significant
+figures** (1.8599 / 6.4402 / 1.1347 / 6.9955). The readings are transcribed correctly and
+nothing moved underneath them in that half hour.
+
+| item | pair `ValueTraded` | CE ask *(pay to buy)* | CE bid *(receive to sell)* | mid | **book width** | app | **app vs bid** | app vs ask |
+|---|---|---|---|---|---|---|---|---|
+| Astrid's Creativity *(08-01)* | 110k | 2.00 | 1.60 | 1.80 | **22.2%** | 2.45 | **+53.1%** | +22.5% |
+| Tecrod's Gaze | 115k | 7.5 | 7.0 | 7.25 | 6.9% | 7.00 | **−0.1%** | −6.7% |
+| Uhtred's Saga | 173k | 1.1 | 1.05 | 1.075 | 4.7% | 1.13 | **+8.1%** | +3.2% |
+| Expedition Logbook | 568k | 1.8 | 1.7 | 1.75 | 5.7% | 1.86 | **+9.4%** | +3.3% |
+| Cowardly Fate | 580k | 5.33 | 5.3 | 5.315 | **0.6%** | 6.44 | **+21.5%** | +20.8% |
+| Faded Crisis Fragment *(08-01)* | 1.60M | 9.5 | 9.3 | 9.4 | 2.1% | 8.754 | **−5.9%** | −7.9% |
+| Omen of Whittling *(08-01)* | 10.0M | 10.33 | 10.10 | 10.2 | 2.3% | 10.760 | **+6.5%** | +4.2% |
+| Divine ↔ Exalted *(liquid control)* | — | 407 ex | 400 ex | 403.5 | 1.7% | — | — | — |
+
+**What survives, and it is the part that matters for money.** Below ~600k `ValueTraded` the
+error has a **direction**: the app quotes at or above the bid on **5 of 5** readings, and
+above the *ask* on 4 of them. Above 1.6M it goes both ways (−5.9% / +6.5%). So the app
+systematically overstates what a thin sale realises, the *uncertain*-band "treat this as a
+ceiling" wording is correct, and a haircut of some shape is justified. Median error over the
+bid on the five sub-1M readings is **+9.4%**; the mean is +18.4%.
+
+**What does not survive: scaling the haircut on `ValueTraded`.** The 2026-08-02 plan was to
+fit a curve on liquidity. These five points cannot carry one:
+
+1. **The error is not monotone in `ValueTraded`, not even close.** Ordered by liquidity:
+   110k → **+53.1%**, 115k → **−0.1%**, 173k → +8.1%, 568k → +9.4%, 580k → **+21.5%**. The
+   two closest-matched pairs in the whole sample are the two widest divergences in it.
+   Astrid's and Tecrod's Gaze sit 5k apart in `ValueTraded` and 53 percentage points apart
+   in error. Any monotone function of `ValueTraded` fitted here has an r² near zero.
+2. **Book width is not monotone in `ValueTraded` either** (22.2% → 6.9% → 4.7% → 5.7% →
+   0.6%), so it is not an alternative axis in disguise.
+3. **Book width does not predict the error.** Cowardly Fate has the **tightest book the
+   project has ever measured** — 0.6%, tighter than the 1.7% divine↔exalted control — and
+   the **second-largest error** in the table, +21.5% over the bid and +20.8% over the ask.
+   The app is not quoting a mid on a wide book there; it is 37× the half-spread away from
+   the mid. That is a wrong *level*, exactly like the 07-30 readings, and no spread model
+   reaches it.
+4. **So Astrid's is a point, not the head of a trend.** Its 22.2% book and +53% error were
+   read as the thin end of a curve. At the same liquidity, Tecrod's Gaze is dead on the bid.
+
+**Consequence — the haircut is still on, but as a floor, not a curve.** Do not fit
+`haircut = f(ValueTraded)`; there is nothing to fit. What the data supports is the weaker,
+buildable claim: **below ~1M `ValueTraded`, believe the bid, not the quote** — apply a flat
+conservative discount (the +9.4% median is the defensible starting number, +21.5% the
+observed worst case short of Astrid's), or refuse to band a thin item *plausible* at all.
+Anything finer needs an axis this sample has not found.
+
+**The axis worth trying next is age, not liquidity.** A wrong *level* on a tight book is
+what a stale reference price looks like, and it is what the 07-30 → 08-01 collapse of Omen
+of Whittling (+37% → +6.5%, same item, same parser) already looked like. **`ce_age_s` is
+now instrumented on every whisper and has never been analysed** — that is the cheapest
+remaining test of the whole pricing question, and unlike this one it needs no game time.
+
+
+> **Read the 2026-08-01 subsection at the end before acting on this one.** The ~26%
+> overstatement below is real and measured, but it did **not** reproduce two days later,
+> and the spread explanation offered for it has since been disproved directly. The heading
+> used to read "overstates thin items by ~26%"; it was renamed because that framing was
+> load-bearing in two other files and is now known to be too general.
 
 **Measured 2026-07-30, Runes of Aldur, on the first two trades ever completed through the
 app. Both lost money.** This is the most consequential finding in this file: the derivation
@@ -143,18 +267,90 @@ items actually being traded. A 1.2× gap on a thin item is not a 20% edge; it is
 noise, and the app presented two such trades as profitable. `MIN_PAIR_VALUE = 1000` is also
 far too low — Astrid's cleared it by 67× and was still 65% wrong.
 
-**Open, and it decides the fix:** the maintainer re-checked poe2scout against live on
-07-30 and found Whittling off by only ~10 ex, which cannot be reconciled with the 3,361
-observed at trade time unless the two checks read different sides of the book or the price
-genuinely moved 34% in a day. Until that is resolved, do not tune a haircut constant — the
-distinction between *spread* (haircut proceeds, scaled by liquidity), *which side was read
-in-game* (guidance, no code change) and *movement* (freshness) is unsettled.
+#### Resolved 2026-08-01: on liquid pairs the book is tight, and the error is movement
+
+> **Scope, added 2026-08-02:** everything in this subsection was measured at 1.6M and 10.0M
+> `ValueTraded` and holds only there. At 110k the book is 22.2% wide and the error is
+> one-directional — see the banner at the top of this section. The heading used to read
+> "the book is tight … not spread" without qualification, which is how the liquidity
+> haircut came to be killed on evidence that did not cover the case it was for.
+
+**The fork above is settled for liquid pairs, and it is not the branch this section
+assumed.** The maintainer
+read both sides of the in-game Currency Exchange book while the app's own snapshot was
+pulled minutes later. In-game quotes are "I want : I have"; the first row of each pair is
+what you **pay** to buy, the second what you **receive** to sell.
+
+| item | in-game buy | in-game sell | **book spread** | app (poe2scout) | app vs sell | pair `ValueTraded` |
+|---|---|---|---|---|---|---|
+| Faded Crisis Fragment | 9.5 div | 9.3 div | **2.1%** | 8.754 div | **−5.9%** (low) | 1.60M |
+| Omen of Whittling | 10.33 div | 10.10 div | **2.25%** | 10.760 div | **+6.5%** (high) | 10.0M |
+| Divine ↔ Exalted *(control)* | 407 ex | 400 ex | **1.7%** | — | — | — |
+
+Three things follow, and they overturn point 2 above:
+
+1. **Spread is not the explanation.** The book is ~2% wide on these items — barely wider
+   than the liquid-currency control at 1.7%, and nowhere near 26%. A haircut scaled by
+   liquidity would be correcting for something that is not there. **Do not build it.**
+2. **The error is not systematic, and not one-directional.** Two items measured minutes
+   apart came out **−5.9% and +6.5%** — opposite signs. "The reference price overstates"
+   is the wrong shape for this; it is *noise about the mid*, roughly ±6% at this liquidity.
+3. **The 26% did not reproduce.** Omen of Whittling was +37% on 07-30 and is +6.5% today,
+   same item, same derivation, same parser. A level difference that vanishes in two days
+   is **movement**, not level. So the fix is **freshness** — show the price's age, and
+   distrust a stale one — which is the cheapest of the three branches this file was
+   holding open.
+
+#### The maintainer attributes the original losses to user error — partly supported
+
+Recorded 2026-08-01, in the maintainer's words: the RuinousLuck loss was "user error +
+ambiguous naming" — the `Buy / Each / Cost` columns misread — and the Omen of Whittling and
+Astrid's Creativity losses are chalked up to the same thing. Since the last day of use has
+produced **only successful trades**, the app's own arithmetic is not the suspect it was.
+
+**This is very likely right about the losses and does not account for the price table.**
+Keeping both on the record, because the distinction changes what gets built:
+
+- *It explains the losses.* Misreading a lot quantity ("5 for 5 div" read as "1 for 5 div")
+  changes what you believe you are paying per unit, which is exactly how a trade at a fair
+  price feels like a loss. Confirmed on RuinousLuck from `Client.txt`. **This is the
+  strongest argument for the column renames** in the UI section — they are not cosmetic.
+- *It does not explain the 07-30 numbers.* That table compares **two prices** — the app's
+  CE figure against an in-game CE reading — and a misread quantity moves neither. Nor can
+  reading the wrong side of the book: the book is ~2% wide, and the gaps were 37% and 65%.
+  Whatever produced 3,361 against 4,605 was a different price *level*, not a different
+  column and not a different side.
+- *So the cause of the price gap is still movement*, which is what the 2026-08-01 readings
+  independently support, and what the freshness work is aimed at. **Do not delete the
+  07-30 table on the strength of the attribution** — if it was a bad in-game reading rather
+  than a real 37% move, the thing that establishes that is the missing Astrid's measurement
+  below, not a recollection.
+
+**What this does *not* settle.** Both items measured are liquid: Omen of Whittling carries
+the highest `ValueTraded` in the sample at 10.0M. **Astrid's Creativity — the 110k item that
+was 65% wrong — was not re-measured**, and it is the only genuinely thin case the project
+has ever had. The tight-book result is established for ~1M+ pairs and **assumed, not
+measured, below that**. Get an Astrid's reading before concluding that thin items behave
+like liquid ones.
+
+**`min_gap_ratio = 1.05` is still wrong, for a new reason.** The old argument was that 5%
+is tight against a 26% bias. The measurement replaces it with a better one: the reference
+price carries **±6% of noise**, so a 1.05 threshold selects trades whose entire edge is
+smaller than the error bar on the number that found them. That is not a bias to subtract —
+it is a floor below which a gap means nothing. The conclusion survives; the reasoning
+behind it has changed completely, and the constant should be set from the noise, not from
+a haircut.
 
 ### Gold is a real constraint and the app does not model it
 
 **Measured 2026-07-30 in game:** the Currency Exchange charges roughly **120 gold per
 exalted** and **800 gold per divine** traded. The maintainer ran out of gold mid-session
 settling a high-value item in exalted.
+
+**Confirmed flat, 2026-08-01.** The open question was whether those rates held across price
+points or scaled with trade size; the maintainer reports they are **static** — 120/ex and
+800/div when liquidating, whatever the quantity. So the gold bill is a plain multiplication
+of units settled, and the recommendation in TODO needs no rate table, only the gold on hand.
 
 This **directly opposes** the denomination finding below. Exalted minimises the rounding
 floor, and it also multiplies the gold cost: settling ~3,000 exalted costs ~360,000 gold,
@@ -184,51 +380,111 @@ eight versions scanning ten currency items, which is close to exactly the wrong 
 
 **1. Deep discounts fill rarely, not never — and they still earned most of the money.**
 
-**Superseded 2026-07-31 at n=156, from `outcomes.jsonl`.** The earlier reading, kept
-because the size of the correction is the point:
+**Superseded twice. Current reading is 2026-08-01 at n=789**, five times the sample the
+last revision had. The two earlier readings are kept because the size of each correction is
+the point:
 
 > At n=14 (2 fills, both at the smallest gaps sampled, ~10 attempts at 3.8×–12.5× producing
 > zero): *"Deep discounts do not fill. A listing far below market is a mistake, an
 > abandonment, or already sold — its continued visibility is evidence it cannot be taken."*
 
-**That was an artefact of ten samples.** Every whisper the app has ever sent is logged, and
-the log now reads:
+> At n=156 (2026-07-31): plausible 24 whispers / 21% fill / **0.40 div per whisper**; ghost
+> 131 whispers / 2.3% fill / **0.113 div per whisper**; ratio ~0.28 on value per whisper.
+> "Ghosts fill rarely but are worth roughly a quarter of a plausible whisper."
 
-| band | whispers | filled | fill rate | profit (div) | **div per whisper** |
+**Both were under-sampled, and both under-rated ghosts.** Every whisper the app has ever
+sent is logged. All 789 attempts in `outcomes.jsonl` carry a resolved outcome, and the log
+now reads:
+
+| band | whispers | filled | fill rate | exp. profit (div) | **div per whisper** |
 |---|---|---|---|---|---|
-| plausible | 24 | 5 (+1 sold) | **21%** | 10.04 | **0.40** |
-| thin | 1 | 0 | — (n=1) | 0 | — |
-| ghost | 131 | 3 | **2.3%** | 14.80 | **0.113** |
+| plausible | 194 | 26 | **13.4%** | 102.0 | **0.526** |
+| thin | 12 | 2 | 17% (n=12) | 2.0 | 0.167 |
+| ghost | 666 | 13 | **1.95%** | 286.7 | **0.430** |
 
-Ghosts *do* fill — including one at **10.94×** and one at 3.92×, gaps the old finding said
-were uncatchable. What survives is the **ranking** decision, and only on a per-whisper
-basis: plausible returns ~3.5× more per message sent, so it must still be offered first.
-What does **not** survive is `FILL_PRIOR[GHOST] = 0.0`. Zero is measurably wrong; the
-measured ratio is ~0.11 on fill rate, ~0.28 on value per whisper.
+**Measured ratios: 0.146 on fill rate, 0.82 on value per whisper.** `FILL_PRIOR[GHOST]` is
+**0.16** — see the stability warning below before changing it.
 
-**The uncomfortable part: ghosts produced 14.80 of the session's 20.80 divines — 71%.**
-Not because they fill, but because the ones that land are much bigger (8.00, 5.00, 1.80 div
-against ~2 div for a typical plausible fill). A 2.3% hit rate on a fat tail beat a 20% hit
-rate on a thin one, in absolute terms, because **the whisper is nearly free and the user
-sent 131 of them in 63 minutes**. The binding constraint is attention, not opportunity — so
-"is this worth whispering?" has no answer independent of how many whispers are left in the
-session. The app models none of that.
+> **Revised later the same day, by one trade, and the direction is the same one as every
+> other revision of this finding.** The ghost row above read 12 fills / 2.0% / 150.7 div /
+> 0.251 per whisper until the **Rigwald's Ferocity** record was corrected. It was a
+> **137.86× ghost** logged at 06:06Z on 01 Aug for 1.00 divine against a 137.86 divine
+> reference, and it sat as `no_reply` because the pre-0.8.0 timer wrote a verdict over a
+> trade that had completed. The maintainer confirmed (2026-08-01) it **filled at the listed
+> price**; the correction is in the log as an appended `filled` with
+> `actual_profit_divines: 136.0`. **This is the fourth time this finding has been revised
+> and the fourth time the correction favoured ghosts.**
 
-Fill rate by gap, all 156 whispers — the curve the thresholds should be fitted to:
+**⚠ Both ratios are unstable, and the day this was fitted proves it.** Read three times
+inside 24 hours as the log grew and one record was corrected:
 
-| gap | whispers | filled | fill rate |
+| reading | n | fill-rate ratio | value ratio |
 |---|---|---|---|
-| 1.00–1.10× | 2 | 0 | — |
-| 1.10–1.20× | 4 | 1 | 25% |
-| 1.20–1.35× | 12 | 2 | 17% |
-| 1.35–1.50× | 7 | 2 | 29% |
-| 1.50–2.00× | 15 | 1 | 7% |
-| 2.00–4.00× | 26 | 1 | 4% |
-| >4× | 90 | 1 | 1% |
+| before the Rigwald's correction | 789 | 0.162 | 0.66 |
+| after it | 789 | 0.175 | **1.25** |
+| +83 more whispers | 872 | **0.146** | **0.82** |
 
-The cliff sits between 1.5× and 2×, which is roughly where `max_gap_ratio = 1.50` already
-puts it — the threshold is right, the *prior beyond it* is not. Note the top three buckets
-are still under `MIN_SAMPLES`; only 1.5×+ is properly powered.
+The **fill-rate** ratio moved ±0.015 and is worth about **±0.02**: all three readings rest
+on twelve or thirteen ghost fills. `FILL_PRIOR[GHOST]` is pinned at a round **0.16**, the
+middle of the range. It was briefly moved to 0.17 on the middle reading; 83 more whispers
+put the measurement back below where it started, so **that was over-fitting and the lesson
+is not to chase it.**
+
+The **value** ratio is far worse: it crossed parity and came back within hours, on 83
+whispers containing **no new ghost fills at all** — four *plausible* fills alone moved it
+from 1.25 to 0.82. One 137.86× fill is 47% of all ghost realised value. **Quote it with its
+range or not at all.** Do not feed it to `FILL_PRIOR` — the weight multiplies profit, so the
+fat tail would be counted twice; reasoning under *Cross-venue ranking*.
+
+What survives all three readings, and is the actual finding: **`FILL_PRIOR[GHOST] = 0.0` is
+wrong by a wide, well-powered margin (n=666), and ghosts are worth somewhere between half
+and all of a plausible whisper rather than nothing.**
+
+**Read the profit column as an upper bound, and most loosely on ghosts — the tail is one
+trade.** It is `expected_profit_divines`, the app's own estimate, which carries ±6% on
+liquid pairs and **+53% on a thin one** (see the pricing section — this is not a small
+caveat on a ghost, whose gap is largest exactly where the price is least trustworthy).
+**136 of the ghost column's 286.7 divines — 47% — are the single Rigwald's fill**, and 254
+of them come from four fills at 8.75×, 14.09×, 42.91× and 137.86×. Three of the four are independently
+corroborated and one is a known loss — see *Ghost fills are real fills* below. A conclusion
+resting 47% on one observation is a reason to keep measuring, not a reason to re-weight.
+
+Fill rate by gap, all 789 whispers — the curve the thresholds should be fitted to:
+
+| gap | whispers | filled | fill rate | exp. profit (div) | div/whisper |
+|---|---|---|---|---|---|
+| 1.00–1.10× | 56 | 8 | 14% | 22.0 | 0.393 |
+| 1.10–1.20× | 39 | 6 | 15% | 23.0 | 0.590 |
+| 1.20–1.35× | 53 | 5 | 9% | 7.9 | 0.148 |
+| 1.35–1.50× | 40 | 5 | 12% | 17.2 | 0.430 |
+| 1.50–2.00× | 86 | 3 | 3% | 17.0 | 0.198 |
+| 2.00–4.00× | 152 | 4 | 3% | 13.0 | 0.086 |
+| >4× | 363 | 5 | 1% | 120.7 | 0.333 |
+
+**The cliff is confirmed and it sits between 1.35× and 1.50×, not at 2×** — everything
+below 1.5× fills at 9%–15%, everything above at 1%–3%. `max_gap_ratio = 1.50` lands on it.
+Every bucket is now over `MIN_SAMPLES`.
+
+**`min_gap_ratio = 1.05` is no longer unmeasured.** The 1.00–1.10× bucket was 2 whispers at
+n=156 and is 56 whispers at n=789: it fills at **14%**, as well as any bucket below the
+cliff, and returns 0.393 div per whisper. Fill *behaviour* gives no reason to raise the
+floor. The reason to raise it is unchanged and is not about fills: at a 1.05 gap the entire
+edge is inside the ±6% error bar on the reference price that found it, so those 8 fills may
+not have been profitable at all. **Do not read this bucket as vindicating 1.05** — read it
+as showing that the question is a pricing question, exactly as the pricing item says.
+
+**The uncomfortable part holds and got stronger: the whisper is nearly free.** 601 ghost
+whispers across ~5 hours of play returned 0.251 div each against 0.382 for a plausible one,
+on a 2% hit rate carried by a fat tail. A 6× cheaper hit rate stayed within 35% of the
+value per message. The binding constraint is attention, not opportunity — "is this worth
+whispering?" has no answer independent of how many whispers are left in the session, and
+the app models none of that.
+
+**Sample provenance.** 789 attempts over 2026-07-29 to 2026-08-01: 189 pre-0.7.0 records
+with no `session_id`, then seven sessions. `11fc03d0a4f3` (2026-08-01 20:49–21:29Z, 227
+attempts, 14 fills) is a **fifth** field-test session, run on 0.8.0 — it is the first to
+write `expired` rather than `no_reply` (209 of them), and it postdates the *fourth session*
+write-up below, which does not include it.
 
 **2. There are no bulk sellers on the Bulk Item Exchange.** Probed 8 items for the "real
 seller shaving price to move volume" profile:
@@ -267,6 +523,140 @@ The trap: a session summarised in conversation as "made about 20 divines" reads 
 no measurement was taken, and was written up that way here before anyone opened the file.
 **The log is the record; the operator's recollection is not.** Read it before concluding
 that a session produced no data.
+
+### Ghost fills are real fills, not counteroffers — measured 2026-08-01, n=37 fills
+
+> **Updated later the same day: 37 fills, 36 at the listed price.** The Rigwald's Ferocity
+> record was corrected from `no_reply` to `filled` after this join was run, so it was not
+> in the 36. It was then checked against `Client.txt` the same way and is **corroborated
+> independently of the maintainer's recall**, which matters because it is now 47% of all
+> ghost realised value:
+>
+> ```
+> 23:06:04  @To Ciosss: Hi, I'd like to buy your 1 Rigwald's Ferocity for my 1 Divine Orb
+> 23:07:25  : Trade accepted.
+> 23:07:30  @To Ciosss: ty
+> ```
+>
+> The trade is accepted **81 seconds** after the whisper and the thank-you goes to Ciosss
+> five seconds later. `Trade accepted.` carries no name, so the join is by elimination:
+> five sellers were whispered in that window (BADL, Ciosss, Xigemalulu, 胖胖嚛,
+> Peto_Rovente) and **Ciosss is the only one that ever resolved as anything but
+> `no_reply`** — the other four were whispered 20–30 times each across six sessions and
+> never once replied. Ciosss appears in the log exactly once: one whisper, one fill. And
+> per *"Reply to the last whisper received"* below, `@To Ciosss` as a reply target means
+> Ciosss had whispered *back*, which no other candidate did.
+>
+> At **137.86×** it is now by far the largest gap ever observed to fill — 3.2× the previous
+> record of 42.91× — and the listing was **six minutes old** with the seller not AFK.
+
+**The question, and why it mattered.** On 2026-08-01 the one ghost fill observed by hand
+was a **counteroffer at 10× the listed price** that lost money while logging +38.00 divines
+of expected profit. If the fat-tail fills behind the ghost correction were all seller
+haggling, the correction was measuring negotiation rather than fills and ghost value per
+whisper was overstated or negative. That would have invalidated the largest revision the
+project has made.
+
+**It did not.** Every one of the 36 fills in `outcomes.jsonl` was joined to the seller's
+`@From` lines in `Client.txt` (attempt `id` → character → whispers within −1/+25 min of the
+logged `@To`). Result: **35 of 36 fills went through at the listed price. One was a
+counteroffer** — `9adaaa859e10`, the already-known one. Of the 12 ghost fills, **11 were at
+the listed price**, including both fills the 0.7.0 correction rested on:
+
+| id | item | ask | gap | seller's reply |
+|---|---|---|---|---|
+| `fa91398cc414` | Ancient Rib | 2 @ 1 div | 3.92× | `ty` — traded 51s after the whisper |
+| `0980dfa320d3` | Uhtred's Saga | 2 @ 80 ex | 10.94× | *nothing* — joined, traded, done |
+| `9adaaa859e10` | Faded Crisis Fragment | 5 @ 1 div | 8.75× | `10 div` … `so 50 div total 5x 10` |
+
+The replies to the other 33 are pleasantries (`ty`, `oki`, `1min`), GGG's own auto-thank, or
+GGG's **"Ready to be picked up: 10 Ancient Crisis Fragment listed for 10 Divine Orb"**
+template — which is itself confirmation the price was the listed one, since the game
+generates it from the listing. **The 0.7.0 correction stands.** Do not re-open this.
+
+**Two extreme gaps are independently corroborated, which is the stronger result.** The
+concern behind the counteroffer question was really "is a 40× gap ever real?", and the log
+answers it without a trade:
+
+- **Aldur's Saga**, bought at 1 div against a CE reference of 42.9 (42.91×). A *different*
+  Bulk seller was asking **42.0 divine** for the same item in the same sweep. Two
+  independent sources agree; the 1-div listing was genuinely mispriced and the fill was a
+  real ~41 div gain.
+- **Preserved Cranium**, bought 3 @ 1 div against a CE of 14.1 (14.09×). Across 66 attempts
+  on that item, sellers ask 9–10 div, and the same seller re-listed at 9 div eleven minutes
+  later. The gain was real, though nearer ~24 div than the logged 39.
+
+So the fat tail is a **real property of the Bulk Item Exchange**, not an artefact of the
+reference price. The counteroffer risk is real but rare (1 in 36) and is a reason to make a
+row's **price** amendable, not a reason to distrust the band.
+
+### The three-way verdict split is used, and the maintainer still wants it gone — measured 2026-08-02, n=310 across four 0.8.0 sessions
+
+> **This section's first version was wrong and said "never once used by hand", from a
+> single session. Three more sessions had already been logged when it was written.** The
+> corrected reading is more interesting than the error, and the error is the same one
+> CLAUDE.md warns about twice: the log had moved on since it was last read.
+
+0.8.0 replaced the single *No Reply* button with **AFK** and **Offline**, leaving the timer
+to write **Expired**. Across the four sessions that have run 0.8.0:
+
+| session | whispers | AFK | Offline | Refused | manual share |
+|---|---|---|---|---|---|
+| `11fc03d0a4f3` (01 Aug 20:49Z) | 227 | 0 | 0 | 0 | **0%** |
+| `f0351bcc86af` (02 Aug 00:02Z) | 1 | 0 | 0 | 0 | 0% |
+| `3c0e46bcfb21` (02 Aug 00:36Z) | 31 | 0 | 0 | 0 | **0%** |
+| `d9b8d1359894` (02 Aug 03:18Z) | 51 | 4 | 7 | 0 | **22%** |
+
+So it is not that the buttons are unreachable — in the last session **22% of whispers got a
+hand-written verdict**. The maintainer used them properly and *then* asked for them to go:
+
+> *"Split responses do seem unnecessary. Too many options to press during fast paced
+> trading. Opportunities come in so fast during live scanning that it is cumbersome to
+> click the AFK or Offline button instead of just moving on to the next opportunity."*
+
+**That is stronger evidence than the zero would have been.** A feature nobody touches might
+just be undiscovered; a feature used across 51 whispers and then rejected has been tried.
+The cost is interaction, not discoverability, and no relabelling fixes that.
+
+**Decided, and it replaces the three buttons:** one **"Seller not available"** button whose
+only job is to *remove the row from the queue*, plus the `Client.txt` reader to say
+afterwards whether it was AFK, offline or genuinely silent. Same data, one click instead of
+a three-way judgement, and the classification moves to where the evidence already is.
+`Outcome.AFK` and `Outcome.OFFLINE` stay in the enum forever — `outcomes.jsonl` now holds
+11 real records under them — but stop being things a human is asked to choose between.
+
+**And the maintainer asked the right question back: what are these metrics *for*?** The
+honest answer, so it can be judged rather than assumed: 22% of `NO_REPLY` is GGG's AFK
+auto-reply, so a quarter of the denominator under **every fill rate in the project** is a
+seller who was never reachable. If those come out, the fill rate among reachable sellers is
+materially higher than anything reported here. The second use is auditing GGG's own `afk`
+flag, which called 11 of 40 present sellers AFK — 28% wrong — and which the Results tab's
+*By seller state* split still rests on. Both are worth having; **neither is worth a
+three-way judgement per whisper**, which is what this measurement establishes.
+
+### A listing older than ~3 days has never filled — measured 2026-08-01, n=789
+
+Fill rate against `listing_age_s` at the moment of the whisper, all resolved attempts:
+
+| listing age | whispers | filled | fill rate |
+|---|---|---|---|
+| < 1 h | 283 | 18 | 6.4% |
+| 1–6 h | 177 | 8 | 4.5% |
+| 6–24 h | 159 | 5 | 3.1% |
+| 1–3 d | 68 | 5 | 7.4% |
+| **≥ 3 d** | **102** | **0** | **0%** |
+
+**The oldest listing that ever filled was 62.9 hours (2.62 days) old.** At ≥2 days it is 1
+fill in 125; at ≥3 days, 0 in 102. Against the 4.56% base rate, P(0 fills in 102) ≈ 0.008,
+so this is not sampling noise. The effect holds in both large bands separately (ghost 0/79,
+plausible 0/23), so it is **age, not gap** — an old listing means an absent or uninterested
+seller whichever band it sits in.
+
+**This is the cheapest ranking signal the project has found.** 102 of 789 whispers — 13% of
+the whole budget — went to listings that have never once produced a trade. Nothing in
+`listings.py` reads `listing_age_s` today. Note the shape: below 3 days age barely predicts
+anything (6.4% → 3.1% → 7.4%, non-monotonic), so this is a **cliff to gate on, not a decay
+curve to weight by**. Do not build a continuous freshness discount from these numbers.
 
 ### Fixed in 0.6.0, all found by one session of real use (2026-07-31)
 
@@ -320,7 +710,9 @@ worth more than the individual fixes:
 - **The holdback was the wrong fix.** 0.6.0 treated a copied whisper as money spent until
   the user said otherwise. Against the measured fill rates — 21% plausible, 2.3% ghost,
   so 79%+ of whispers never touch the bankroll — the guard withheld far more real trades
-  than it prevented double-spends. Reverted on the maintainer's call. **The general
+  than it prevented double-spends. Reverted on the maintainer's call. *The n=789 refit
+  (2026-08-01) makes the case stronger, not weaker: 12.4% and 2.0%, so 95% of whispers
+  never touch it.* **The general
   lesson:** a correctness argument that ignores the base rate can be locally sound and
   still net negative. Sizing every candidate against the whole bankroll is the accurate
   model when whispers rarely fill.
@@ -351,6 +743,318 @@ worth more than the individual fixes:
   the row tint says which trade a click acts on. Reported as noise: by the time the
   cursor is on the button that question is already answered. Buttons now report no row;
   the rest of the row, including the gaps between the buttons, still lights up.
+
+### Found in the fourth session of real use (2026-08-01)
+
+**Half of this is fixed in 0.8.0** — the false expiries, the repeated whispers, the
+silent hotkey refusal, the column names and the truncated headings. The evidence below is
+kept in full regardless of what was built from it, and what is *not* yet fixed is called
+out at the end of each entry. What 0.8.0 decided while fixing them is in
+*Deliberate decisions*, below.
+
+Measured from `outcomes.jsonl` (969 records, 4 sessions: `5731c10c7246`, `d8a2b67634ef`,
+`c7ae70bf0310`, `4340682082ea`) joined against `LatestClient.txt`. **The local-time offset
+on this machine was UTC−7** on this date, derived by correlating `@To` lines against logged
+attempts — 06:05:45Z ↔ `2026/07/31 23:05:47`.
+
+- **The hotkey still does nothing. Third fix, third failure.** Tested in 0.7.0 — the build
+  that took Qt out of the delivery path entirely — with the game focused *and* with the app
+  focused. No press has ever been observed in any release. The report does not say whether
+  the Settings **press counter** moved, and that is the single diagnostic 0.7.0 added for
+  exactly this situation: it separates "the key never reached us" from "the queue had
+  nothing to take". **Collect it before writing a fourth fix.** Three derivations from the
+  Win32 docs have now produced three non-working builds, so the next move is to read how a
+  shipped tool actually does it (Sidekick, Awakened PoE Trade) rather than deriving again.
+- **The hotkey was never bound at all, and three releases were spent fixing the wrong
+  half.** Root-caused 2026-08-01 from the Settings line the maintainer reported: with the
+  box ticked, a fresh binding and the settings saved, it still read *"Not listening. Tick
+  the box above and press OK to bind it."* That text is the `not hk.active` branch
+  (`settings_dialog.py:352`), and `active` is `self._pump is not None and self._pump.ok`
+  — so **`RegisterHotKey` returned 0**. No press could ever have arrived, and every fix
+  since 0.5.0 (the missing `ctypes.wintypes` import, then taking Qt out of the delivery
+  path) addressed what happens *after* a press. Both were real bugs; neither was this one.
+  **Why it stayed invisible for three releases:** on a false return the pump sets
+  `ok = False` and returns silently (`hotkey.py:176-183`) — it never calls `GetLastError`,
+  and `failed` is only emitted from the `except` branch, so a refused registration writes
+  nothing to the log and shows nothing on screen. *The lesson is about the diagnostic, not
+  the API:* 0.7.0 added a press counter to tell "the key never reached us" from "the queue
+  had nothing to take", and the real answer was a third thing neither branch could express.
+  A status line that reports success or silence cannot distinguish silence from refusal.
+  Registration must report **why** it failed. Most likely cause is another process already
+  owning the combination — the maintainer runs Sidekick — which `GetLastError` returns as
+  `ERROR_HOTKEY_ALREADY_REGISTERED` (1409) and which a second binding would not escape if
+  that process grabs a range.
+
+  ~~**Confirmed the same day: it was Sidekick.**~~ **Withdrawn 2026-08-01 (later the same
+  day). The Sidekick attribution was a confound and is not supported.** What was recorded
+  originally: "quitting Sidekick **and rebinding** made the hotkey fire — in the app *and*
+  in game, the first time it has ever worked in any release. Restarting Sidekick afterwards
+  did not take it back." The error is visible in that sentence — **two variables were
+  changed and the fix was credited to one of them.** Rebinding is the other, and it
+  explains the result on its own if the problem was the *combination* rather than the
+  *program*.
+
+  **The test that isolates it, on v0.7.0 from Releases:** poe2-arb quit, game quit,
+  **Sidekick running throughout**, game restarted, then poe2-arb restarted — so Sidekick
+  called `RegisterHotKey` first, by a wide margin, which is precisely the order predicted
+  to fail. **It registered fine and the hotkey works.** Sidekick is therefore not holding
+  the binding now in use, and the "first-come-first-served, so this will regress"
+  prediction is falsified for that binding.
+
+  **What survives, and it is the part that matters.** `RegisterHotKey` *was* returning 0 —
+  that is derived from the `not hk.active` branch and is not in question. What is unknown
+  again is **why**. Two live hypotheses, and no evidence yet separating them:
+  - *The specific combination was taken*, by Sidekick or by anything else, and rebinding
+    is what fixed it. Consistent with everything observed.
+  - *A stale poe2-arb process still held the key.* `RegisterHotKey(NULL, …)` is owned by
+    the thread, released when the process exits — an earlier instance that had not fully
+    exited, or a pump thread that outlived its window, would refuse the next instance with
+    1409 and would have nothing to do with Sidekick at all. Note the app has shipped a
+    `terminate()` fallback in `_HotkeyPump.stop` for exactly the case where the thread
+    will not go quietly.
+
+  **One cheap experiment settles it:** with Sidekick running, bind `ctrl+shift+c`
+  specifically — the combination from the original failure — and see whether it is refused.
+  If it is, the cause is that combination. If it is not, the original refusal was
+  transient, and a stale process is the leading candidate.
+
+  **RESOLVED 2026-08-01, and the experiment above was never needed — the second
+  hypothesis is right, and the stale process is one poe2-arb starts itself.** The 0.8.0
+  build was run on Windows for the first time and refused a hotkey within four seconds,
+  with `GetLastError` finally saying why. From `poe2-arb.log`, four lines, unedited:
+
+  | time | line |
+  |---|---|
+  | 06:32:16 | `gui.app: poe2-arb starting` |
+  | 06:32:16 | `gui.hotkey: global hotkey registered: CTRL + SHIFT + C` |
+  | 06:32:18 | `gui.install_prompt: updated installed copy from 0.7.0 to 0.8.0` |
+  | 06:32:19 | `gui.app: poe2-arb starting` |
+  | 06:32:20 | `gui.hotkey: RegisterHotKey refused (GetLastError=1409 …)` |
+
+  **The app was locking itself out of its own hotkey, on every update.** `_update_in_place`
+  replaces the installed exe, calls `launch()` on it and returns True so `main` exits — but
+  `MainWindow.__init__` had already registered the hotkey *two seconds earlier*, and a
+  `RegisterHotKey(NULL, …)` is held until its process dies. So the copy that was leaving
+  owned the key and the copy that was staying asked second and was refused. The leaving
+  copy was gone by 06:32:46 (the rebind to `CTRL + ALT + D` succeeded then, and
+  `CTRL + SHIFT + C` again at 06:32:52), so the window is only a few seconds wide — and
+  permanent, because nothing before 0.8.0 ever asked again.
+
+  **This is very likely the whole three-release story.** The upgrade path *is* the test
+  path: download the new exe, run it, it updates the installed copy and hands over, and the
+  surviving process has no hotkey. Every field test began that way. It also explains the
+  two facts that made the Sidekick answer look right and then wrong — quitting Sidekick
+  involved restarting poe2-arb (which is what actually fixed it), and the isolating test on
+  2026-08-01 restarted poe2-arb *without* an update pending, so nothing was holding the key
+  and it registered fine. Not proven for the earlier releases, which logged nothing; stated
+  as the leading explanation, not as measurement.
+
+  **Fixed by ordering, not by anything in `hotkey.py`.** `MainWindow._setup_hotkey` now only
+  wires the object up; registration moved to `MainWindow.start_hotkey`, which `app.main`
+  calls **after** `maybe_offer_install` returns. A process about to hand over never claims
+  the key. `tests/test_app.py` pins the call order; `test_main_window.py` pins the split
+  between constructing the window and claiming the key.
+
+  **The update *onto* the first fixed build can still race, and that is not a regression.**
+  The fix constrains the copy that is *leaving*, so it only helps once the leaving copy has
+  it. Upgrading from any build ≤0.8.0-artifact means the old code registers at construction
+  as before, and the arriving fixed copy may still find the key taken — it asks slightly
+  later now (after the install check rather than during construction), which narrows the
+  window but does not close it. Every update *after* that one is clean. If the hotkey is
+  refused on exactly one upgrade and never again, this is why; the retry is the backstop.
+
+  **Two things this does not fix, deliberately.** A poe2-arb that crashed or hung with a
+  live pump thread still holds the key for the next launch — that is what the 60-second
+  retry is for. And the retry *would* have recovered this case on its own at ~06:33:20;
+  the maintainer rebound by hand at 06:32:46 first, **so the retry has still never been
+  observed firing.** It remains unverified.
+
+  **`describe_error(1409)` now names poe2-arb** as the usual culprit, and only poe2-arb.
+  That is not a reversal of "do not name a program": a third-party guess sends people to
+  close something innocent, whereas our own second copy was caught in the log holding the
+  key and is the one thing the user can check immediately.
+
+  - **Do not tell the user it is Sidekick.** The shipped wording said so and has been
+    softened to name overlays as *a* common cause, because naming a specific program on
+    this evidence would send people to close something innocent.
+  - **Fixing the silence matters more than fixing the conflict**, and this episode is the
+    argument for it rather than against it. Three releases were lost because a refusal was
+    indistinguishable from success; a fourth conclusion was then drawn from a confounded
+    one-shot test and lasted half a day. `GetLastError` on the false return is what would
+    have answered this immediately, and is what will answer it next time.
+
+  **What 0.8.0 built, and three traps in it.** The pump now calls `GetLastError` on a
+  false return and reports it; Settings gained *Refused* as a third state, because
+  "listening / not listening" is exactly the vocabulary that could not express this.
+  `GlobalHotkey.probe` trial-registers a binding before Settings saves it, and
+  `_try_again` retries a refused one every 60s so a key lost to startup order comes back
+  when the other program closes. The traps, in the order they bite:
+  1. **Probing the key we already hold reports it as taken** — by us. `probe` answers
+     "free" for the live binding rather than testing it, or every working hotkey fails
+     its own pre-check.
+  2. **The pre-check is a race and cannot be a guarantee.** Another program can claim the
+     key between the answer and the save, so `register` still has to report failure. The
+     probe buys a better message, nothing more.
+  3. **The trial must run on the pump thread.** `RegisterHotKey` is thread-affine, so a
+     key registered from the GUI thread posts `WM_HOTKEY` where nothing is listening —
+     which is one line away from the bug this whole item is about. `probe` posts `WM_NULL`
+     to wake the pump's blocked `GetMessage` and waits on an event for the answer.
+
+  Still unverified on Windows: everything above is Windows-only and untestable here, which
+  is the exact shape of code that shipped broken twice. The tests fake the Win32 layer.
+- **A real fill was logged as `no_reply` — and it was the largest gap the project has
+  seen.** Rigwald's Ferocity, whispered 23:06:04 for 1 divine against a CE reference of
+  137.86 (`d218084e2ae6`). `@To Ciosss: ty` follows at 23:07:30 — 86 seconds later, so it
+  traded. The queue's five-minute auto-expiry wrote `no_reply` at 23:11:03, **three and a
+  half minutes after the trade had already completed**, and nothing asked afterwards. An
+  auto-expiry that fires while a fill is still in progress does not just lose a click, it
+  writes a false verdict into the file the fill rates are computed from. The log *format*
+  is fine — verdicts apply in file order, so a later correction wins, and `9adaaa859e10`
+  carries `no_reply` then `filled` from a real correction the same evening. The gap is the
+  UI: once a row auto-expires there is no way back to it.
+- **The one ghost that filled, filled at a counteroffer 10× the listed price.** The app
+  read RuinousLuck's listing as 5 Faded Crisis Fragments for 5 divine — 1 div each against
+  a CE reference of 8.75, ghost band, logged `expected_profit_divines: 38.0`. The seller's
+  reply was `10 div`, then `so 50 div total 5x 10`. Taken at 10 div each against a real CE
+  of ~9.4, it was a **small loss** on a record that claims +38. It was raised here as a
+  candidate explanation for the entire ghost result — if the 3.92× and 10.94× fills were
+  also counteroffers, ghost value-per-whisper would be overstated or negative.
+  **Checked 2026-08-01 and it is not the explanation: 36 of 37 fills were at the listed
+  price, this one included as the sole exception.** See *Ghost fills are real fills, not
+  counteroffers* above. What survives is the narrow version: a counteroffer happens about
+  1 fill in 36, and the app has no way to record one, so **a row must be amendable in
+  price and not only in quantity.**
+- **The second false expiry that evening was a seller finishing a map — the case a pin
+  solves.** Same listing, `9adaaa859e10`: whispered 02:32:27, seller replied `map` then
+  `finish` at 02:33:23, auto-expired to `no_reply` at 02:37:25, **traded at ~02:43** and
+  hand-corrected to `filled` at 02:46. So the timeout fired six minutes before the trade,
+  on a row whose seller had already said in writing that they were coming. Two of the two
+  false expiries measured this session were live conversations, not silence: **an answered
+  whisper is exactly the row that should stop counting down.**
+- **The same stale listing was whispered five times across four sessions in 3½ hours.**
+  RuinousLuck's Faded Crisis Fragment listing at 23:05:47, 23:24:18, 23:39:21, 02:21:58 and
+  02:32:27; two of those were answered `RuinousLuck is not online`. Bulk listings do not
+  delist when the stock is gone or when the seller stops honouring the price, so
+  **re-finding a listing you have already resolved is the normal case, not an edge case**,
+  and the app keeps no memory of what it has already asked for. Restarting *Find trades*
+  re-whispers the same sellers immediately, which is also how the maintainer pauses the app.
+- **A Ready-to-whisper row cost 84 div against a 39 div bankroll** (screenshot, 0.7.0). Not
+  yet diagnosed; the bankroll spin box had been lowered during the session, so the first
+  suspect is that queued candidates are not re-checked when the bankroll changes.
+  **Reproduced on 0.8.0, 2026-08-02, and this time it cost a whisper.** A **599 div** row
+  against a **260 div / 350 ex** bankroll, and it was in *Waiting on a reply* — so the app
+  had the maintainer offer a seller an amount he could not settle, and he *"was surprised
+  when I couldn't fill the order."* That is the consequence: not a display glitch, a spent
+  whisper and a trade that could not complete.
+
+  **Root-caused from the code the same day, and it is not a bug so much as a missing
+  handler: changing the bankroll re-sizes nothing that already exists.**
+  `_bankroll_changed` (`main_window.py:1124`) assigns `cfg.bankroll_divines` and starts the
+  config save timer; that is the entire method. Sizing lives in `build_candidates` —
+  `max_by_bankroll = int(bankroll_units // lot_pay)` — reading `cfg.bankroll()` at
+  `sweep.py:179`. **The handler's docstring presents this as correct** (*"the in-memory
+  value is what the next sweep reads, and that is already correct"*), which is why it has
+  survived: it looks decided rather than missed. Four consequences worth having written
+  down:
+
+  - **The change lands progressively, not at a sweep boundary.** `cfg.bankroll()` is read
+    inside the per-item loop, so items swept after the spin box moves use the new figure
+    while candidates already built keep the old sizing until their item comes round again.
+    A stale row's exposure is up to a full ~15-minute cycle.
+  - **Removing the QUEUED drip does not fix it.** That removes one contributor — a row
+    sitting invisible for minutes on top of the above — and leaves the cause alone.
+  - **The precedent is the method directly below it.** `_appetite_changed` re-ranks what is
+    on screen because *"waiting for the next sweep would be a fifteen-minute round trip to
+    see the effect of moving a slider."* The same argument fits the bankroll exactly and
+    was never applied to it. It is **not** directly reusable though: `set_result` re-*ranks*
+    where the bankroll needs re-*sizing*. `SweepResult` keeps candidates rather than raw
+    listings, but `Candidate` carries its own `listing`, so re-planning from
+    `[c.listing for c in result.candidates]` is available and cheap.
+  - **Two surfaces, not one.** `trade_queue` holds submitted candidates independently of
+    the sweep panel, and *Ready* is where the 599 div row was. Whispered rows must be left
+    alone — they record what was actually asked for.
+- **Column headers were misread by their own author.** `Buy 5 / Each 1 div / Cost 5 div /
+  Profit +38` was read back as "I bought 1 for 5 div". Three of the four words are doing a
+  job the reader has to be told; *Amount / Price per / Total* is what the maintainer reached
+  for unprompted, and it is the same vocabulary the in-game trade UI uses.
+
+### The first real play session on 0.8.0 — Windows, 2026-08-02
+
+**The build:** the `b8d43a8` artifact from run 30727645833, carrying the ranking refit, the
+editable rows, `FILL_PRIOR[GHOST]` and the `stock` / `ce_age_s` instrumentation. Everything
+below is the maintainer's own report from playing with it, so it settles the Windows
+verification list that had been open since 0.8.0 was written.
+
+**Confirmed working — close these, do not re-verify:**
+
+- **It starts and the tables render.** No startup crash, no mangled table. This was the
+  base risk: 0.3.0 shipped a startup `NameError` with every panel individually tested.
+- **Pinning is reachable and works.** The 30px flag button was sized for use mid-map and is
+  fine.
+- **Queue order looks sane.** The refit ships a ranking in which a big enough ghost outranks
+  a plausible; in a live queue it does not whisper nonsense first.
+
+**The app is not a mid-map tool, and the design has been assuming it is.** In the
+maintainer's words: *"this tool returns results too frequently to really use mid-map. It is
+more of a sit in town and message people app, but earnings are strong enough to warrant the
+allotted time investment."* This is a load-bearing correction to a premise that appears
+throughout this file and CLAUDE.md — "someone mid-map is looking at the headline", the 30px
+buttons, the toast-and-alert-window model, and the whole justification for interrupting at
+all. **The user is sitting in front of the app giving it full attention.** Consequences
+worth weighing before the next UI change: an interruption model built for a player who is
+busy is optimising the wrong thing, and density and throughput matter more than glanceability.
+The earnings verdict is the other half of it — the time cost is accepted, so the constraint
+is the app's rate of useful output, not its rate of interruption.
+
+- **The queue's drip is the throughput problem** — see *The offer queue*, where the
+  oldest-first presentation order and the one-per-`offer_window_s` promotion were both
+  reversed on the strength of this session.
+
+**Icon legibility fails on Windows, and matching the game's font is abandoned.** The
+dingbats (✔ ✖ ⚑ ⚐ ❐ ✎ ☾ ⊘ ✕) were chosen because emoji fall back to identical empty boxes
+and were verified by screenshot **on Linux only**. On Windows, *"detail is lost in
+rendering"*: the *Ready to whisper* icons are tolerable, the *Waiting on a reply* ones —
+the seven-action row, at the same 30px — are **illegible**. So the 0.8.0 note that "proper
+PoE2-styled icon assets remain the right answer" is superseded: **the maintainer's decision
+is to stop trying to match the game's font environment and use something clean and legible
+instead.** Bundled assets, not a different character, and not a PoE2 pastiche.
+
+**A conflicting hotkey in another app does not raise a refusal — it silently loses.** Bound
+to the same key as a Sidekick hotkey, poe2-arb's hotkey does not fire and **Sidekick simply
+takes precedence**; no `RegisterHotKey` failure is reported. So the 1409 diagnostic built in
+0.8.0 detects only the case it was actually built for — **another copy of poe2-arb itself**,
+which is the one thing that has ever genuinely blocked the key (via the updater; see
+2026-08-01, *RESOLVED*). Likely mechanism, not verified: a low-level keyboard hook runs
+ahead of the `WM_HOTKEY` delivery path and swallows the keystroke, so there is nothing for
+`RegisterHotKey` to refuse and nothing for us to observe. **Decided: stop fighting it.** A
+warning under the hotkey field in Settings — an overlapping binding in any other app, first
+or third party, will block ours silently — and no further detection work. This closes the
+"find a binding that gets refused" line of investigation.
+
+- **The 60-second retry has still never been observed firing**, and is no longer worth
+  chasing. It exists for a crashed poe2-arb holding a live pump thread; that case is real
+  but rare, and the conflict case it might have covered turns out not to be detectable.
+
+**The Results panel's three breakdowns are working; its two list tabs are being removed.**
+The maintainer's read at n=872+: *"all 3 of the categories we are tracking are reflective of
+our hypotheses"*, and **By discount is now telling** where it was not on the smaller sample
+— the two tighter bands fill significantly better than the stretch bands. Two qualifications
+that matter more than the observation:
+
+- **By discount corroborates; it does not add.** It is the same log and the same split
+  `FILL_PRIOR` is already fitted to (plausible 13.4% / ghost 1.95%, n=872). A coherence
+  check, not independent evidence, and **not a reason to re-tune the prior** — the ±0.02
+  stability warning in *Negative results* 1 is unaffected by looking at the same numbers
+  through a different tab.
+- **By seller state rests on a flag measured to be 28% wrong** — GGG's API called 11 of 40
+  AFK sellers present. Keep the tab; do not act on its numbers until the flag is audited.
+
+**Every trade and Every whisper are being deleted, reversing a field request 2 days old.**
+Both were added on 2026-07-31 because "what did I actually buy" took two steps; the tab
+being renamed *Trades → Results* now answers it in a better structure, so they are a second,
+worse copy. `results.py` carries a comment explaining why *Every trade* exists and why it
+precedes *Every whisper* — **that comment must go with the tabs**, or it reads as
+justification to restore them.
 
 ### What the game's own log can and cannot tell us — measured 2026-07-31
 
@@ -612,6 +1316,29 @@ Also worth not rediscovering:
 
 ### The offer queue
 
+> **DECIDED 2026-08-02, NOT YET BUILT: the interruption model is being removed.** The
+> premise under everything in the next four bullets is that the user is busy in a map and
+> an offer must interrupt them. That premise is **false** — the app is used sitting in
+> town with full attention (see *The first real play session on 0.8.0*). The maintainer's
+> call: **drop the toast and the alert window; keep the ● marker, re-defined as "row 1,
+> the one the hotkey will take".** Concretely, and read this before touching
+> `trade_queue`:
+>
+> - **`offer_window_s` and `alert_until` go**, along with the toast and the OFFERED
+>   state's gate on visibility. Retire the config key through `config.RETIRED_KEYS` and
+>   drop its Settings row.
+> - **The ● stops being a state and becomes a position.** It marks row 1 of *Ready to
+>   whisper*, which after the re-sort **is** the trade the hotkey takes. Nothing is
+>   "offered" any more; everything found is simply takeable.
+> - **`expires_at` starts when the candidate enters Ready**, not at promotion, and the
+>   floor-at-the-alert-window rule goes with the alert window. `available_ttl_s` (5 min)
+>   still governs the lifetime and `awaiting_timeout_s` still governs the whisper.
+> - **Rows still expire.** Removing the interruption is not removing the clock — a stale
+>   Ready row is still a listing that has probably gone.
+>
+> The four bullets below are kept because they record *why* each piece existed; do not
+> re-derive them as reasons to keep it.
+
 - **Exactly one trade is OFFERED at a time.** A second toast arriving while the first is
   unread makes both of them noise.
 - **An unclaimed offer lapses into AVAILABLE rather than vanishing.** Still a good trade,
@@ -630,9 +1357,33 @@ Also worth not rediscovering:
   then silently gained five minutes — and the seconds it spent flashing came out of the
   listed time the user had configured. `expires_at` is floored at the alert window so a
   short TTL cannot retire a trade whose own toast is still up.
-- **An unanswered whisper self-marks as NO_REPLY.** Silence is the majority outcome;
-  leaving rows pending forever would bias the log toward whatever the user came back and
-  clicked. Timeout 0 answers every one by hand.
+- **An unanswered whisper self-marks as `Outcome.EXPIRED`** — *not* `NO_REPLY`, since
+  0.8.0. Leaving rows pending forever would bias the log toward whatever the user came
+  back and clicked, but the timer knows only that its deadline passed: on 2026-08-01 it
+  wrote `no_reply` three and a half minutes *after* a trade completed, and **both** false
+  expiries that evening were sellers who had answered. Timeout 0 answers every one by hand.
+- **`NO_REPLY` stays in the enum and is never written again.** `outcomes.jsonl` returns
+  records under it forever, so the value has to keep resolving — the same constraint as
+  `bands.symbol_for_name`. It was retired as a *button* because by hand it meant one of
+  two different things, which is now **AFK** and **Offline**; those two plus **Expired**
+  are the three-way split the game log independently derives (76% silent / 22% AFK / the
+  rest replies). Anything asking "did they answer at all" must use `Outcome.is_silence`,
+  which covers all four, rather than testing members by name.
+- **A pinned row never expires, and unpinning restarts nothing.** Pinning is what the user
+  does when a seller speaks, so a pinned row sorts above everything else in Waiting on a
+  reply and holds a highlight of its own — deliberately *not* a band colour, because it is
+  state rather than risk. `expires_at` is left untouched throughout, so a row released past
+  its deadline resolves on the next tick: the deadline was real, the pin only held it, and
+  restarting the clock would make a row immortal by pin-and-unpin. Pin state is per-session
+  UI and is deliberately **absent from `outcomes.jsonl`** — it says what the user is doing
+  now, not what happened to the trade.
+- **Only some verdicts suppress the listing for the session** (`SETTLED_OUTCOMES`):
+  FILLED, SOLD, OFFLINE and DECLINED. `EXPIRED` and `AFK` deliberately do **not** — an
+  away seller comes back, and a deadline passing says nothing about the listing at all.
+  The suppression exists because a Bulk listing does not delist when its stock goes, so
+  every later sweep re-finds it; `forget_resolved` drops the row that would otherwise
+  deduplicate it, which is why the key is remembered separately. Keyed on `Candidate.key`
+  (seller + item + ratio), because the queue row's id is regenerated each sweep.
 - **Every action is one click on the row itself**, so the tables carry no selection — a
   highlight would imply a second step that doesn't exist. This constrains the redraw:
   countdowns tick every second, and rebuilding a row would destroy the button under the
@@ -645,6 +1396,13 @@ Also worth not rediscovering:
   the delegate fills the row itself with a translucent tint from the palette's highlight.
   **The buttons themselves report no row** (0.7.0): pointing at Accept highlights Accept,
   because by then which trade it acts on is not in question.
+  **This is not what ships, and it is a regression.** Reported with a screenshot
+  2026-08-02: hovering one button highlights **the whole button group for that row**.
+  0.7.0's changelog states the fix as shipped and user-visible — *"Hovering a button lit up
+  the whole row. It now highlights the button you're pointing at"* — so it worked once and
+  broke under the **0.8.0 icon-button rework**, which is where the row's action widget was
+  rebuilt. Look there first rather than re-deriving the original fix. Open bug; the
+  decision above is the intended behaviour.
 - **Action widgets must be unparented, not just removed, on rebuild.** `removeCellWidget`
   only schedules deletion; the orphan keeps painting at its old geometry until the event
   loop catches up, which put a live Accept/Decline on top of another row's Item column.
@@ -656,9 +1414,36 @@ Also worth not rediscovering:
   The live offer is **no longer pinned to the top** (it was until 0.6.0, which reshuffled
   the list every alert window) — it carries the ● marker and is named in the headline,
   which is where someone mid-map is looking.
+
+  > **REVERSED for *Ready to whisper* by maintainer decision, 2026-08-02 — not yet
+  > built.** Two premises under this bullet failed in the first real play session. The
+  > app is **not** used mid-map (see *The first real play session on 0.8.0*), so
+  > "where someone mid-map is looking" is not a reason for anything; and the maintainer
+  > routinely **shrinks the Ready pane to a few rows** to give the splitter's real estate
+  > to *Waiting on a reply*, at which point a presentation order that is not the hotkey's
+  > order means **the visible rows are not the ones the key will act on**. The
+  > requirement is now: **row 1 is the trade the hotkey takes, row 2 is the one after
+  > it.** Since the hotkey takes `offered` — chosen by `_next_to_offer`, i.e. **by rank**
+  > — while `available` sorts by `offered_at or queued_at`, satisfying this means sorting
+  > *Ready* by the ranking key. **The cost is real and was the reason for the old rule:**
+  > rank order reshuffles when a better candidate arrives, so rows move under the cursor.
+  > Mitigate rather than revert (row 1 is the hotkey's row, so it is the least
+  > click-sensitive; consider holding a reshuffle while the pointer is over the table).
+  > Spec in TODO, *Both queue sections*.
+
 - **The hotkey falls through to the top of Ready when nothing is live.** The alert window
   is seconds and the listed window is minutes, so most of the time there is no OFFERED
-  trade and the key did nothing while the panel was full of takeable rows.
+  trade and the key did nothing while the panel was full of takeable rows. *Note this is
+  already half of the reversal above: when nothing is OFFERED the key does take row 1, and
+  the complaint is precisely that when something **is** OFFERED it does not.*
+- **The QUEUED drip is being removed** (decided 2026-08-02, not yet built). `tick` promotes
+  one trade per `offer_window_s`, so found candidates sit invisible in QUEUED for 20s each
+  and a sweep's worth of them takes minutes to appear. The maintainer's instruction is to
+  **put every candidate into Ready as it is found**. This does not delete the OFFERED
+  state — the ● marker, the toast and the alert window are a separate concern — it stops
+  `available` being gated on promotion. Note the interaction with `cancel_pending`, which
+  drops the QUEUED backlog when *Find trades* is switched off: with no backlog to drop,
+  stopping stops adding rather than retracting, which is the intended behaviour anyway.
 - **Submissions are deduplicated against everything unfinished**, including already-
   whispered trades. Sweeps overlap, and re-offering would have the user message the same
   seller twice.
@@ -677,8 +1462,23 @@ Also worth not rediscovering:
   `TradeQueue.revise` → `listings.replan_units`, appended to the log as an amendment. The
   correction is deliberately *not* re-optimised: the user is reporting what they bought,
   not asking for the best trade at that size.
-- **Ghosts are never queued** (`queue_ghosts=False`). Interrupting a map for something
-  measured never to fill is pure cost. They stay visible in Trades.
+- **The *Long shots* slider does two different things, and only one of them is a slide.**
+  `risk_appetite` is a single 0–1 value read in two places, which is why "what would a
+  higher setting pull in?" has a surprising answer:
+  - **A binary gate at zero.** `queue_ghosts = risk_appetite > 0.0`, so **any** setting
+    above 0 queues **every** ghost. The old note here — "ghosts are never queued
+    (`queue_ghosts=False`)" — described the default, not the behaviour, and was written
+    when the prior was 0.0 and interrupting a map for a ghost was thought to be pure cost.
+    Both premises are now gone: ghosts fill at 1.95%, and the app is not used mid-map.
+  - **A continuous re-weighting.** `fill_weight = prior + appetite × (1 − prior)`. For a
+    ghost that is 0.16 at 0%, **0.58 at 50%**, 1.0 at 100%; plausible is 1.0 throughout.
+    At 100% the priors are flattened away entirely and ranking is pure expected profit.
+
+  **So raising the slider above 50% pulls in no listing that 50% did not already queue** —
+  it only ranks the ones already there higher against plausibles. The 137.86× Rigwald's
+  Ferocity fill was taken at 50%, and at 0% it would not have been queued at all. Recorded
+  because the maintainer asked exactly this after that trade; the answer is that the
+  interesting threshold is 0-versus-anything, not 50-versus-more.
 - **A whispered trade cannot be dismissed, only resolved.** It is already recorded as an
   attempt; deleting it would bias the outcome log toward whatever the user answered.
 - **Stopping the sweep drops the QUEUED backlog and nothing else** (`cancel_pending`, added
@@ -709,6 +1509,63 @@ Also worth not rediscovering:
   freshness filtering actually solves.
 - **A failed re-check counts as "go ahead".** Unknown is not evidence of absence; don't
   talk the user out of a real trade because a request failed.
+- **`FILL_PRIOR` holds the *fill-rate* ratio (ghost 0.17), not the value-per-whisper ratio
+  (1.25) — and this looks like a transcription error.** Both numbers are measured, both are
+  in *Negative results* 1, and the smaller one is the one in the code. It is deliberate:
+  `fill_weight` **multiplies profit**, so `profit × weight` is already an estimate of
+  divines per whisper. Feeding it the value ratio would apply the fat tail twice, since a
+  ghost's value per whisper is high *because* its profit is large. Decided 2026-08-01,
+  resolving a question TODO.md had carried open since 0.7.0.
+- **Nothing is hidden from the queue by default — not ghosts, not stale listings.** Both
+  are demoted by a measured weight. A hidden row cannot be falsified, and that is exactly
+  how `FILL_PRIOR[GHOST] = 0.0` survived four field tests while being wrong. A *user*
+  filter is fine and one is planned for stale rows; it must ship off by default.
+- **Staleness is a cliff, not a curve.** Gate at `STALE_LISTING_S`; do not build a
+  continuous freshness discount. Below three days, age barely predicts anything
+  (6.4% → 3.1% → 7.4%, non-monotonic), so any decay curve would be fitting noise.
+
+### Correcting a trade after the fact — decided 2026-08-01
+
+- **An amendment never rewrites `gap` or `unit_price_divines` in the log, and this is not
+  an oversight.** A price correction writes `cost_divines`, `pay_units` and
+  `expected_profit_divines` and nothing else. The gap is the feature every fill rate in the
+  project is fitted against, and the one that predicts a fill is **the gap we whispered at**
+  — not the one that was negotiated afterwards. The realised gap is still recoverable from
+  `cost_divines ÷ units`, so nothing is lost by keeping the whispered one. `listings.repriced`
+  *does* move `Candidate.unit_price_divines`, because a row on screen showing a negotiated
+  total beside an advertised gap is a row disagreeing with itself; the two are deliberately
+  different, and the log is the one that must not move.
+- **Profit is allowed to be negative, and every display of it must say so.** Nothing out of
+  `plan_trade` ever loses money — it refuses a losing quantity — so every profit figure in
+  the app was written `f"+{value:.2f}"`, which renders `+-2.80`. An amended trade *can* lose
+  money; that is the case this feature exists for. `format.fmt_profit` owns the sign now.
+  Do not reintroduce a hand-written `+`.
+- **`sale_unit_divines` and `settle_currency` are recorded per attempt from 0.8.0.** They
+  were not, and could not be recovered, so a correction to a *quantity* had no way to
+  re-apply the rounding floor that decided the original profit. Records written before this
+  fall back to a whole divine in `outcomes.plan_correction` — the pessimistic reading, and
+  the same default `plan_trade` takes.
+- **The Trades tab edits in place; the Opportunities queue uses a dialog — and the dialog
+  is now overruled.** The original reasoning still describes a real constraint: the queue
+  tables rebuild on a one-second timer for the countdowns, which destroys an open editor
+  mid-keystroke. **The maintainer tried it and wants inline editing with spin arrows
+  anyway** (2026-08-02), which makes the rebuild a problem to solve rather than a reason to
+  avoid inline editing — suppress the rebuild while an editor is open, or make the tick
+  update only the countdown cells it owns. Also decided: **Total and Price per must both be
+  editable and each must move the other.** Editing stays confined to **history rows** on
+  the Trades tab — a live sweep row is a listing nobody has acted on, there is nothing to
+  correct about it, and the same double-click has to keep copying its whisper.
+- **A whispered row is editable in the queue while it is live, and on the Trades tab
+  afterwards — not on the live sweep table.** Decided 2026-08-01. A listing you whispered
+  this session is *carried* on the live Trades table so a verdict has a row to land on, and
+  those rows are deliberately **not** editable there: the queue's *Adjust…* covers a trade
+  in flight, and Trades → *All time* covers it once the session has moved on. The
+  alternative — a live table holding two kinds of row with two sets of edit rules, one of
+  which also has to keep double-click-to-copy — is the shape of a bug rather than a feature.
+- **A verdict change goes through `record_outcome`, not through the amendment record.**
+  Verdicts already fold in order and a later record already wins — `9adaaa859e10` carries
+  `no_reply` then `filled` from a real correction made by hand. Nothing new was needed in
+  the file format; what was missing was a route to it from the UI.
 
 ### Operational
 
@@ -718,6 +1575,12 @@ Also worth not rediscovering:
   directory is the dropper pattern we're avoiding.
 - **Release notes come from `CHANGELOG.md`**, and a tag without a section fails the build
   before anything is compiled.
+- **`upload-artifact` v5 and v6 are still Node 20; only v7 clears the deprecation.** Found
+  2026-08-01 taking the release workflow off Node 20 (`checkout@v4→v5`,
+  `setup-python@v5→v6`, `upload-artifact@v4→**v7**`). The obvious one-major-version bump
+  leaves the warning in place, which is the sort of thing that gets re-tried. Proved on
+  `workflow_dispatch` runs with no tag and no release. `softprops/action-gh-release@v2` was
+  never flagged and is untouched.
 - **UI state lives in a JSON file in the cache dir**, not in the TOML config (meant to stay
   hand-editable) and not in QSettings (which would write to the registry, contradicting
   "delete the folder to remove it"). Column order and widths are part of it, as the
@@ -728,6 +1591,47 @@ Also worth not rediscovering:
   hands out each later resize in proportion. The action column is exempt from shrinking:
   a row of buttons does not get smaller when squeezed, it gets clipped, and an action you
   cannot reach is worse than one you have to scroll to.
+- **Each column's floor is its own heading, not one shared number** (0.8.0). At the narrow
+  end of the window a single `MIN_WIDTH = 28` let `Profit` truncate to "rofit" and
+  `Expires` to "xpire", which is a header lying about which column you are reading. Below
+  the sum of the floors the table scrolls sideways instead, and the window's minimum width
+  was raised to 960 to make that rare — measured with `ColumnLayout.minimum_row_width()`:
+  *Waiting on a reply* wants 916 and the Trades table 896. Item and Seller get a flat 120
+  regardless of their four- and six-letter headings, because their contents are names.
+  **Amended 2026-08-02 by maintainer decision: sideways scroll is not acceptable for the
+  action column.** "Below the sum of the floors, scroll" is fine for *Item* and *Seller* and
+  wrong for the buttons — an action you have to scroll to find is one you do not use. The
+  requirement is now that **every action button on a row is visible at the window's minimum
+  width**, with the action column at a fixed width and the shrink taken out of Item and
+  Seller (which keep floors of their own, from content rather than from their headings).
+  The minimum width itself should come **down**, not up: the 960 was driven by *Long shots*
+  wrapping in the bankroll bar, which has free margin to its left.
+  Three things this uncovered, all measured by screenshot and all easy to reintroduce:
+  - **`resizeColumnsToContents` measures the cells and ignores the heading.** "Buy" came
+    back at 30px against a 49px title, so the floors have to be applied *after* it or the
+    first paint is already truncated.
+  - **It does not measure a cell widget at all**, so an action column's width is a guess —
+    314px for a row of buttons whose `sizeHint` is 226. That 88px of nothing came straight
+    off the columns that do hold something, because the action column is exempt from the
+    squeeze. `_fit_protected` asks the widget instead.
+  - **Growth must hand out the space the row does not fill, not the space the window
+    gained.** A row can already be wider than the window — the squeeze stops at the floors,
+    and the first sizing runs against a pre-show viewport narrower than the real one.
+    Adding the window's delta on top of that *compounds* the overflow: measured, a 638px
+    sizing that had settled at 897 grew to 1235 in a 976px window, and what fell off the
+    end was the action buttons.
+- **The row action buttons are dingbats, not emoji** (0.8.0). 👍 / 👎 / 📌 were what was
+  asked for and they are the wrong bet in a shipped exe: they need a colour emoji font,
+  and where one is missing *every* button renders as the same empty box — verified by
+  screenshot, which is also how the replacements (✔ ✖ ⚑ ⚐ ❐ ✎ ☾ ⊘ ✕) were checked to draw
+  in a plain text font. The wording survives as the tooltip and as the button's `action`
+  property, which is what `click_action` and the tests match on. ~~Proper PoE2-styled icon
+  assets remain the right answer and are still open.~~ **Superseded 2026-08-02 by the first
+  Windows run:** the dingbats lose their detail in the game's font environment — tolerable
+  in *Ready to whisper*, **illegible** in the seven-action *Waiting on a reply* row — and
+  the maintainer's call is to **abandon matching the game's look entirely and use clean,
+  legible bundled icon assets instead.** Screenshot verification on Linux said nothing about
+  this, which is the second time a font assumption has travelled badly.
 - **A session is defined by the queue draining, not by a clock.** `session.py`: it starts
   on *Find trades* and ends only when nothing is running *and* nothing is outstanding, so
   pressing the toggle again mid-session continues it. Between sweeps the queue is

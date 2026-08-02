@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..config import Config
+from .hotkey import format_hotkey
 from .hotkey_edit import HotkeyEdit
 from .theme import error_color, muted_color, warning_color
 from ..rate_limit import Severity, check_pacing, min_safe_interval, worst_severity
@@ -240,13 +241,15 @@ class SettingsDialog(QDialog):
         self.awaiting_timeout.setSpecialValueText("never")
         self.awaiting_timeout.setToolTip(
             "After you send a whisper, how long the app waits for you to say what\n"
-            "happened before writing it down as no reply.\n\n"
-            "Silence is the usual answer, so this saves you clicking. Set it to\n"
-            "never if you'd rather record every one yourself.\n\n"
-            "It also frees the money up: currency promised to a whisper is held\n"
-            "against your bankroll until the trade is answered for."
+            "happened before writing it down as Expired.\n\n"
+            "Expired means nobody said what happened — not that the seller stayed\n"
+            "silent, which the app has no way to know. Silence is the usual\n"
+            "answer, so this saves you clicking. Set it to never if you'd rather\n"
+            "record every one yourself.\n\n"
+            "Pin a row once a seller replies and it stops counting down, so a\n"
+            "conversation can't be written off mid-trade."
         )
-        form.addRow("Mark as no reply after", self.awaiting_timeout)
+        form.addRow("Mark as Expired after", self.awaiting_timeout)
 
         self.hotkey_enabled = QCheckBox("Global hotkey copies the next trade")
         self.hotkey_enabled.setChecked(cfg.trade_hotkey_enabled)
@@ -342,12 +345,29 @@ class SettingsDialog(QDialog):
     # ---------------------------------------------------------------- the hotkey
 
     def _refresh_hotkey_state(self) -> None:
-        """Say whether the binding is live right now, in plain words."""
+        """Say whether the binding is live right now, in plain words.
+
+        Three states, not two. *Refused* — Windows would not give us the key
+        because another program has it — used to render as "Not listening",
+        which is also what an unbound key says, and that ambiguity is why the
+        real cause went unfound through three releases (2026-08-01).
+        """
         hk = self._hotkey_obj
         if hk is None:
             self.hotkey_state.setText("")
             return
-        if not hk.supported:
+        # Refused is the only one worth colouring: it is the state with a
+        # remedy, and the one nothing on screen could express before.
+        self.hotkey_state.setStyleSheet(
+            f"color: {warning_color(self) if hk.refused else muted_color(self)};"
+        )
+        if hk.refused:
+            self.hotkey_state.setText(
+                f"Refused — {format_hotkey(hk.refused)} could not be bound: "
+                f"{hk.refusal_reason} The app keeps trying, so it will start "
+                f"working on its own if that program closes."
+            )
+        elif not hk.supported:
             self.hotkey_state.setText("Windows only — the hotkey does nothing here.")
         elif not hk.active:
             self.hotkey_state.setText(
@@ -445,10 +465,24 @@ class SettingsDialog(QDialog):
         Checked here rather than on save because a rejected binding leaves the
         user with a key that silently does nothing — the failure would otherwise
         only show up in the log.
+
+        Two kinds of problem. The binding may be unusable on its face (no
+        modifier, unknown key), which `HotkeyEdit` answers; or Windows may
+        refuse it because another program owns it, which only Windows can
+        answer, and only by being asked to register it. The second is the one
+        that cost three releases — the maintainer's call, 2026-08-01, was to
+        find out **before** the setting saves clean rather than after.
+
+        It is a **race**: another program can take the key between this answer
+        and the save, so `GlobalHotkey.register` still has to report failure.
+        This buys a better message, not a guarantee.
         """
         if not self.hotkey_enabled.isChecked():
             return ""
-        return self.hotkey.problem()
+        problem = self.hotkey.problem()
+        if problem or self._hotkey_obj is None:
+            return problem
+        return self._hotkey_obj.probe(self.hotkey.binding())
 
     def _fill_leagues(self) -> None:
         """Automatic first, then every league poe.ninja knows.

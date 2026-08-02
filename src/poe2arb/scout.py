@@ -44,6 +44,16 @@ REALM = "poe2"
 # Minimum ValueTraded on *both* sides of a pair before its price is believed.
 # Below this the RelativePrice is derived from a handful of trades and is wrong
 # by multiples, not percentages.
+#
+# **This is too low and there is now a measurement saying so.** Astrid's
+# Creativity carries ~110k ValueTraded — 110x this floor — and on 2026-08-02 its
+# in-game book was **22.2% wide** with poe2scout quoting **+53% above the bid**,
+# against ~2% and ±6% on pairs at 1.6M and 10.0M. Both of the project's two known
+# real losses are explained by it. Raising this is one candidate fix and a
+# ValueTraded-scaled haircut is the other; the haircut is preferred because a
+# floor hides listings while a haircut prices them. Do not raise it on a guess —
+# the shape needs a second thin reading (n=1 today). See docs/FINDINGS.md, "The
+# reference price does not match what a sale realises".
 MIN_PAIR_VALUE = 1_000.0
 
 

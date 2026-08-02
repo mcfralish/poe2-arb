@@ -360,10 +360,15 @@ def test_a_lapsed_offer_expires_after_the_available_window():
     assert q.available == []
 
 
-# --- auto no-reply ---------------------------------------------------------
+# --- auto expiry -----------------------------------------------------------
 
-def test_an_unanswered_whisper_becomes_no_reply():
-    """Silence is the common case; leaving it pending forever biases the log."""
+def test_an_unanswered_whisper_expires():
+    """Leaving it pending forever biases the log toward whatever got clicked.
+
+    The verdict is EXPIRED, not NO_REPLY: all the timer knows is that its
+    deadline passed. Measured 2026-08-01, it wrote `no_reply` three and a half
+    minutes *after* a trade completed.
+    """
     q = TradeQueue(offer_window_s=15.0, available_ttl_s=60.0, awaiting_timeout_s=300.0)
     q.submit([cand()], T0)
     q.tick(T0)
@@ -372,7 +377,7 @@ def test_an_unanswered_whisper_becomes_no_reply():
 
     tick = q.tick(T0 + timedelta(seconds=5 + 301))
     assert tick.auto_resolved == [taken]
-    assert taken.outcome is Outcome.NO_REPLY
+    assert taken.outcome is Outcome.EXPIRED
     assert taken.state is QueueState.RESOLVED
     assert q.awaiting == []
 
@@ -499,3 +504,149 @@ def test_revise_corrects_the_quantity_without_losing_the_trades_identity():
     assert revised.key == before
     # Nothing to change is reported as nothing changed.
     assert q.revise(trade.id, 3.0) is None
+
+
+def test_revise_records_a_counteroffered_price():
+    """1 fill in 36 was negotiated, and it logged a profit it did not earn."""
+    q = queue()
+    q.submit([cand(char="A", pay=11.0, stock=18.0)], T0)
+    trade = q.tick(T0).newly_offered
+    q.take(trade.id, T0)
+    before = trade.key
+
+    revised = q.revise(trade.id, 18.0, 250.0)
+    assert revised is not None
+    assert revised.candidate.plan.units == 18.0        # quantity untouched
+    assert revised.candidate.pay_total == 250.0
+    assert revised.key == before
+    assert q.revise(trade.id, 18.0, 250.0) is None
+
+
+def test_revise_applies_the_quantity_before_the_price():
+    """Shrinking re-prices at the listed rate; a price given overrides that."""
+    q = queue()
+    q.submit([cand(char="A", pay=11.0, stock=18.0)], T0)
+    trade = q.tick(T0).newly_offered
+    q.take(trade.id, T0)
+    revised = q.revise(trade.id, 3.0, 40.0)
+    assert revised.candidate.plan.units == 3.0
+    assert revised.candidate.pay_total == 40.0         # not the listed 33
+
+
+# --- pinning ---------------------------------------------------------------
+# Requested 2026-08-01. The log had already produced the case twice that
+# evening: both false expiries were sellers who had *answered*, one of them
+# mid-trade when the timer fired. A seller who has spoken is not on a clock.
+
+
+def test_a_pinned_row_does_not_expire():
+    q = TradeQueue(offer_window_s=15.0, available_ttl_s=60.0, awaiting_timeout_s=300.0)
+    q.submit([cand()], T0)
+    q.tick(T0)
+    taken = q.take_offered(T0)
+    assert q.pin(taken.id) is taken
+
+    tick = q.tick(T0 + timedelta(hours=2))
+    assert tick.auto_resolved == []
+    assert taken.state is QueueState.AWAITING
+    assert q.awaiting == [taken]
+
+
+def test_a_pinned_row_shows_no_countdown():
+    """The Expires cell has to say "held", not a number that never moves."""
+    q = TradeQueue(offer_window_s=15.0, available_ttl_s=60.0, awaiting_timeout_s=300.0)
+    q.submit([cand()], T0)
+    q.tick(T0)
+    taken = q.take_offered(T0)
+    assert taken.seconds_left(T0 + timedelta(seconds=60)) == pytest.approx(240.0)
+    q.pin(taken.id)
+    assert taken.seconds_left(T0 + timedelta(seconds=60)) is None
+
+
+def test_unpinning_restarts_nothing():
+    """A row released past its deadline resolves on the next tick.
+
+    Deliberate: the deadline was real, the pin only held it. Restarting the
+    clock would let a row be kept alive indefinitely by pinning and unpinning.
+    """
+    q = TradeQueue(offer_window_s=15.0, available_ttl_s=60.0, awaiting_timeout_s=300.0)
+    q.submit([cand()], T0)
+    q.tick(T0)
+    taken = q.take_offered(T0)
+    q.pin(taken.id)
+    q.tick(T0 + timedelta(hours=1))
+    q.pin(taken.id, False)
+    assert q.tick(T0 + timedelta(hours=1, seconds=1)).auto_resolved == [taken]
+
+
+def test_pinned_rows_sort_above_the_rest():
+    q = TradeQueue(offer_window_s=15.0, available_ttl_s=60.0, awaiting_timeout_s=300.0)
+    q.submit([cand(char="A"), cand(char="B")], T0)
+    q.tick(T0)
+    first = q.take_offered(T0)
+    q.tick(T0 + timedelta(seconds=16))
+    second = q.take_offered(T0 + timedelta(seconds=16))
+    assert [t.id for t in q.awaiting] == [second.id, first.id]  # newest first
+    q.pin(first.id)
+    assert [t.id for t in q.awaiting] == [first.id, second.id]
+
+
+def test_only_a_whispered_row_can_be_pinned():
+    q = queue()
+    q.submit([cand()], T0)
+    q.tick(T0)
+    assert q.pin(q.offered.id) is None
+
+
+def test_resolving_releases_the_pin():
+    q = queue(awaiting_timeout_s=300.0)
+    q.submit([cand()], T0)
+    q.tick(T0)
+    taken = q.take_offered(T0)
+    q.pin(taken.id)
+    q.resolve(taken.id, Outcome.FILLED)
+    assert not taken.pinned
+
+
+# --- a settled listing is not offered again --------------------------------
+# Measured 2026-08-01: the same stale listing went out five times across four
+# sessions in 3½ hours, because a Bulk listing does not delist when the stock
+# is gone. `forget_resolved` drops the row that would have deduplicated it, so
+# the key has to be remembered separately.
+
+
+@pytest.mark.parametrize(
+    "outcome", [Outcome.FILLED, Outcome.SOLD, Outcome.OFFLINE, Outcome.DECLINED]
+)
+def test_a_settled_listing_is_never_re_offered(outcome):
+    q = queue(awaiting_timeout_s=300.0)
+    q.submit([cand()], T0)
+    q.tick(T0)
+    taken = q.take_offered(T0)
+    q.resolve(taken.id, outcome)
+    q.forget_resolved()
+    assert q.submit([cand()], T0 + timedelta(minutes=20)) == 0
+
+
+@pytest.mark.parametrize("outcome", [Outcome.EXPIRED, Outcome.AFK])
+def test_a_silent_listing_can_be_tried_again(outcome):
+    """An away seller comes back, and a deadline says nothing about the stock."""
+    q = queue(awaiting_timeout_s=300.0)
+    q.submit([cand()], T0)
+    q.tick(T0)
+    taken = q.take_offered(T0)
+    q.resolve(taken.id, outcome)
+    q.forget_resolved()
+    assert q.submit([cand()], T0 + timedelta(minutes=20)) == 1
+
+
+def test_the_timer_settles_nothing_by_itself():
+    """Auto-expiry must not suppress the listing — it is not a verdict on it."""
+    q = TradeQueue(offer_window_s=15.0, available_ttl_s=60.0, awaiting_timeout_s=300.0)
+    q.submit([cand()], T0)
+    q.tick(T0)
+    q.take_offered(T0)
+    q.tick(T0 + timedelta(seconds=400))
+    q.forget_resolved()
+    assert q.settled == frozenset()
+    assert q.submit([cand()], T0 + timedelta(minutes=20)) == 1

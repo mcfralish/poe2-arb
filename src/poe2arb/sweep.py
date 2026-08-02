@@ -59,6 +59,11 @@ class SweepResult:
     candidates: list[Candidate]   # ranked, best first
     listings_seen: int
     errors: dict[str, str]        # item id -> why it failed, if any did
+    # When the CE reference prices behind these candidates were fetched. Carried
+    # so a whisper can log how old its reference price was: the pricing error is
+    # the reference *moving*, and nothing else in the record dates it. None on a
+    # result built before this existed.
+    ce_fetched_at: datetime | None = None
 
     @property
     def duration_s(self) -> float:
@@ -198,6 +203,7 @@ def run_sweep(
             candidates=candidates,
             listings_seen=len(listings),
             errors=errors,
+            ce_fetched_at=snapshot.fetched_at,
         )
     finally:
         if own_ggg:

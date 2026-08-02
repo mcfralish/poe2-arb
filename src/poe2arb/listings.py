@@ -4,28 +4,39 @@ The trade is: buy an underpriced listing by whisper on the Bulk Item Exchange,
 sell into the in-game Currency Exchange. Two field tests (docs/FINDINGS.md,
 "Negative results") shape everything here:
 
-1. **Deep discounts fill rarely, not never.** Corrected 2026-07-31 from 156
-   logged whispers; the earlier claim, from n=14 with ~10 large-gap attempts,
-   was that they never fill at all. Measured: plausible 21% (n=24), ghost
-   **2.3%** (n=131) — with fills at 3.92x and 10.94x, gaps the old reading
-   called uncatchable. Large gaps are still *demoted*, because plausible
-   returns ~3.5x more **per whisper sent** (0.40 div against 0.113), and
-   `GHOST` still keeps them visible rather than hidden. They are not worthless
-   though: ghosts earned 71% of the one profitable session's divines, because
-   the rare fill is a large one. See `FILL_PRIOR`, whose 0.0 for ghosts is the
-   part now known to be wrong.
+1. **Deep discounts fill rarely, not never.** Fitted 2026-08-01 from 789 logged
+   whispers, after two under-sampled readings said first that they never fill
+   (n=14) and then that they are worth about a quarter of a plausible whisper
+   (n=156). Measured at n=872: plausible **13.4%** (n=194), ghost **1.95%**
+   (n=666), and the fills at 3.92x and 10.94x that overturned the first reading
+   are confirmed to have gone through **at the listed price**, not as
+   counteroffers. So ghosts are demoted rather than buried — see `FILL_PRIOR`,
+   0.16 rather than 0.0, which carries the *fill-rate* ratio. The
+   value-per-whisper ratio is a different number, it swung 0.66 -> 1.25 -> 0.82
+   in one day, and it does not belong in a ranking weight.
 
-2. **Partial currency cannot be traded, so the settlement currency decides the
+2. **A listing that has sat three days does not sell.** 0 fills in 102 whispers;
+   the oldest that ever filled was 62.9 hours old. It holds in every band, so it
+   is age rather than gap, and it is the only signal in the log that predicts a
+   flat zero. `STALE_LISTING_S` gates on it; `rank_candidates` sorts those
+   listings below everything fresh without hiding any of them.
+
+3. **Partial currency cannot be traded, so the settlement currency decides the
    haircut.** A 3.79 CE rate pays 3 if you take divines and 1636 exalted — 3.789
    divines — if you take exalted, because exalted is ~432x finer. Measured on
    the one trade that filled, settling in exalted turns a 1.00 divine profit
    into 1.79. Profit is therefore floored to `sale_unit_divines`, never to a
    whole divine and never left unfloored.
 
-`max_gap_ratio` is now supported by the log — the fill-rate cliff sits between
-1.5x and 2x, where it already is. `min_gap_ratio` is not: only 2 whispers have
-ever been sent below 1.10x, and it is entangled with the reference price's own
-~26% error on thin items, so the two have to be fitted together or not at all.
+`max_gap_ratio` is supported by the log and the cliff is now located more
+precisely than before: fills run 9%-15% below 1.5x and 1%-3% above it, so 1.50
+sits on the edge. `min_gap_ratio` is no longer unmeasured — 56 whispers below
+1.10x fill at 14%, as well as any bucket under the cliff — but it is still not
+*settled*, because at a 1.05 gap the whole edge is inside the reference price's
+own ~6% error on a liquid pair — and on a thin one the error is far larger and
+one-directional (measured 2026-08-02: +53% above the bid at 110k ValueTraded).
+That is a pricing question, not a fill question, and the two still have to be
+fitted together.
 """
 
 from __future__ import annotations
@@ -343,7 +354,15 @@ class Candidate:
 
     @property
     def pay_per_unit(self) -> float:
-        """Per-item price in the seller's currency, to match `pay_total`."""
+        """Per-item price in the seller's currency, to match `pay_total`.
+
+        Read off the **plan** rather than the listing, so a trade amended to a
+        counteroffered price reports the price actually agreed. The two are the
+        same number on an unamended plan — `pay_units / units` reduces to
+        `lot_pay / lot_get`, which is the listing's own ratio in lowest terms.
+        """
+        if self.plan.units > 0:
+            return self.plan.pay_units / self.plan.units
         return self.listing.price_per_unit
 
     @property
@@ -383,6 +402,47 @@ def replan_units(candidate: Candidate, units: float) -> Candidate:
             pay_unit_divines=plan.pay_unit_divines,
             sale_unit_divines=plan.sale_unit_divines,
         ),
+    )
+
+
+def repriced(candidate: Candidate, pay_units: float) -> Candidate:
+    """The same quantity at a different total price — a counteroffer.
+
+    Measured 2026-08-01 against `Client.txt`: **35 of 36 fills went through at
+    the listed price**, so this is rare and the worry that the ranking rested on
+    negotiated prices is closed. The one that was counteroffered is why this
+    exists anyway — it logged +38.00 divines on a trade that lost money, because
+    the app could record a changed *quantity* and not a changed *price*.
+
+    Deliberately **not** clamped the way `replan_units` is. A correction to the
+    quantity can only ever shrink a trade, since the extra was never on offer; a
+    correction to the price usually moves it the other way, because a seller who
+    counteroffers is asking for more. Nothing here re-optimises either: the user
+    is reporting what they paid.
+
+    Only `pay_units` is given, because the proceeds are a fact about the
+    quantity and the Currency Exchange rather than about what the seller
+    charged. Profit is therefore free to come out negative, and every display of
+    it has to be able to say so — see `format.fmt_profit`.
+    """
+    plan = candidate.plan
+    if pay_units <= 0 or plan.units <= 0 or pay_units == plan.pay_units:
+        return candidate
+    cost = pay_units * plan.pay_unit_divines
+    return dataclasses.replace(
+        candidate,
+        plan=dataclasses.replace(
+            plan,
+            pay_units=pay_units,
+            cost_divines=cost,
+            profit_divines=plan.proceeds_divines - cost,
+        ),
+        # The row has to stay self-consistent: gap is derived from this, and a
+        # gap quoting the advertised price beside a total showing the negotiated
+        # one is how the log came to disagree with itself in the first place.
+        # The *logged* attempt keeps the whispered gap — an amendment record
+        # carries no gap — because that is the feature the ranking is fitted on.
+        unit_price_divines=cost / plan.units,
     )
 
 
@@ -462,21 +522,58 @@ def build_candidates(
 # How much of a band's profit to believe when ranking. Relative weights, not
 # probabilities — do not quote them as fill rates.
 #
-# **Known wrong and not yet fixed (2026-07-31).** These three round numbers came
-# from 14 whispers. The log now holds 156, and says ghosts fill at 2.3% against
-# plausible's 21% — a ratio of ~0.11 on fill rate, or ~0.28 on divines per
-# whisper sent, which is the quantity this actually weights. Either way it is
-# not 0.0: ghosts earned 71% of the one profitable session's take. Thin is still
-# n=1 and uncallable.
+# **Fitted from the outcome log, currently n=872 (2026-08-02).** Ghosts fill at
+# **1.95%** (n=666) against plausible's **13.4%** (n=194): a ratio of **0.146**.
+# GHOST carries **0.16**, and the gap between those two numbers is the point of
+# the next paragraph.
 #
-# Deliberately left alone until fitted properly rather than nudged to a guess —
-# see TODO.md, "Fit the ranking to the outcome log", which also has to decide
-# which of the two ratios `fill_weight` is meant to express.
+# **Do not re-tune this on a single fill. It was tried and it was wrong.** The
+# ratio was read three times inside one day as the log grew and one record was
+# corrected: **0.162 -> 0.175 -> 0.146**. The middle reading briefly moved the
+# constant to 0.17; 83 more whispers moved the measurement back below where it
+# started. All three rest on **twelve or thirteen ghost fills**, so the estimate
+# is worth about +/-0.02 and no more. 0.16 sits in the middle of the range and
+# is where it stays until the ghost fill count changes materially — chasing the
+# figure costs churn and buys nothing.
+#
+# **The value-per-whisper ratio is far less stable still, and must not be quoted
+# as a fact.** Same day, same log: **0.66 -> 1.25 -> 0.82**. It crossed parity
+# and came back within hours, on 83 whispers that produced **no new ghost fills
+# at all** — four plausible fills alone moved it. It is dominated by whichever
+# band last caught a fat tail: one 137.86x fill is 47% of all ghost realised
+# value. Report it with its range or not at all.
+#
+# *Why the fill-rate ratio and not the value-per-whisper ratio (0.66).* This
+# weight multiplies a candidate's **profit**, so `profit x weight` is already an
+# estimate of divines per whisper — the objective the ranking wants to maximise.
+# Feeding it the value ratio would apply the fat tail twice, since a ghost's
+# value per whisper is high *because* its profit is large. The consequence is
+# deliberate and worth stating: a 39-div ghost now scores 6.3 and outranks a
+# 3-div plausible, because 2.0% x 39 really does beat 12.4% x 3. Ghosts are no
+# longer pinned to the bottom by a 0.0 they were never worth.
+#
+# THIN stays 0.5 and stays a guess: n=10, under `outcomes.MIN_SAMPLES`, and its
+# raw 20% fill rate would imply a weight above 1.0, which is obviously an
+# artefact of two fills.
+#
+# Full tables in docs/FINDINGS.md, "Negative results" 1.
 FILL_PRIOR = {
     Band.PLAUSIBLE: 1.0,
     Band.THIN: 0.5,
-    Band.GHOST: 0.0,
+    Band.GHOST: 0.16,
 }
+
+# A listing this old has never once been traded: 0 fills in 102 whispers, and
+# the oldest listing that ever filled was 62.9 hours (2.62 days). Measured
+# 2026-08-01 over all 789 logged attempts; P(0 fills in 102) at the 4.56% base
+# rate is ~0.008, and it holds in both large bands separately, so it is age
+# rather than gap. Full table in docs/FINDINGS.md, "A listing older than ~3 days
+# has never filled".
+#
+# A **cliff, not a decay curve.** Below three days age barely predicts anything
+# (6.4% -> 3.1% -> 7.4%, non-monotonic), so do not turn this into a continuous
+# freshness discount — there is no evidence for the shape it would need.
+STALE_LISTING_S = 3 * 24 * 60 * 60
 
 
 def fill_weight(band: Band, risk_appetite: float) -> float:
@@ -492,23 +589,45 @@ def fill_weight(band: Band, risk_appetite: float) -> float:
     return prior + appetite * (1.0 - prior)
 
 
-def rank_candidates(
-    candidates: list[Candidate], *, risk_appetite: float = 0.0
-) -> list[Candidate]:
-    """Whisper order, by profit discounted for how likely the band is to fill.
+def is_stale(candidate: Candidate, now: datetime | None = None) -> bool:
+    """Has this listing sat unsold past the age at which nothing ever fills?
 
-    Ghosts sort to the bottom rather than being hidden. They are the visible
-    evidence for why the ranking works this way, and a user who wants to test a
-    12x listing should be able to find it — at appetite 0, just not be led to
-    it first.
+    Unknown age counts as fresh. `indexed` is absent on some responses, and a
+    missing timestamp is not evidence of abandonment.
+    """
+    age = candidate.listing.age_s(now)
+    return age is not None and age >= STALE_LISTING_S
+
+
+def rank_candidates(
+    candidates: list[Candidate],
+    *,
+    risk_appetite: float = 0.0,
+    now: datetime | None = None,
+) -> list[Candidate]:
+    """Whisper order, by profit discounted for how likely it is to fill.
+
+    Two discounts, in order. **Stale listings sort below everything fresh**,
+    whatever their band or profit — three days without a sale is the one signal
+    in the log that predicts a flat zero, so a stale plausible is worth less
+    than a fresh ghost. Within that, profit is weighted by `FILL_PRIOR`.
+
+    Nothing is hidden. A user who wants to test a 12x listing, or a listing that
+    has sat for a week, should be able to find it — just not be led to it first.
+    Hiding either would make the ranking unfalsifiable, which is how the 0.0
+    ghost prior survived four field tests.
 
     Sorted on explicit tiebreaks down to the account name so the order is stable
     between runs; anything derived from set or dict iteration would reshuffle,
-    since Python randomises string hashing per process.
+    since Python randomises string hashing per process. `now` is injected for
+    the same reason the clocks elsewhere are: a sort must not read the wall
+    clock per comparison.
     """
+    at = now or datetime.now(timezone.utc)
     return sorted(
         candidates,
         key=lambda c: (
+            is_stale(c, at),
             -c.profit_divines * fill_weight(c.band, risk_appetite),
             c.band.rank,
             -c.profit_divines,

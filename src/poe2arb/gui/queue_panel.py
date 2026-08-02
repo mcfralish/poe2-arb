@@ -6,11 +6,14 @@ Two lists, because they ask the user for two different things:
   arrival at the bottom, with the live offer marked. Both are takeable; the
   difference is only whether it's currently worth interrupting a map for.
 - **Waiting on a reply** — everything already whispered, **newest first**, each
-  self-marking as "no reply" when its timer runs out.
+  self-marking as Expired when its timer runs out, unless it has been pinned.
 
 The two orders are deliberately opposite. Ready is read top-down and must not
 reshuffle under the cursor, so new rows append at the bottom. Waiting is read
 when a reply arrives, and a reply is almost always to the whisper just sent.
+Pinned rows are the exception and sort above everything: a row is pinned
+*because* a seller answered, so it is the trade in progress rather than one of
+a dozen outstanding messages.
 
 **Money is shown in the currency the seller asked for**, not in divines. A
 listing whispered as "2412 exalted" displayed as "5.6 div" is unrecognisable as
@@ -32,6 +35,7 @@ import logging
 from datetime import datetime, timezone
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDoubleSpinBox,
@@ -47,9 +51,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..format import currency_label, fmt_amount, fmt_qty
+from ..format import currency_label, fmt_amount, fmt_profit, fmt_qty
 from ..listings import Band
-from ..outcomes import Outcome
+from ..outcomes import TIPS, Outcome, label_for
 from ..trade_queue import QueueState
 from .bankroll_bar import BankrollBar
 from .table_items import NumericItem, RowHoverTable, TextItem, flexible_columns
@@ -67,13 +71,25 @@ _SETTLE_TIP = (
     "Profit figure, because proceeds round down to a whole unit of it — a whole "
     "divine if you settle in divines, which is the expensive way round."
 )
+_AUTO_TIP = (
+    "Marks itself Expired when this runs out — which only means nobody said "
+    "what happened, not that the seller stayed silent. Pin the row if they've "
+    "answered and it will stop counting down."
+)
+# A pinned row is state, not risk, so it must not borrow the band colours.
+_PIN_COLOUR = "#f0b429"
 
+# Amount / Price per / Total, not Buy / Each / Cost. Renamed 2026-08-01 after
+# the old headers were misread by their own author: "Buy 5 · Each 1 div · Cost
+# 5 div" read back as "I bought 1 for 5 div", and a losing trade got explained
+# as a bug in the profit column. Both tables here and the Results tab use the
+# same three words.
 READY_COLUMNS = [
     ("", "A dot marks the live offer — the one the hotkey will copy."),
     ("Item", "What you'd be buying."),
-    ("Buy", "How many to ask for."),
-    ("Each", _EACH_TIP),
-    ("Cost", _COST_TIP),
+    ("Amount", "How many to ask for."),
+    ("Price per", _EACH_TIP),
+    ("Total", _COST_TIP),
     ("Profit", "Divines you'd clear, after rounding."),
     ("Settle", _SETTLE_TIP),
     ("Seller", "Character to whisper."),
@@ -83,18 +99,19 @@ READY_COLUMNS = [
 
 AWAITING_COLUMNS = [
     ("Item", "What you asked for."),
-    ("Buy", "How many you asked for."),
-    ("Each", _EACH_TIP),
-    ("Cost", _COST_TIP),
+    ("Amount", "How many you asked for."),
+    ("Price per", _EACH_TIP),
+    ("Total", _COST_TIP),
     ("Profit", "Divines you'd clear if they trade."),
     ("Settle", _SETTLE_TIP),
     ("Seller", "Who you whispered."),
     ("Sent", "How long ago you copied the whisper."),
-    ("Auto", "Marks itself as no reply when this runs out."),
+    ("Auto", _AUTO_TIP),
     (
         "",
-        "Copy again puts the same whisper back on the clipboard. Adjust "
-        "corrects the quantity to what you actually bought.",
+        "Pin holds a row that's been answered off the clock. Copy Again puts "
+        "the same whisper back on the clipboard, and Adjust corrects the "
+        "quantity and the price to what you actually paid.",
     ),
 ]
 
@@ -114,7 +131,12 @@ class QueuePanel(QWidget):
     outcome_reported = Signal(str, object)    # (trade id, Outcome)
     dismiss_requested = Signal(str)           # trade id
     recopy_requested = Signal(str)            # trade id, already whispered
-    revise_requested = Signal(str, float)     # (trade id, units actually traded)
+    # (trade id, units actually traded, total actually paid in the seller's
+    # currency). Both travel together because one dialog sets both, and a
+    # correction that moved the quantity without the price would put the same
+    # lie back in the log that this exists to stop.
+    revise_requested = Signal(str, float, float)
+    pin_requested = Signal(str, bool)         # (trade id, hold it off the clock)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -158,7 +180,10 @@ class QueuePanel(QWidget):
         # Row identity as last drawn, so a redraw can tell "same trades, new
         # countdown" from "the list actually changed".
         self._ready_ids: list[str] = []
-        self._awaiting_ids: list[str] = []
+        # Identity *and* pin state: pinning changes the row's highlight, its
+        # button and its countdown cell, so it has to force a rebuild the same
+        # way an arriving trade does.
+        self._awaiting_ids: list[tuple[str, bool]] = []
         self.refresh(None)
 
     # --- wiring ------------------------------------------------------------
@@ -219,7 +244,8 @@ class QueuePanel(QWidget):
             bits.append(f"{waiting} waiting on a reply")
         self.headline.setText("  ·  ".join(bits) if bits else "Nothing to do")
         self.hint.setText(
-            "Anything left unanswered marks itself as no reply."
+            "Anything left unanswered marks itself as Expired. Pin a row once "
+            "the seller replies and it stops counting down."
             if waiting
             else "Find trades keeps looking while it's switched on."
         )
@@ -270,7 +296,7 @@ class QueuePanel(QWidget):
     # --- awaiting section --------------------------------------------------
 
     def _sync_awaiting(self, trades, now) -> None:
-        ids = [t.id for t in trades]
+        ids = [(t.id, t.pinned) for t in trades]
         if ids != self._awaiting_ids:
             self._rebuild_awaiting(trades)
             self._awaiting_ids = ids
@@ -281,7 +307,9 @@ class QueuePanel(QWidget):
                 elapsed.setText(_elapsed(since))
             timer = self.awaiting.item(row, AWAITING_TIMER_COLUMN)
             if timer is not None:
-                timer.setText(_countdown(t.seconds_left(now)))
+                # `seconds_left` already returns None for a pinned row, so this
+                # shows the em-dash without a second test for it here.
+                timer.setText("held" if t.pinned else _countdown(t.seconds_left(now)))
 
     def _rebuild_awaiting(self, trades) -> None:
         _clear_widgets(self.awaiting, AWAITING_ACTION_COLUMN)
@@ -295,41 +323,65 @@ class QueuePanel(QWidget):
             self.awaiting.setItem(row, 6, TextItem(_seller(c)))
             self.awaiting.setItem(row, AWAITING_ELAPSED_COLUMN, TextItem(""))
             self.awaiting.setItem(row, AWAITING_TIMER_COLUMN, TextItem(""))
+            if t.pinned:
+                self._mark_pinned(row)
             actions = _actions(
                 [
-                    # First, because it is the one with a deadline: a seller who
-                    # answers wants the offer repeated, and retyping it by hand
-                    # is how a trade gets lost.
-                    ("Copy again", "Put this whisper back on the clipboard, unchanged.",
+                    # First, because it is what a reply calls for and it is the
+                    # one action that has to happen *before* the timer would
+                    # otherwise fire.
+                    ("Unpin" if t.pinned else "Pin",
+                     "Let this row start counting down again."
+                     if t.pinned
+                     else "They've answered — hold this row off the clock so the "
+                          "timer can't write it down as unanswered mid-trade.",
+                     lambda tid=t.id, on=not t.pinned: self.pin_requested.emit(tid, on)),
+                    # A seller who answers wants the offer repeated, and
+                    # retyping it by hand is how a trade gets lost.
+                    ("Copy Again", "Put this whisper back on the clipboard, unchanged.",
                      lambda tid=t.id: self.recopy_requested.emit(tid)),
                     # Before the verdict buttons, because it has to be used
                     # first: marking a trade as Traded resolves it, and the
                     # quantity has to be right before that is written down.
                     ("Adjust…",
-                     "They had fewer than they listed, or you could only afford part "
-                     "of it — correct the quantity before recording the trade.",
-                     lambda tid=t.id: self._ask_quantity(tid)),
-                    ("Traded", "The trade went through.",
-                     lambda tid=t.id: self.outcome_reported.emit(tid, Outcome.FILLED)),
-                    ("No reply", "They never answered.",
-                     lambda tid=t.id: self.outcome_reported.emit(tid, Outcome.NO_REPLY)),
-                    ("Already sold", "They replied to say it's gone.",
-                     lambda tid=t.id: self.outcome_reported.emit(tid, Outcome.SOLD)),
+                     "They had fewer than they listed, you could only afford part "
+                     "of it, or they counteroffered — correct the quantity and the "
+                     "price before recording the trade.",
+                     lambda tid=t.id: self._ask_adjustment(tid)),
+                    # AFK and Offline in place of the old No Reply, which said
+                    # two different things depending on who pressed it. The
+                    # timeout writes Expired on its own; these are the two
+                    # reasons a person ever marks a whisper dead by hand.
+                    *(
+                        (label_for(o), TIPS[o],
+                         lambda tid=t.id, o=o: self.outcome_reported.emit(tid, o))
+                        for o in (Outcome.FILLED, Outcome.AFK,
+                                  Outcome.OFFLINE, Outcome.SOLD)
+                    ),
                 ]
             )
             self.awaiting.setCellWidget(row, AWAITING_ACTION_COLUMN, actions)
             self.awaiting.watch(actions, row)
 
+    def _mark_pinned(self, row: int) -> None:
+        """Tint a held row. Its own colour — this is state, not risk."""
+        colour = QColor(_PIN_COLOUR)
+        for column in range(self.awaiting.columnCount()):
+            item = self.awaiting.item(row, column)
+            if item is not None:
+                item.setForeground(colour)
+
     # --- corrections -------------------------------------------------------
 
-    def _ask_quantity(self, trade_id: str) -> None:
+    def _ask_adjustment(self, trade_id: str) -> None:
         """Open the correction dialog for one whispered trade."""
         trade = self._queue.get(trade_id) if self._queue is not None else None
         if trade is None:
             return
-        units = QuantityDialog.ask(self, trade.candidate)
-        if units is not None:
-            self.revise_requested.emit(trade_id, units)
+        chosen = AdjustDialog.ask(self, trade.candidate)
+        if chosen is not None:
+            units, pay_units = chosen
+            self.revise_requested.emit(trade_id, units, pay_units)
 
     # --- shared cells ------------------------------------------------------
 
@@ -364,8 +416,10 @@ class QueuePanel(QWidget):
             f"{_COST_TIP}\n\nThat's {c.plan.cost_divines:.2f} divines' worth."
         )
         table.setItem(row, first + 2, cost)
+        # Signed, because an amended trade is allowed to have lost money.
         table.setItem(
-            row, first + 3, NumericItem(f"+{c.profit_divines:.2f}", c.profit_divines)
+            row, first + 3,
+            NumericItem(fmt_profit(c.profit_divines), c.profit_divines),
         )
         settle = TextItem(currency_label(c.settle_currency))
         settle.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -379,7 +433,11 @@ class QueuePanel(QWidget):
         return item.data(TRADE_ID) if item is not None else None
 
     def click_action(self, table: QTableWidget, row: int, label: str) -> bool:
-        """Press an in-row button by its label. Returns False if it isn't there."""
+        """Press an in-row button by name. Returns False if it isn't there.
+
+        Matches the `action` property rather than the button text, because the
+        text is a glyph — see `GLYPHS`.
+        """
         column = (
             READY_ACTION_COLUMN if table is self.ready else AWAITING_ACTION_COLUMN
         )
@@ -387,38 +445,53 @@ class QueuePanel(QWidget):
         if widget is None:
             return False
         for btn in widget.findChildren(QPushButton):
-            if btn.text() == label:
+            if btn.property("action") == label:
                 btn.click()
                 return True
         return False
 
 
-class QuantityDialog(QDialog):
-    """Correct a whispered trade to the quantity that was actually available.
+class AdjustDialog(QDialog):
+    """Correct a whispered trade to the quantity and price it happened at.
 
-    Two things happened in the second field test that the app had no way to
-    record: a whisper for 18 Faded Crisis Fragments where only 3 were
+    Three things happened in the field that the app had no way to record. Two
+    are quantities: a whisper for 18 Faded Crisis Fragments where only 3 were
     affordable at the time, and a seller advertising 2 Omens of Whittling who
-    turned out to hold 1. Both were logged at the quantity asked for, so the
+    turned out to hold 1. The third is a price — **1 fill in 36 was
+    counteroffered** (2026-08-01, joined to `Client.txt`), and that one logged
+    +38.00 divines on a trade that lost money, because a changed price had
+    nowhere to go. All three were logged at the figures whispered, so the
     outcome log carried a cost and a profit that never happened.
 
     The quantity steps in whole lots rather than single items, because the price
     only divides that finely — see `listings.smallest_lot` — and it cannot go
-    above the original ask, which was capped by the seller's own stock.
+    above the original ask, which was capped by the seller's own stock. The
+    total has no such ceiling: a counteroffer is normally *more*, not less.
+
+    **A dialog rather than editing the row in place.** The queue tables rebuild
+    on a one-second timer for the countdowns, which would destroy an open editor
+    mid-keystroke, and this is used with a map on screen. The Trades tab reads
+    from the log, does not tick, and does edit in place.
     """
 
     def __init__(self, parent, candidate):
         super().__init__(parent)
-        from ..listings import replan_units
+        from ..listings import replan_units, repriced
 
         self._candidate = candidate
         self._replan = replan_units
-        self.setWindowTitle("Adjust the quantity")
+        self._reprice = repriced
+        # Whether the user has set a price of their own. Until they do, the
+        # total follows the quantity at the listed rate — which is what "they
+        # only had three" means and is nearly always the whole correction.
+        self._total_touched = False
+        self._syncing = False
+        self.setWindowTitle("Adjust the trade")
 
         layout = QVBoxLayout(self)
         blurb = QLabel(
-            f"How many {candidate.item_name} did you actually get from "
-            f"{_seller(candidate)}?"
+            f"What did you actually get from {_seller(candidate)}, and what did "
+            f"you pay for it?"
         )
         blurb.setWordWrap(True)
         layout.addWidget(blurb)
@@ -435,8 +508,27 @@ class QuantityDialog(QDialog):
             "far — part of a lot would cost part of an orb, which cannot be "
             "traded."
         )
-        self.units.valueChanged.connect(lambda _: self._preview())
+        self.units.valueChanged.connect(lambda _: self._quantity_changed())
         form.addRow("Quantity", self.units)
+
+        pay = candidate.listing.pay_currency
+        total = candidate.pay_total
+        self.total = QDoubleSpinBox()
+        # Whole units unless the listing was somehow priced in fractions:
+        # partial currency cannot be traded, so a decimal place here would be
+        # offering something that does not exist.
+        whole = float(total).is_integer()
+        self.total.setDecimals(0 if whole else 2)
+        self.total.setSingleStep(1.0)
+        self.total.setRange(1.0 if whole else 0.01, 1e9)
+        self.total.setValue(total)
+        self.total.setToolTip(
+            "What you handed over, in the seller's own currency. A seller who "
+            "counteroffers changes this rather than the quantity — leave it "
+            "alone and it follows the quantity at the listed price."
+        )
+        self.total.valueChanged.connect(lambda _: self._total_changed())
+        form.addRow(f"Total ({currency_label(pay)})", self.total)
         layout.addLayout(form)
 
         self.summary = QLabel()
@@ -452,26 +544,57 @@ class QuantityDialog(QDialog):
         layout.addWidget(self.buttons)
         self._preview()
 
+    # --- keeping the two fields honest about each other --------------------
+
+    def _quantity_changed(self) -> None:
+        if not self._total_touched:
+            self._syncing = True
+            self.total.setValue(self._listed_total())
+            self._syncing = False
+        self._preview()
+
+    def _total_changed(self) -> None:
+        if not self._syncing:
+            self._total_touched = True
+        self._preview()
+
+    def _listed_total(self) -> float:
+        """What this quantity costs at the price the seller advertised."""
+        return self._replan(self._candidate, self.units.value()).pay_total
+
+    def revised(self):
+        """The candidate as corrected, for the preview and for the caller."""
+        c = self._replan(self._candidate, self.units.value())
+        return self._reprice(c, self.total.value())
+
     def _preview(self) -> None:
         """Say what the correction does to the cost and the profit."""
-        revised = self._replan(self._candidate, self.units.value())
+        revised = self.revised()
         pay = revised.listing.pay_currency
-        self.summary.setText(
+        text = (
             f"{fmt_qty(revised.plan.units)} for "
             f"{fmt_amount(revised.pay_total, pay)}  ·  "
-            f"profit +{revised.profit_divines:.2f} div"
+            f"profit {fmt_profit(revised.profit_divines)} div"
         )
+        # Said out loud, because the whole reason the price is editable is a
+        # trade that lost money while the log recorded +38.00.
+        if revised.profit_divines < 0:
+            text += "  —  this trade lost money"
+        self.summary.setText(text)
 
     def chosen_units(self) -> float:
         return self.units.value()
 
+    def chosen_total(self) -> float:
+        return self.total.value()
+
     @staticmethod
-    def ask(parent, candidate) -> float | None:
-        """Run the dialog. Returns the new quantity, or None if cancelled."""
-        dlg = QuantityDialog(parent, candidate)
+    def ask(parent, candidate) -> tuple[float, float] | None:
+        """Run the dialog. Returns (units, total paid), or None if cancelled."""
+        dlg = AdjustDialog(parent, candidate)
         if not dlg.exec():
             return None
-        return dlg.chosen_units()
+        return dlg.chosen_units(), dlg.chosen_total()
 
 
 def _seller(candidate) -> str:
@@ -503,15 +626,54 @@ def _clear_widgets(table: QTableWidget, column: int) -> None:
         widget.deleteLater()
 
 
+# One glyph per action, with the wording kept as the tooltip. Words were what
+# shipped, and the row of them is why the action column could not shrink and why
+# *Already sold* was clipped at narrow widths in the fourth field test — the
+# awaiting row now carries seven actions, which as words is wider than the rest
+# of the table put together. `click_action` still finds a button by its full
+# name, so tests and screenshots read in words rather than in glyphs.
+#
+# **Dingbats, not emoji.** 👍 / 👎 / 📌 were what was asked for and they are the
+# wrong bet for a shipped exe: they need a colour emoji font, and where one is
+# missing every button reads as an identical empty box — verified by screenshot,
+# which is also how the set below was checked to draw in a plain text font.
+# Proper PoE2-styled icon assets are still the right answer and are still open.
+GLYPHS = {
+    "Accept": "✔",
+    "Decline": "✖",
+    # A raised flag for held, a lowered one for released.
+    "Pin": "⚑",
+    "Unpin": "⚐",
+    "Copy Again": "❐",
+    "Adjust…": "✎",
+    "Traded": "✔",
+    "AFK": "☾",
+    "Offline": "⊘",
+    "Already Sold": "✕",
+}
+
+# Square enough for a glyph and no bigger. The row is read mid-map, so the
+# targets stay comfortably clickable.
+_GLYPH_SIZE = 30
+
+
 def _actions(specs) -> QWidget:
     """A row of small buttons that act on their own row in one click."""
     holder = QWidget()
     layout = QHBoxLayout(holder)
     layout.setContentsMargins(2, 0, 2, 0)
-    layout.setSpacing(4)
+    layout.setSpacing(2)
     for label, tip, slot in specs:
-        btn = QPushButton(label)
-        btn.setToolTip(tip)
+        glyph = GLYPHS.get(label)
+        btn = QPushButton(glyph or label)
+        # The name goes first in the tooltip: with no visible label it is the
+        # only thing that says which action this is.
+        btn.setToolTip(f"{label} — {tip}" if glyph else tip)
+        # Read back by `click_action`, and by anything else that wants to find
+        # an action by name now that the text on it is a picture.
+        btn.setProperty("action", label)
+        if glyph:
+            btn.setFixedSize(_GLYPH_SIZE, _GLYPH_SIZE)
         btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # don't steal focus mid-map
         btn.clicked.connect(lambda _=False, s=slot: s())
         layout.addWidget(btn)

@@ -120,3 +120,39 @@ def test_a_restored_layout_is_not_resized_to_contents(qapp):
     other._sized = True
     other.size_to_contents()
     assert fresh.horizontalHeader().sectionSize(1) == 123
+
+
+# --- per-column minimum widths ----------------------------------------------
+# From the fourth field test: at narrow window widths the headings truncated to
+# `Profit`->"rofit" and `Expires`->"xpire", which is a header lying about which
+# column you are reading.
+
+
+def test_a_column_never_shrinks_below_its_own_heading(qapp):
+    t, layout = table(qapp, width=800)
+    t.resize(200, 200)
+    qapp.processEvents()
+    header = t.horizontalHeader()
+    for i in range(header.count()):
+        assert header.sectionSize(i) >= layout.min_width(i)
+
+
+def test_a_name_column_gets_more_room_than_its_heading(qapp):
+    """"Item" is four characters; its contents run to a Reliquary Key."""
+    _, layout = table(qapp)
+    assert layout.min_width(0) >= layout.ROOMY_MIN   # Item
+    assert layout.min_width(3) >= layout.ROOMY_MIN   # Seller
+    assert layout.min_width(1) < layout.ROOMY_MIN    # Buy
+
+
+def test_sizing_to_contents_still_clears_the_heading(qapp):
+    """resizeColumnsToContents measures the cells and ignores the title."""
+    t, layout = table(qapp, rows=(("Item", "x"), ("Expires", "5m")))
+    header = t.horizontalHeader()
+    assert header.sectionSize(1) >= layout.min_width(1)
+
+
+def test_an_unheaded_column_keeps_the_bare_floor(qapp):
+    """A marker or action column has no title to fit."""
+    _, layout = table(qapp, rows=(("", "●"), ("Item", LONG)))
+    assert layout.min_width(0) == layout.MIN_WIDTH

@@ -167,9 +167,15 @@ def test_exalted_priced_listings_are_costed_correctly(snapshot):
 
 
 def test_sweep_ranks_plausible_ahead_of_ghosts(snapshot):
+    """That the sweep applies `rank_candidates` at all, not what it decides.
+
+    The ghost pays 8 rather than 1, because since `FILL_PRIOR[GHOST]` was fitted
+    to 0.16 a ghost with enough profit *should* outrank a plausible — the
+    crossover itself is pinned in tests/test_listings.py.
+    """
     ggg = FakeGgg({
         "omen-of-light": [
-            listing("omen-of-light", pay=1.0, stock=2.0, account="ghost#1"),
+            listing("omen-of-light", pay=8.0, stock=1.0, account="ghost#1"),
             listing("omen-of-light", pay=11.0, stock=1.0, account="real#1"),
         ]
     })
