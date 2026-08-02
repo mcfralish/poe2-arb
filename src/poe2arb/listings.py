@@ -7,13 +7,13 @@ sell into the in-game Currency Exchange. Two field tests (docs/FINDINGS.md,
 1. **Deep discounts fill rarely, not never.** Fitted 2026-08-01 from 789 logged
    whispers, after two under-sampled readings said first that they never fill
    (n=14) and then that they are worth about a quarter of a plausible whisper
-   (n=156). Measured: plausible 12.4% (n=178), ghost **2.16%** (n=601), and the
-   fills at 3.92x and 10.94x that overturned the first reading are confirmed to
-   have gone through **at the listed price**, not as counteroffers. Ghosts are
-   worth **1.25** plausible whispers in divines — more, not less — having read
-   0.28 and then 0.66, so they are demoted rather than buried. See `FILL_PRIOR`,
-   now 0.17 for ghosts rather than 0.0, and note it carries the *fill-rate*
-   ratio rather than that value ratio.
+   (n=156). Measured at n=872: plausible **13.4%** (n=194), ghost **1.95%**
+   (n=666), and the fills at 3.92x and 10.94x that overturned the first reading
+   are confirmed to have gone through **at the listed price**, not as
+   counteroffers. So ghosts are demoted rather than buried — see `FILL_PRIOR`,
+   0.16 rather than 0.0, which carries the *fill-rate* ratio. The
+   value-per-whisper ratio is a different number, it swung 0.66 -> 1.25 -> 0.82
+   in one day, and it does not belong in a ranking weight.
 
 2. **A listing that has sat three days does not sell.** 0 fills in 102 whispers;
    the oldest that ever filled was 62.9 hours old. It holds in every band, so it
@@ -522,20 +522,26 @@ def build_candidates(
 # How much of a band's profit to believe when ranking. Relative weights, not
 # probabilities — do not quote them as fill rates.
 #
-# **Fitted 2026-08-01 from 789 logged whispers**, replacing three round numbers
-# that came from 14. Ghosts fill at 2.16% (n=601) against plausible's 12.4%
-# (n=178): a ratio of **0.17**, which is what GHOST now carries.
+# **Fitted from the outcome log, currently n=872 (2026-08-02).** Ghosts fill at
+# **1.95%** (n=666) against plausible's **13.4%** (n=194): a ratio of **0.146**.
+# GHOST carries **0.16**, and the gap between those two numbers is the point of
+# the next paragraph.
 #
-# *Revised the same day, by one trade.* The Rigwald's Ferocity record — a
-# 137.86x ghost, the biggest the project has found — was sitting as `no_reply`
-# because the pre-0.8.0 timer wrote a verdict over it; the maintainer confirmed
-# it filled at the listed price. Ghost fills go 12 -> 13 and the prior 0.162 ->
-# 0.175. **The prior barely moves and the value ratio doubles**: ghost value per
-# whisper goes 0.251 -> 0.477 divines against plausible's 0.382, so a ghost
-# whisper is now worth *more* per message than a plausible one (ratio 1.25, was
-# 0.66). That does not change what this table holds — see below — and it rests
-# on a single observation worth 47% of all ghost realised value, so it is a
-# reason to keep measuring rather than to re-weight.
+# **Do not re-tune this on a single fill. It was tried and it was wrong.** The
+# ratio was read three times inside one day as the log grew and one record was
+# corrected: **0.162 -> 0.175 -> 0.146**. The middle reading briefly moved the
+# constant to 0.17; 83 more whispers moved the measurement back below where it
+# started. All three rest on **twelve or thirteen ghost fills**, so the estimate
+# is worth about +/-0.02 and no more. 0.16 sits in the middle of the range and
+# is where it stays until the ghost fill count changes materially — chasing the
+# figure costs churn and buys nothing.
+#
+# **The value-per-whisper ratio is far less stable still, and must not be quoted
+# as a fact.** Same day, same log: **0.66 -> 1.25 -> 0.82**. It crossed parity
+# and came back within hours, on 83 whispers that produced **no new ghost fills
+# at all** — four plausible fills alone moved it. It is dominated by whichever
+# band last caught a fat tail: one 137.86x fill is 47% of all ghost realised
+# value. Report it with its range or not at all.
 #
 # *Why the fill-rate ratio and not the value-per-whisper ratio (0.66).* This
 # weight multiplies a candidate's **profit**, so `profit x weight` is already an
@@ -554,7 +560,7 @@ def build_candidates(
 FILL_PRIOR = {
     Band.PLAUSIBLE: 1.0,
     Band.THIN: 0.5,
-    Band.GHOST: 0.17,
+    Band.GHOST: 0.16,
 }
 
 # A listing this old has never once been traded: 0 fills in 102 whispers, and

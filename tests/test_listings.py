@@ -572,14 +572,15 @@ def test_appetite_outside_the_range_is_clamped():
 def test_the_ghost_prior_is_the_measured_ratio_not_zero():
     """Pins the fit, because zero survived four field tests by being untested.
 
-    2.16% of 601 ghost whispers filled against 12.4% of 178 plausible ones — a
-    ratio of 0.175. See docs/FINDINGS.md, "Negative results" 1, and the note on
-    `FILL_PRIOR` for why this is the fill-rate ratio and **not** the 1.25
-    measured on divines per whisper — a ghost whisper is now worth more per
-    message than a plausible one, and feeding that in would count the fat tail
-    twice.
+    1.95% of 666 ghost whispers filled against 13.4% of 194 plausible ones — a
+    ratio of 0.146, and 0.16 is the middle of three readings taken in one day
+    (0.162 / 0.175 / 0.146) that all rest on thirteen ghost fills. Pinned at a
+    round 0.16 deliberately: the measurement is worth about +/-0.02 and chasing
+    it costs churn. See docs/FINDINGS.md, "Negative results" 1, and the note on
+    `FILL_PRIOR` for why this is the fill-rate ratio rather than the
+    value-per-whisper one.
     """
-    assert FILL_PRIOR[Band.GHOST] == 0.17
+    assert FILL_PRIOR[Band.GHOST] == 0.16
 
 
 def test_a_proven_band_is_believed_at_any_appetite():

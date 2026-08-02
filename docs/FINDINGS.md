@@ -328,11 +328,14 @@ the point:
 sent is logged. All 789 attempts in `outcomes.jsonl` carry a resolved outcome, and the log
 now reads:
 
-| band | whispers | filled | fill rate | sold | exp. profit (div) | **div per whisper** |
-|---|---|---|---|---|---|---|
-| plausible | 178 | 22 | **12.4%** | 5 | 68.0 | **0.382** |
-| thin | 10 | 2 | 20% (n=10) | 1 | 2.0 | 0.200 |
-| ghost | 601 | 13 | **2.16%** | 2 | 286.7 | **0.477** |
+| band | whispers | filled | fill rate | exp. profit (div) | **div per whisper** |
+|---|---|---|---|---|---|
+| plausible | 194 | 26 | **13.4%** | 102.0 | **0.526** |
+| thin | 12 | 2 | 17% (n=12) | 2.0 | 0.167 |
+| ghost | 666 | 13 | **1.95%** | 286.7 | **0.430** |
+
+**Measured ratios: 0.146 on fill rate, 0.82 on value per whisper.** `FILL_PRIOR[GHOST]` is
+**0.16** — see the stability warning below before changing it.
 
 > **Revised later the same day, by one trade, and the direction is the same one as every
 > other revision of this finding.** The ghost row above read 12 fills / 2.0% / 150.7 div /
@@ -344,22 +347,37 @@ now reads:
 > `actual_profit_divines: 136.0`. **This is the fourth time this finding has been revised
 > and the fourth time the correction favoured ghosts.**
 
-Fill rates fell as the sample grew (plausible 21% → 12.4%) and the **value ratio rose past
-parity: a ghost whisper is now worth 1.25 plausible whispers in divines** (0.477 against
-0.382), having read 0.28 at n=156 and 0.66 an hour earlier. `FILL_PRIOR[GHOST] = 0.0` is
-wrong by a wide, well-powered margin (n=601). Measured ratios: **0.175 on fill rate, 1.25
-on value per whisper**.
+**⚠ Both ratios are unstable, and the day this was fitted proves it.** Read three times
+inside 24 hours as the log grew and one record was corrected:
 
-**But the ranking still uses the fill-rate ratio, and it barely moved: 0.162 → 0.175.**
-`FILL_PRIOR[GHOST]` is 0.17. Do not raise it to the value ratio — the weight multiplies
-profit, so the fat tail would be counted twice; the reasoning is under *Cross-venue ranking*
-and is unchanged by this revision.
+| reading | n | fill-rate ratio | value ratio |
+|---|---|---|---|
+| before the Rigwald's correction | 789 | 0.162 | 0.66 |
+| after it | 789 | 0.175 | **1.25** |
+| +83 more whispers | 872 | **0.146** | **0.82** |
 
-**Read the profit column as an upper bound, and most loosely on ghosts — the tail is now
-one trade.** It is `expected_profit_divines`, the app's own estimate, which carries ±6% on
-liquid pairs and is least trustworthy exactly where the gap is largest. **136 of the ghost
-column's 286.7 divines — 47% — are the single Rigwald's fill**, and 254 of them come from
-four fills at 8.75×, 14.09×, 42.91× and 137.86×. Three of the four are independently
+The **fill-rate** ratio moved ±0.015 and is worth about **±0.02**: all three readings rest
+on twelve or thirteen ghost fills. `FILL_PRIOR[GHOST]` is pinned at a round **0.16**, the
+middle of the range. It was briefly moved to 0.17 on the middle reading; 83 more whispers
+put the measurement back below where it started, so **that was over-fitting and the lesson
+is not to chase it.**
+
+The **value** ratio is far worse: it crossed parity and came back within hours, on 83
+whispers containing **no new ghost fills at all** — four *plausible* fills alone moved it
+from 1.25 to 0.82. One 137.86× fill is 47% of all ghost realised value. **Quote it with its
+range or not at all.** Do not feed it to `FILL_PRIOR` — the weight multiplies profit, so the
+fat tail would be counted twice; reasoning under *Cross-venue ranking*.
+
+What survives all three readings, and is the actual finding: **`FILL_PRIOR[GHOST] = 0.0` is
+wrong by a wide, well-powered margin (n=666), and ghosts are worth somewhere between half
+and all of a plausible whisper rather than nothing.**
+
+**Read the profit column as an upper bound, and most loosely on ghosts — the tail is one
+trade.** It is `expected_profit_divines`, the app's own estimate, which carries ±6% on
+liquid pairs and **+53% on a thin one** (see the pricing section — this is not a small
+caveat on a ghost, whose gap is largest exactly where the price is least trustworthy).
+**136 of the ghost column's 286.7 divines — 47% — are the single Rigwald's fill**, and 254
+of them come from four fills at 8.75×, 14.09×, 42.91× and 137.86×. Three of the four are independently
 corroborated and one is a known loss — see *Ghost fills are real fills* below. A conclusion
 resting 47% on one observation is a reason to keep measuring, not a reason to re-weight.
 
@@ -504,52 +522,40 @@ So the fat tail is a **real property of the Bulk Item Exchange**, not an artefac
 reference price. The counteroffer risk is real but rare (1 in 36) and is a reason to make a
 row's **price** amendable, not a reason to distrust the band.
 
-### The three-way verdict split has never once been used by hand — measured 2026-08-01, n=227
+### The three-way verdict split is used, and the maintainer still wants it gone — measured 2026-08-02, n=310 across four 0.8.0 sessions
 
-0.8.0 replaced the single *No Reply* button with **AFK** and **Offline**, on the reasoning
-that those were the two things the maintainer ever actually meant, and left the timer to
-write **Expired** on its own. TODO flagged the risk in advance: *"if the three buttons feel
-like more work than the one they replaced, that is worth knowing before the log fills up
-with a split nobody uses."*
+> **This section's first version was wrong and said "never once used by hand", from a
+> single session. Three more sessions had already been logged when it was written.** The
+> corrected reading is more interesting than the error, and the error is the same one
+> CLAUDE.md warns about twice: the log had moved on since it was last read.
 
-Session `11fc03d0a4f3` (01 Aug 20:49–21:29Z) is the only session that has ever run 0.8.0 —
-it is the only one writing `expired` rather than `no_reply`, which is how to identify it.
-Its 227 whispers resolved as:
+0.8.0 replaced the single *No Reply* button with **AFK** and **Offline**, leaving the timer
+to write **Expired**. Across the four sessions that have run 0.8.0:
 
-| verdict | n | written by |
-|---|---|---|
-| `expired` | 209 | the timer, on its own |
-| `filled` | 14 | the user |
-| `sold` | 4 | the user |
-| `afk` | **0** | — |
-| `offline` | **0** | — |
-| `declined` | **0** | — |
+| session | whispers | AFK | Offline | Refused | manual share |
+|---|---|---|---|---|---|
+| `11fc03d0a4f3` (01 Aug 20:49Z) | 227 | 0 | 0 | 0 | **0%** |
+| `f0351bcc86af` (02 Aug 00:02Z) | 1 | 0 | 0 | 0 | 0% |
+| `3c0e46bcfb21` (02 Aug 00:36Z) | 31 | 0 | 0 | 0 | **0%** |
+| `d9b8d1359894` (02 Aug 03:18Z) | 51 | 4 | 7 | 0 | **22%** |
 
-**Across the whole log — 789 whispers — AFK, Offline and Refused have been pressed zero
-times between them.** Every unanswered whisper in the 0.8.0 session went to the timer.
+So it is not that the buttons are unreachable — in the last session **22% of whispers got a
+hand-written verdict**. The maintainer used them properly and *then* asked for them to go:
 
-What this does *not* say: that the split was a mistake. `expired` is honest where
-`no_reply` was not, and that half of the change is doing its job — a verdict is no longer
-claimed that nobody observed. What it says is that **the manual half is so far unused**,
-and therefore that the plan to split `NO_REPLY` by reading `Client.txt` (below) is now the
-*only* live route to the AFK/offline distinction rather than a supplement to a button.
-Before adding a fourth button anywhere, check this table again.
+> *"Split responses do seem unnecessary. Too many options to press during fast paced
+> trading. Opportunities come in so fast during live scanning that it is cumbersome to
+> click the AFK or Offline button instead of just moving on to the next opportunity."*
 
-**Asked and settled, 2026-08-02.** The maintainer's answer: *"Split responses do seem
-unnecessary. Too many options to press during fast paced trading. Opportunities come in so
-fast during live scanning that it is cumbersome to click AFK or Offline instead of just
-moving on to the next opportunity."*
-
-So the zero is not indifference — it is **the queue arriving faster than a three-way
-judgement can be made**. Any design that asks the user to classify a non-reply mid-map will
-read as zero, whatever the labels are.
+**That is stronger evidence than the zero would have been.** A feature nobody touches might
+just be undiscovered; a feature used across 51 whispers and then rejected has been tried.
+The cost is interaction, not discoverability, and no relabelling fixes that.
 
 **Decided, and it replaces the three buttons:** one **"Seller not available"** button whose
 only job is to *remove the row from the queue*, plus the `Client.txt` reader to say
-afterwards whether it was AFK, offline or genuinely silent. That is the same data at a
-fraction of the interaction cost, and it puts the classification where the evidence already
-is. `Outcome.AFK` and `Outcome.OFFLINE` stay in the enum forever — `outcomes.jsonl` holds
-records under both — but stop being things a human is asked to choose between.
+afterwards whether it was AFK, offline or genuinely silent. Same data, one click instead of
+a three-way judgement, and the classification moves to where the evidence already is.
+`Outcome.AFK` and `Outcome.OFFLINE` stay in the enum forever — `outcomes.jsonl` now holds
+11 real records under them — but stop being things a human is asked to choose between.
 
 **And the maintainer asked the right question back: what are these metrics *for*?** The
 honest answer, so it can be judged rather than assumed: 22% of `NO_REPLY` is GGG's AFK
@@ -557,8 +563,8 @@ auto-reply, so a quarter of the denominator under **every fill rate in the proje
 seller who was never reachable. If those come out, the fill rate among reachable sellers is
 materially higher than anything reported here. The second use is auditing GGG's own `afk`
 flag, which called 11 of 40 present sellers AFK — 28% wrong — and which the Results tab's
-*By seller state* split still rests on. Both are worth having; **neither is worth a click
-per whisper**, which is what this measurement establishes.
+*By seller state* split still rests on. Both are worth having; **neither is worth a
+three-way judgement per whisper**, which is what this measurement establishes.
 
 ### A listing older than ~3 days has never filled — measured 2026-08-01, n=789
 

@@ -24,7 +24,7 @@ it has been used in game.
 > `field-test-4`: [run 30727645833](https://github.com/mcfralish/poe2-arb/actions/runs/30727645833),
 > artifact `poe2-arb-field-test-4-b8d43a8b…`, **14-day retention — expires 2026-08-16.**
 > It carries everything in 0.8.0 — the ranking refit, the editable rows,
-> `FILL_PRIOR[GHOST] = 0.17`, and the `stock` / `ce_age_s` instrumentation the next field
+> `FILL_PRIOR[GHOST]`, and the `stock` / `ce_age_s` instrumentation the next field
 > test needs. **Nothing in it has been used in game.** If the artifact has expired, re-run
 > the workflow rather than trusting this link.
 
@@ -47,9 +47,14 @@ three-way verdict split is unused. Written up in [docs/FINDINGS.md](docs/FINDING
 anything that went wrong which the log cannot see — worth one question after the next run
 rather than reconstructing this one.
 
-**As of 2026-08-01 the log holds 789 attempts and nothing unread.** Checked explicitly,
-because this project has twice written "no fill-rate data was recorded" over the top of
-data that overturned its biggest finding. Re-check before believing this paragraph.
+**As of 2026-08-02 the log holds 872 attempts. RE-READ IT BEFORE BELIEVING ANY NUMBER IN
+THIS FILE.** It went 789 → 872 *during the session that wrote these paragraphs*: three more
+sessions (`f0351bcc86af`, `3c0e46bcfb21`, `d9b8d1359894`, 02 Aug 00:02–03:28Z, 83 attempts,
+4 fills) landed after an explicit "nothing unread" check. That check was true when it was
+made and stale an hour later. The correction changed two findings — the ghost ratios and
+the verdict-split result — and this is now **the third time** the project has written a
+conclusion over the top of data it had not read. `read_attempts(path)` and a count is
+fifteen seconds; do it first, every time.
 
 **What 0.8.0 built, so it is not rebuilt.** The auto-expiry writes `Outcome.EXPIRED`
 instead of `no_reply` and the manual buttons are now **AFK** / **Offline**; a waiting row
@@ -142,12 +147,13 @@ disk:
   `actual_profit_divines: 136.0` is in `outcomes.jsonl` (a backup of the pre-correction
   file is not kept in the repo — the log is append-only and the original verdict is still
   in it). Consequences, all in [docs/FINDINGS.md](docs/FINDINGS.md) *Negative results* 1:
-  ghost fills 12 → 13, fill rate 2.0% → 2.16%, `FILL_PRIOR[GHOST]` 0.16 → **0.17**, and
-  **ghost value per whisper 0.251 → 0.477 against plausible's 0.382** — so a ghost whisper
-  is now worth *more* per message than a plausible one (1.25×, was 0.66×). **Fourth
-  revision of this finding, fourth time it favoured ghosts.** The prior stays on the
-  fill-rate ratio; do not feed it the value ratio. Caveat recorded and load-bearing: that
-  one trade is 47% of all ghost realised value.
+  ghost fills 12 → 13. **The prior briefly went to 0.17 and is back at 0.16** — 83 more
+  whispers, read later the same session, put the fill-rate ratio at 0.146 against the 0.175
+  that justified the move, so that was over-fitting. The value ratio went 0.66 → 1.25 →
+  0.82 in one day, crossing parity and returning on whispers containing no new ghost fills.
+  **The durable finding is that the estimate is unstable at ±0.02 and must not be chased**;
+  one trade is 47% of all ghost realised value. Full table in
+  [docs/FINDINGS.md](docs/FINDINGS.md) *Negative results* 1.
 - **The release workflow is off Node 20.** `checkout@v4→v5`, `setup-python@v5→v6`,
   `upload-artifact@v4→**v7**`. Proved on dispatch runs, no tag, no release — and the
   proving earned its keep: **`upload-artifact` v5 and v6 are still Node 20**, so the
@@ -158,9 +164,10 @@ disk:
   price**, joined attempt-by-attempt to `Client.txt`. Both fat-tail fills the 0.7.0
   correction rested on were unnegotiated, and two extreme gaps are corroborated by
   independent listings on the same item. The correction stands; do not re-open it.
-- **The ranking is fitted at n=789** — five times the last sample, because a **fifth**
+- **The ranking is fitted at n=872** (was n=789 when first written this session) — many
+  times the last sample, because a **further**
   field-test session (`11fc03d0a4f3`, 227 attempts, 14 fills, the first run on 0.8.0) was
-  sitting in `outcomes.jsonl` unread. `FILL_PRIOR[GHOST]` is 0.17 rather than 0.0, and a
+  sitting in `outcomes.jsonl` unread. `FILL_PRIOR[GHOST]` is 0.16 rather than 0.0, and a
   listing three days old now sorts last — 0 fills in 102 whispers, 13% of every message
   the app has ever suggested. Both in `listings.py`, both in FINDINGS.
 - The lesson from last time repeated itself exactly: **read `outcomes.jsonl` before
@@ -178,10 +185,11 @@ reorder, resize and persist. Full list in [CHANGELOG.md](CHANGELOG.md).
 
 **The ghost correction has now survived being doubted four times, and got bigger every
 time.** At n=131 it read "ghosts fill at 2.3%, worth 0.28 of a plausible whisper". At
-**n=789** it reads: ghosts fill at **2.16%** (n=601) against plausible's 12.4% (n=178), and
-are worth **1.25** plausible whispers in divines — *more*, not less. Every one of the four
-readings under-rated them, which is a pattern rather than a coincidence and is the reason
-`FILL_PRIOR[GHOST]` should never be nudged downward on a hunch. The 2026-08-01 counteroffer
+**n=872** it reads: ghosts fill at **1.95%** (n=666) against plausible's 13.4% (n=194).
+Every reading has said the same qualitative thing — the 0.0 is badly wrong and ghosts are
+worth a real fraction of a plausible whisper — while the *quantity* has swung on single
+fills (fill-rate ratio 0.162 / 0.175 / 0.146 within one day; value ratio 0.66 / 1.25 / 0.82).
+Take the direction as settled and the decimal as noise. The 2026-08-01 counteroffer
 scare is resolved against the game's own log (35 of 36 fills at the listed price), and
 `FILL_PRIOR[GHOST] = 0.0` is now fixed rather than merely known-wrong. Full tables in
 [docs/FINDINGS.md](docs/FINDINGS.md), *Negative results* 1.
@@ -351,11 +359,11 @@ which is why the original occurrence left no trace.
       (2026-08-01)** — 120/ex and 800/div whatever the quantity — so the gold bill is
       units-settled × rate, no rate table required. Blocked on nothing but the work now.
 - [ ] **Fitting the ranking to the outcome log: three of four pieces are DONE
-      (2026-08-01).** Fitted at n=789, five times the sample the last attempt had; tables
+      (2026-08-01, refitted at n=872 on 2026-08-02).** Tables
       in [docs/FINDINGS.md](docs/FINDINGS.md), *Negative results* 1. Shipped in
       `listings.py`:
-      - *`FILL_PRIOR[GHOST]` is 0.17*, not 0.0. Ghosts fill at 2.16% (n=601) against
-        plausible's 12.4% (n=178). **The open question of which ratio the prior expresses
+      - *`FILL_PRIOR[GHOST]` is 0.16*, not 0.0. Ghosts fill at 1.95% (n=666) against
+        plausible's 13.4% (n=194), and the ratio is unstable at ±0.02 — do not chase it. **The open question of which ratio the prior expresses
         is answered: the fill-rate one.** `fill_weight` multiplies profit, so
         `profit × weight` is already the divines-per-whisper estimate; feeding it the
         value ratio (now 1.25) would count the fat tail twice. Consequence, deliberate: a ghost
