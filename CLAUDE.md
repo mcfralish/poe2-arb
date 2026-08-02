@@ -379,7 +379,14 @@ Three documents, deliberately split by how often they need reading:
 - **This file** — architecture, commands, invariants. Loaded every session.
 - **[TODO.md](TODO.md)** — what is not done, and the current state of play. Read it when
   picking up work. It takes priority over this file for anything in flight. Completed
-  items are deleted rather than ticked.
+  items are deleted rather than ticked. **Open work is grouped into numbered batches, each
+  a session-sized unit ordered by dependency** — take the lowest-numbered unfinished batch
+  unless told otherwise, and finish one before starting the next rather than cherry-picking
+  across them. It also carries a *Decisions taken* section: read it before re-litigating
+  anything that looks like an open question. **Keep the file short.** Anything measured
+  belongs in FINDINGS and anything shipped in CHANGELOG; TODO holds a pointer, not a copy.
+  It reached 900 lines of mostly-historical narrative once and was cut in half on
+  2026-08-02 without losing a single open item.
 - **[docs/FINDINGS.md](docs/FINDINGS.md)** — measured evidence and standing decisions.
   Read the relevant section before changing that subsystem; do not load it wholesale.
 

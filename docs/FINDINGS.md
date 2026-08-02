@@ -1575,6 +1575,12 @@ Also worth not rediscovering:
   directory is the dropper pattern we're avoiding.
 - **Release notes come from `CHANGELOG.md`**, and a tag without a section fails the build
   before anything is compiled.
+- **`upload-artifact` v5 and v6 are still Node 20; only v7 clears the deprecation.** Found
+  2026-08-01 taking the release workflow off Node 20 (`checkout@v4→v5`,
+  `setup-python@v5→v6`, `upload-artifact@v4→**v7**`). The obvious one-major-version bump
+  leaves the warning in place, which is the sort of thing that gets re-tried. Proved on
+  `workflow_dispatch` runs with no tag and no release. `softprops/action-gh-release@v2` was
+  never flagged and is untouched.
 - **UI state lives in a JSON file in the cache dir**, not in the TOML config (meant to stay
   hand-editable) and not in QSettings (which would write to the registry, contradicting
   "delete the folder to remove it"). Column order and widths are part of it, as the
