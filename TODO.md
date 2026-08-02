@@ -581,22 +581,38 @@ session will read them backwards. *Trades* also moves to **second** tab position
   than tidying: the app had him offer a seller 599 div against a 260 div bankroll, so the
   whisper was spent and the trade could not be completed.
 
-  **Maintainer's hypothesis (2026-08-02), still to be tested in game:** the candidate had
-  been *queued but not yet presented* when the bankroll was lowered, so it was sized against
-  the old figure and surfaced afterwards. **Plausible and worth confirming** — but note the
-  correction below, because it changes what needs building:
+  **Root cause confirmed by reading the code, 2026-08-02 — no game test needed.
+  Changing the bankroll does not re-size anything that already exists.**
+  `_bankroll_changed` (`main_window.py:1124`) sets `cfg.bankroll_divines` and starts the
+  save timer, and that is the whole handler. Sizing happens in `build_candidates`
+  (`max_by_bankroll = int(bankroll_units // lot_pay)`, `listings.py:264`) from
+  `cfg.bankroll()` at `sweep.py:179`. **Its own docstring states the behaviour as
+  intended** — *"the in-memory value is what the next sweep reads, and that is already
+  correct"* — so this reads as a deliberate choice, not an oversight, and needs replacing
+  rather than repairing.
 
-  - **Removing the drip narrows the window; it does not close it.** With candidates landing
-    in *Ready* as they are found, "sized before you changed the bankroll" shrinks from
-    *minutes* to *instant* — but any row **already sitting in Ready** when the spin box
-    moves is still sized against the old bankroll, and a sweep is ~15 minutes long. So the
-    no-queue model makes this rarer and does **not** fix it.
-  - **The fix is still needed, and belongs on the *Ready* side only:** when the bankroll
-    changes, re-size or drop the queued candidates. Whispered rows must be left alone —
-    they record what was actually asked for, and re-planning one retroactively would
-    falsify the attempt.
-  - If the maintainer's test shows the bankroll was *not* changed during that session, the
-    original suspect is back and it is a sizing bug in `build_candidates`, not staleness.
+  - **The window is wider than "queued but not yet presented".** `cfg.bankroll()` is read
+    **inside the per-item loop**, so the change takes effect *progressively*: items swept
+    after the spin box moves get the new figure, candidates already built keep the old
+    sizing until that item comes round again. Exposure per row is up to a full ~15-minute
+    cycle — not a promotion delay.
+  - **So removing the QUEUED drip does not fix this.** It removes one contributor (a row
+    can no longer sit invisible for minutes *on top of* the above) and leaves the cause
+    untouched.
+  - **The precedent is one method below.** `_appetite_changed` re-ranks what is on screen
+    via `set_result(self._last_sweep, ...)`, arguing that *"waiting for the next sweep
+    would be a fifteen-minute round trip to see the effect of moving a slider."* That
+    argument applies verbatim to the bankroll and was never applied to it.
+  - **But that path is not directly reusable:** `set_result` re-*ranks*, and the bankroll
+    needs re-*sizing*, i.e. re-running `build_candidates`. `SweepResult` keeps `candidates`
+    and not the raw listings — however `Candidate` holds its own `listing`, so
+    `[c.listing for c in result.candidates]` is enough to re-plan. Cheap, just a different
+    call.
+  - **Both surfaces need it.** `trade_queue` holds submitted candidates independently of
+    the sweep panel, so re-planning the panel alone leaves the *Ready* rows stale — and
+    *Ready* is where the 599 div row came from. Whispered rows must be left alone: they
+    record what was actually asked for, and re-planning one retroactively falsifies the
+    attempt.
 > **(FT5) Answered, no work needed: "what would a higher *Long shots* setting pull in?"**
 > Asked after the 137.86× Rigwald's Ferocity fill, which was taken at 50%. **Nothing extra.**
 > `risk_appetite` is read in two places and only one of them is a slide: `queue_ghosts =

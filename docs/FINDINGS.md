@@ -945,13 +945,34 @@ attempts — 06:05:45Z ↔ `2026/07/31 23:05:47`.
   against a **260 div / 350 ex** bankroll, and it was in *Waiting on a reply* — so the app
   had the maintainer offer a seller an amount he could not settle, and he *"was surprised
   when I couldn't fill the order."* That is the consequence: not a display glitch, a spent
-  whisper and a trade that could not complete. His hypothesis is that the candidate was
-  queued-but-not-yet-presented when he lowered the bankroll. **Note for whoever fixes it:
-  removing the QUEUED drip narrows that window from minutes to instant but does not close
-  it** — a row already sitting in *Ready* when the spin box moves is still sized against the
-  old bankroll, and a sweep runs ~15 minutes. Re-sizing queued candidates on a bankroll
-  change is still needed; whispered rows must be left alone, since they record what was
-  actually asked for.
+  whisper and a trade that could not complete.
+
+  **Root-caused from the code the same day, and it is not a bug so much as a missing
+  handler: changing the bankroll re-sizes nothing that already exists.**
+  `_bankroll_changed` (`main_window.py:1124`) assigns `cfg.bankroll_divines` and starts the
+  config save timer; that is the entire method. Sizing lives in `build_candidates` —
+  `max_by_bankroll = int(bankroll_units // lot_pay)` — reading `cfg.bankroll()` at
+  `sweep.py:179`. **The handler's docstring presents this as correct** (*"the in-memory
+  value is what the next sweep reads, and that is already correct"*), which is why it has
+  survived: it looks decided rather than missed. Four consequences worth having written
+  down:
+
+  - **The change lands progressively, not at a sweep boundary.** `cfg.bankroll()` is read
+    inside the per-item loop, so items swept after the spin box moves use the new figure
+    while candidates already built keep the old sizing until their item comes round again.
+    A stale row's exposure is up to a full ~15-minute cycle.
+  - **Removing the QUEUED drip does not fix it.** That removes one contributor — a row
+    sitting invisible for minutes on top of the above — and leaves the cause alone.
+  - **The precedent is the method directly below it.** `_appetite_changed` re-ranks what is
+    on screen because *"waiting for the next sweep would be a fifteen-minute round trip to
+    see the effect of moving a slider."* The same argument fits the bankroll exactly and
+    was never applied to it. It is **not** directly reusable though: `set_result` re-*ranks*
+    where the bankroll needs re-*sizing*. `SweepResult` keeps candidates rather than raw
+    listings, but `Candidate` carries its own `listing`, so re-planning from
+    `[c.listing for c in result.candidates]` is available and cheap.
+  - **Two surfaces, not one.** `trade_queue` holds submitted candidates independently of
+    the sweep panel, and *Ready* is where the 599 div row was. Whispered rows must be left
+    alone — they record what was actually asked for.
 - **Column headers were misread by their own author.** `Buy 5 / Each 1 div / Cost 5 div /
   Profit +38` was read back as "I bought 1 for 5 div". Three of the four words are doing a
   job the reader has to be told; *Amount / Price per / Total* is what the maintainer reached
