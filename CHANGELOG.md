@@ -6,16 +6,19 @@ says what changed for you and, where it matters, why.
 Versions follow `MAJOR.MINOR.PATCH`. Until 1.0 the minor number moves for
 anything user-visible.
 
-## [0.8.0] — 2026-08-01
+## [0.8.0] — 2026-08-02
 
 The first half of the fourth session's defect list. The headline is that **the app was
 writing down trades that happened as trades that didn't** — and every fill rate it
 reports is computed from that file.
 
-> **Prices are still optimistic on rarely-traded items**, and the reason changed: the
-> in-game book turns out to be tight, so the error is the reference price *moving*, not a
-> spread. It runs about ±6% either way rather than consistently high. Liquid currency is
-> fine; thin items are still not, and the *uncertain* rating still says so.
+> **Prices are still optimistic on rarely-traded items, and this release does not fix
+> it.** Measured against both sides of the in-game exchange on seven pairs: on
+> heavily-traded currency the app is accurate to about ±6% either way, but on **thinly
+> traded items it reads high — at or above what a sale actually fetches on every thin
+> pair measured, by as much as 53%.** How much it overshoots is *not* predictable from how
+> rarely an item trades, so there is no correction in this release to apply. Treat the
+> figure on a thin item as a ceiling, not a price; the *uncertain* rating marks them.
 
 ### Fixed
 
@@ -70,11 +73,11 @@ reports is computed from that file.
 - **The Trades tab's filters are renamed** to *All Results*, *Attempts* and *Trades*.
 - **The row buttons are icons rather than words**, with the full wording on hover. Seven
   actions as words was wider than the rest of the table.
-- **The order trades are offered in has been fitted to what actually filled** — 789
+- **The order trades are offered in has been fitted to what actually filled** — 872
   whispers, five times the evidence the last ordering had. Two changes you will see:
   - **Long shots are no longer pinned to the bottom.** The app used to score a "too good
-    to be true" listing at zero, on the grounds that they never fill. They do — 2.2% of
-    601 of them — and the ones that land are large, so a long shot now has to be worth
+    to be true" listing at zero, on the grounds that they never fill. They do — 1.95% of
+    666 of them — and the ones that land are large, so a long shot now has to be worth
     roughly six ordinary trades before it is offered first, rather than never being
     offered first at all. It is still a demotion, just an honest one. Nothing is hidden,
     and the *long shots* switch works as before.
@@ -93,6 +96,10 @@ reports is computed from that file.
   in the background, so it starts working on its own once whatever held it lets go.
   Hotkeys are first-come-first-served, so if yours ever stops working, a different
   combination — or restarting this app — is the fix.
+  **One case this cannot see:** some programs (Path of Exile overlays among them) claim a
+  key in a way Windows never reports to us, so if another tool is bound to the same
+  combination it will simply win and the app will show no error at all. If your hotkey
+  does nothing and Settings says it registered fine, check what else is bound to it.
 
 ## [0.7.0] — 2026-07-31
 

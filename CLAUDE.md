@@ -174,11 +174,24 @@ afterwards, and league names rotate.
 decisions were built on — the toast and alert-window model, the 30px buttons, "where someone
 mid-map is looking", and `risk_appetite` as a tolerance for interruption. **Density and
 throughput beat glanceability**; the scarce resource is whispers sent per minute of sitting
-there, not the user's patience. Two consequences are decided and **not yet built**, so read
-TODO before touching `trade_queue` or `queue_panel`: *Ready to whisper* loses its
-one-per-`offer_window_s` drip (everything found lands in the queue immediately) and sorts by
-the hotkey's own ranking order, so **row 1 is always the trade the hotkey will take**. The
-old rule it replaces — oldest-first so nothing on screen moves — is annotated as reversed in
+there, not the user's patience. **The whole interruption model is being removed as a
+result** — decided 2026-08-02, **not yet built**, so read TODO before touching
+`trade_queue` or `queue_panel`:
+
+- *Ready to whisper* loses its one-per-`offer_window_s` drip; everything found lands in the
+  queue immediately.
+- It sorts by the hotkey's own ranking order, so **row 1 is always the trade the hotkey will
+  take**. The old rule — oldest-first so nothing on screen moves — is reversed, with its
+  cost recorded.
+- **The toast and the alert window go.** `offer_window_s` and `alert_until` are removed and
+  the config key retired; `OFFERED` stops gating visibility. The **● marker survives but
+  stops being a state** — it means "row 1", which is now the same thing as "what the hotkey
+  takes".
+- **`expires_at` starts when a candidate enters *Ready***, not at promotion, and the
+  floor-at-the-alert-window rule goes with the window. `available_ttl_s` and
+  `awaiting_timeout_s` are untouched — **rows still expire.**
+
+Full spec and the superseded rules with their original reasoning are in
 [docs/FINDINGS.md](docs/FINDINGS.md), *The offer queue*.
 
 Four results from field tests are load-bearing in `listings.py` and must not be re-derived

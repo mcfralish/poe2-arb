@@ -1316,6 +1316,29 @@ Also worth not rediscovering:
 
 ### The offer queue
 
+> **DECIDED 2026-08-02, NOT YET BUILT: the interruption model is being removed.** The
+> premise under everything in the next four bullets is that the user is busy in a map and
+> an offer must interrupt them. That premise is **false** — the app is used sitting in
+> town with full attention (see *The first real play session on 0.8.0*). The maintainer's
+> call: **drop the toast and the alert window; keep the ● marker, re-defined as "row 1,
+> the one the hotkey will take".** Concretely, and read this before touching
+> `trade_queue`:
+>
+> - **`offer_window_s` and `alert_until` go**, along with the toast and the OFFERED
+>   state's gate on visibility. Retire the config key through `config.RETIRED_KEYS` and
+>   drop its Settings row.
+> - **The ● stops being a state and becomes a position.** It marks row 1 of *Ready to
+>   whisper*, which after the re-sort **is** the trade the hotkey takes. Nothing is
+>   "offered" any more; everything found is simply takeable.
+> - **`expires_at` starts when the candidate enters Ready**, not at promotion, and the
+>   floor-at-the-alert-window rule goes with the alert window. `available_ttl_s` (5 min)
+>   still governs the lifetime and `awaiting_timeout_s` still governs the whisper.
+> - **Rows still expire.** Removing the interruption is not removing the clock — a stale
+>   Ready row is still a listing that has probably gone.
+>
+> The four bullets below are kept because they record *why* each piece existed; do not
+> re-derive them as reasons to keep it.
+
 - **Exactly one trade is OFFERED at a time.** A second toast arriving while the first is
   unread makes both of them noise.
 - **An unclaimed offer lapses into AVAILABLE rather than vanishing.** Still a good trade,
@@ -1373,10 +1396,13 @@ Also worth not rediscovering:
   the delegate fills the row itself with a translucent tint from the palette's highlight.
   **The buttons themselves report no row** (0.7.0): pointing at Accept highlights Accept,
   because by then which trade it acts on is not in question.
-  **This is not what ships.** Reported with a screenshot 2026-08-02: hovering one button
-  still highlights **the whole button group for that row**. So either the 0.7.0 fix never
-  covered the in-row action widget, or it regressed under the 0.8.0 icon-button rework. Open
-  bug, not a standing decision — the decision above is the intended behaviour.
+  **This is not what ships, and it is a regression.** Reported with a screenshot
+  2026-08-02: hovering one button highlights **the whole button group for that row**.
+  0.7.0's changelog states the fix as shipped and user-visible — *"Hovering a button lit up
+  the whole row. It now highlights the button you're pointing at"* — so it worked once and
+  broke under the **0.8.0 icon-button rework**, which is where the row's action widget was
+  rebuilt. Look there first rather than re-deriving the original fix. Open bug; the
+  decision above is the intended behaviour.
 - **Action widgets must be unparented, not just removed, on rebuild.** `removeCellWidget`
   only schedules deletion; the orphan keeps painting at its old geometry until the event
   loop catches up, which put a live Accept/Decline on top of another row's Item column.

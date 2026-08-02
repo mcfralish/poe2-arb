@@ -6,9 +6,40 @@ deleted rather than ticked, so this file stays worth reading start to finish.
 
 ## State of play
 
-**Shipped:** v0.7.0 (2026-07-31). **v0.8.0 is written and untagged** on `field-test-4`:
-the outcome-log integrity half of the fourth session's defect list, plus the hotkey
-diagnostic, the column work, the ranking refit and the editable rows.
+**Shipped:** v0.7.0 (2026-07-31). **v0.8.0 is written, verified on Windows, and ready to
+tag** on `field-test-4`.
+
+> ## Next session starts here
+>
+> **1. Tag 0.8.0 and ship it.** *(Decided 2026-08-02.)* It is verified in game and carries
+> the hotkey fix that failed four releases running; the FT5 UI batch is large enough to be
+> its own release. Everything the tag needs is already done — `CHANGELOG.md` has a `[0.8.0]`
+> section, `__init__.py` and `pyproject.toml` both read `0.8.0`, and the changelog's
+> user-facing pricing caveat and ghost statistics were corrected on 2026-08-02 to match the
+> current measurements. **Check one thing before tagging: the section is dated `2026-08-02`
+> — if the tag slips past that day, change the date.** Then push `v0.8.0` and let
+> `.github/workflows/release.yml` do the rest.
+>
+> **2. Then the FT5 UI batch, as 0.9.0.** Bump `__version__` and `pyproject.toml` together
+> and open a `[0.9.0]` changelog section before the work, not after. Suggested order, which
+> is dependency-driven rather than by importance:
+>
+> 1. **The one-button "Seller not available" consolidation** (item 2 of the numbered list
+>    below). Every width decision downstream depends on the final button count.
+> 2. **The queue rework** — drop the toast/alert window, kill the QUEUED drip, re-sort
+>    *Ready* by the hotkey's order. Biggest single change and the one the rest sits on.
+> 3. **The width work** — fixed action column, lower window minimum, mirrored column
+>    widths, the *Found* column, *Auto* → *Expires*.
+> 4. **The icons** (Lucide SVGs) and the button-group hover regression.
+> 5. **The tab renames**, then delete *Every trade* / *Every whisper*.
+>
+> **3. And one piece of desk work that is not UI at all:** analyse `ce_age_s` against
+> `outcomes.jsonl`. It is the last untested hypothesis for the pricing error, it is the
+> most valuable open question in the project, and it needs no game time. Do not let the UI
+> batch crowd it out entirely.
+>
+> **Four decisions were taken on 2026-08-02 and are not open** — see *Decisions taken*
+> below before re-litigating any of them.
 
 > **0.8.0 has now been played on Windows, and everything on its verification list is
 > answered.** The build was the `b8d43a8` artifact from
@@ -32,8 +63,33 @@ diagnostic, the column work, the ranking refit and the editable rows.
 > 2026-08-01: the ranking refit was folded into 0.8.0 rather than cut as 0.9.0, because
 > nothing has shipped to users and two unreleased versions is worse bookkeeping than one.
 > The editable rows went in on the same reasoning. `__version__` and `pyproject.toml` stay
-> at 0.8.0; no bump. **The UI list from this session (below) is large enough that it should
-> probably land before the tag** — decide that before writing the changelog entry.
+> at 0.8.0; no bump.
+
+## Decisions taken 2026-08-02 — do not re-open
+
+Answered by the maintainer at the end of the session that wrote this file. Each one was a
+fork the work was otherwise going to guess at.
+
+1. **0.8.0 tags now; the FT5 UI batch is 0.9.0.** Reasoning above.
+2. **The toast and the alert window are removed; the ● marker stays, re-defined.** The
+   interruption model was built for a player busy in a map, and that premise is false. ●
+   stops being a state (`OFFERED`) and becomes a position — **row 1 of *Ready*, which after
+   the re-sort is the trade the hotkey takes**. `offer_window_s` and `alert_until` go;
+   retire the config key via `config.RETIRED_KEYS` and drop its Settings row. `expires_at`
+   starts when a candidate enters *Ready* rather than at promotion, and the
+   floor-at-the-alert-window rule goes with the window. **Rows still expire** —
+   `available_ttl_s` and `awaiting_timeout_s` are untouched. Full spec in
+   [docs/FINDINGS.md](docs/FINDINGS.md), *The offer queue*, where the superseded rules are
+   kept with their original reasoning so nobody re-derives them as arguments to restore it.
+3. **A Ready row whose cost now exceeds the bankroll is re-sized down, not dropped** —
+   re-planned to what the new bankroll affords, and dropped only if that falls below
+   `min_profit_divines`. `smallest_lot` / `replan_units` already do this and a partial ask
+   is already a supported class of whisper. Whispered rows are never re-planned.
+4. **The row icons become vendored Lucide SVGs (MIT).** Clean and legible at small sizes,
+   every shape the rows need, no new runtime dependency — copy the handful of files into
+   the repo with the licence. **Confirm QtSvg survives the PyInstaller bundle**; an SVG
+   that renders in dev and not in the exe is the same class of failure as the dingbats,
+   and only a Windows build proves it.
 
 **Stop counting field tests by ordinal — they no longer agree.** This file has called the
 20:49–21:29Z run of 2026-08-01 "the fifth"; the maintainer calls it the sixth, and both are
@@ -613,6 +669,11 @@ session will read them backwards. *Trades* also moves to **second** tab position
     *Ready* is where the 599 div row came from. Whispered rows must be left alone: they
     record what was actually asked for, and re-planning one retroactively falsifies the
     attempt.
+  - **Decided 2026-08-02: re-size, do not drop.** Re-plan the row to what the new bankroll
+    affords and drop it **only** if that falls below `min_profit_divines`. A partial ask is
+    already a supported class of whisper — a 100 div listing on a 20 div bankroll is asked
+    for at 2 — so shrinking the row is consistent with what the app already does rather
+    than a new behaviour.
 > **(FT5) Answered, no work needed: "what would a higher *Long shots* setting pull in?"**
 > Asked after the 137.86× Rigwald's Ferocity fill, which was taken at 50%. **Nothing extra.**
 > `risk_appetite` is read in two places and only one of them is a slide: `queue_ghosts =
@@ -652,11 +713,15 @@ session will read them backwards. *Trades* also moves to **second** tab position
   assets** (SVG or PNG at the sizes actually drawn), not another character and not a PoE2
   pastiche. Note the dingbats were verified by screenshot on **Linux only**, which is why
   this shipped — the next verification has to be a Windows screenshot.
+  **Source decided 2026-08-02: vendored Lucide SVGs (MIT)** — copy the files into the repo
+  with the licence rather than adding a dependency, and **confirm QtSvg survives the
+  PyInstaller bundle**, which only a Windows build proves.
   See [docs/FINDINGS.md](docs/FINDINGS.md), *Operational*.
-- [ ] **(FT5) Hovering one button highlights the whole button group for that row.** Screenshot
-  supplied. FINDINGS records the opposite as the intended and supposedly shipped 0.7.0
-  behaviour — "pointing at Accept highlights Accept" — so this is either a fix that never
-  covered the in-row action widget or a regression under the 0.8.0 icon rework. Real bug.
+- [ ] **(FT5) Hovering one button highlights the whole button group for that row.**
+  Screenshot supplied. **This is a regression, not an unfinished fix** — 0.7.0's changelog
+  ships it as user-visible ("Hovering a button lit up the whole row. It now highlights the
+  button you're pointing at"), so it worked and then broke under the **0.8.0 icon-button
+  rework**, where the row's action widget was rebuilt. Look there first.
 - [ ] **(FT5) One-word tooltips on the row buttons** — *Re-copy*, *Accept*, *Decline*, …
   0.8.0 put the **full wording** on hover; this shortens it. Keep the button's `action`
   property as-is, since `click_action` and the tests match on it — change only the tooltip.
@@ -680,11 +745,13 @@ session will read them backwards. *Trades* also moves to **second** tab position
   the one after it.**
   - *Stop the drip.* `tick` promotes one QUEUED trade per `offer_window_s` (20s), so a
     sweep's candidates trickle in over minutes and sit invisible meanwhile. **Put every
-    candidate into Ready as it is found.** This does not delete the OFFERED state — the ●
-    marker, the toast and the alert window are a separate concern — it stops `available`
-    being gated on promotion. Check the interaction with `cancel_pending`, which exists to
-    drop the QUEUED backlog when *Find trades* stops; with no backlog, stopping simply
-    stops adding, which is the intended behaviour anyway.
+    candidate into Ready as it is found.** Check the interaction with `cancel_pending`,
+    which exists to drop the QUEUED backlog when *Find trades* stops; with no backlog,
+    stopping simply stops adding, which is the intended behaviour anyway.
+  - *Drop the toast and the alert window with it* — **decided 2026-08-02** (decision 2
+    above), reversing what this item originally said. `offer_window_s` and `alert_until`
+    go, `OFFERED` stops gating visibility, and the ● becomes "row 1" rather than a state.
+    `expires_at` starts on entry to *Ready*. Rows still expire.
   - *Sort Ready by the hotkey's own order.* The hotkey takes `trade_queue.offered` when one
     exists, and `offered` is picked by `_next_to_offer` — **by rank**. `available` sorts by
     `offered_at or queued_at`. That mismatch is the whole complaint. Sorting *Ready* by the
