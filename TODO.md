@@ -13,8 +13,14 @@ if it is still here, it is still open.
 
 ## State of play
 
-**Shipped:** v0.7.0 (2026-07-31). **v0.8.0 is written, verified in game on Windows, and
-ready to tag** on `field-test-4` — that is Batch 0 below.
+**Shipped:** v0.8.0 (2026-08-02) — tagged from `main` after merging `field-test-4`, exe
+published, release job green. **0.9.0 is open**: `__init__.py` and `pyproject.toml` read
+`0.9.0`, `CHANGELOG.md` has an `[Unreleased]` section to fill, and work is on
+`field-test-5` off `main`. Rename that heading to `## [0.9.0] — <date>` before tagging or
+the release job fails, which is the point of it.
+
+**Start with Batch 1** (decided 2026-08-02, over pulling Batch 6's `ce_age_s` analysis
+forward — that stays where it is).
 
 Two field-test sessions have landed since 0.7.0 and both are fully written up in FINDINGS:
 *Found in the fourth session of real use* (2026-08-01) and *The first real play session on
@@ -36,7 +42,9 @@ in different paragraphs, and the log holds six session ids on 01 Aug alone.
 
 Each was a fork the work would otherwise have guessed at.
 
-1. **0.8.0 tags now; the FT5 UI batch is 0.9.0.**
+1. **0.8.0 tags now; the FT5 UI batch is 0.9.0.** *Done — v0.8.0 shipped 2026-08-02.* One
+   release branch per field-test cycle, merged into `main` at the tag: 0.9.0's is
+   `field-test-5`.
 2. **The toast and the alert window are removed; the ● marker stays, re-defined.** ● stops
    being a state (`OFFERED`) and becomes a position — **row 1 of *Ready*, which after the
    re-sort is the trade the hotkey takes**. `offer_window_s` and `alert_until` go; retire
@@ -52,6 +60,11 @@ Each was a fork the work would otherwise have guessed at.
    rather than adding a dependency, and **confirm QtSvg survives the PyInstaller bundle** —
    an SVG that renders in dev and not in the exe is the same failure as the dingbats, and
    only a Windows build proves it.
+5. **The merged verdict button writes `Outcome.UNAVAILABLE`.** Chosen over `NOT_AVAILABLE`,
+   `NO_TRADE` and `SELLER_GONE`: it matches the button's wording and claims nothing about
+   *why*, which is all a single press establishes. `NO_TRADE` was rejected as wide enough to
+   swallow `DECLINED`. **This is permanent** — the log stores the enum value and `Outcome`
+   never renames members.
 
 ## The batches
 
@@ -61,25 +74,12 @@ with the UI batches for game time; do not let the UI list crowd it out entirely.
 
 | # | Batch | Main files |
 |---|---|---|
-| 0 | Ship 0.8.0 | tag only |
 | 1 | The queue rework | `trade_queue.py`, `queue_panel.py`, `main_window.py`, `config.py` |
 | 2 | Bankroll correctness | `main_window.py`, `sweep_panel.py`, `trade_queue.py` |
 | 3 | Table and window layout | `table_items.py`, `queue_panel.py`, `bankroll_bar.py` |
 | 4 | Icons and row polish | new assets, `queue_panel.py`, `settings_dialog.py` |
 | 5 | The tab shuffle | `sweep_panel.py`, `results.py`, `main_window.py` |
 | 6 | Pricing — desk work | `scout.py`, `listings.py`, analysis |
-
----
-
-### Batch 0 — Ship 0.8.0
-
-Everything the tag needs is done: `CHANGELOG.md` has a `[0.8.0]` section, `__init__.py` and
-`pyproject.toml` both read `0.8.0`, and the changelog's user-facing pricing caveat and ghost
-statistics were corrected on 2026-08-02 to match current measurements.
-
-- [ ] **Check the changelog date.** The section reads `2026-08-02`; if the tag slips past
-      that day, change it.
-- [ ] **Push `v0.8.0`** and let `.github/workflows/release.yml` do the rest.
 
 ---
 
@@ -92,10 +92,13 @@ The largest single change and the one the rest sits on. Decision 2 above is the 
       three-way judgement can be made.)* Its only job is to drop the row; the
       AFK/offline/silent split moves to the `Client.txt` reader, where the evidence already
       is. **Keep `Outcome.AFK` and `Outcome.OFFLINE` in the enum** — the log holds records
-      under both and `Outcome` never renames members — and add whatever the new button
-      writes. **Choose that new member's name carefully: it is permanent in the log.**
-      Evidence in [docs/FINDINGS.md](docs/FINDINGS.md), *The three-way verdict split has
-      never once been used by hand*.
+      under both and `Outcome` never renames members. The new member is
+      **`Outcome.UNAVAILABLE`** (decision 5 above; permanent). It is a silence for
+      `is_silence` purposes and belongs in `trade_queue.SETTLED_OUTCOMES` only if a press
+      should suppress the listing for the session — decide that against `AFK`, which is
+      deliberately *not* in the set because an away seller comes back. Evidence in
+      [docs/FINDINGS.md](docs/FINDINGS.md), *The three-way verdict split has never once been
+      used by hand*.
 - [ ] **Rework *Ready to whisper* into a visible FIFO.** Goal: **row 1 is always the trade
       the hotkey will take, row 2 is the one after it.** The maintainer keeps the pane small
       to give room to *Waiting on a reply* and cannot see what is next.
@@ -441,7 +444,8 @@ Not session work; the queue of things only playing can answer.
 
 - **Just play, so the instrumentation fills up.** `stock` and `ce_age_s` are recorded on every
   whisper since 0.8.0 and both are unanalysed. `ce_age_s` is the live hypothesis for the
-  pricing error and needs volume rather than attention.
+  pricing error and needs volume rather than attention. The published v0.8.0 exe is the build
+  to play — no manual workflow run needed for this one.
 - **No in-game pricing readings are wanted right now.** Seven pairs across 110k–10.0M do not
   resolve into a curve and more of the same will not change that. If `ce_age_s` points at
   staleness, the experiment is a **repeat of one item at two known reference-price ages** —

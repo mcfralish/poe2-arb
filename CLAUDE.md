@@ -70,6 +70,17 @@ builds the Windows exe with PyInstaller, and cuts release notes from `CHANGELOG.
 build **fails** if the tag has no matching changelog section, so write the entry first.
 `__init__.py:__version__` and `pyproject.toml:version` must agree with the tag.
 
+**One branch per field-test cycle, merged into `main` at the tag, and the tag goes on the
+merge commit** — `v0.7.0` and `v0.8.0` were both cut that way. So: merge `field-test-N`
+into `main`, tag `main`, push both. Expect a conflict in `release.yml`, because workflow
+changes are cherry-picked to `main` ahead of the branch (`workflow_dispatch` is only
+offered once the file is on the default branch) and then land again in the merge; take the
+branch's side, it is the newer one. **Between releases the version files carry the version
+being worked towards, not the last one shipped**, and `CHANGELOG.md` holds an
+`[Unreleased]` heading — `tests/test_changelog.py` accepts either that or a section named
+for `__version__`, so renaming the heading at tag time is the step that is easy to forget
+and the gate that catches it.
+
 **To get a testable exe without publishing one, run that workflow manually**
 (Actions → Build & Release → Run workflow, against any branch). Same tests, same
 PyInstaller build; it stops before the release step and leaves the exe as a build

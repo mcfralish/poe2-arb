@@ -4,4 +4,4 @@ Decision-support only. This tool fetches public market data, analyzes it and
 prints signals. It never automates any in-game action or trade execution.
 """
 
-__version__ = "0.8.0"
+__version__ = "0.9.0"

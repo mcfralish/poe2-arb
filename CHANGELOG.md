@@ -6,6 +6,17 @@ says what changed for you and, where it matters, why.
 Versions follow `MAJOR.MINOR.PATCH`. Until 1.0 the minor number moves for
 anything user-visible.
 
+## [Unreleased]
+
+In progress, heading for 0.9.0: the second half of the fourth session's defect list
+and the first of the fifth's — the offer queue stops drip-feeding and starts showing
+what is next, the trade you are about to send sits at the top of it, and the row
+buttons become legible on Windows.
+
+*Rename this heading to `## [0.9.0] — <date>` before tagging. The release job cuts its
+notes from the section matching the tag, so a tag with no matching heading fails the
+build on purpose.*
+
 ## [0.8.0] — 2026-08-02
 
 The first half of the fourth session's defect list. The headline is that **the app was
