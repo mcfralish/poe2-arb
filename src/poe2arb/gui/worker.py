@@ -44,17 +44,25 @@ class SweepWorker(QThread):
     finished_ok = Signal(object)  # SweepResult
     failed = Signal(str)
 
-    def __init__(self, cfg: Config, parent=None):
+    def __init__(self, cfg: Config, parent=None, *, resume_from: str | None = None):
         super().__init__(parent)
         self._cfg = cfg
         self._cancelled = False
         self.was_cancelled = False
+        self._resume_from = resume_from
+        # The item this sweep had reached, so a stop-and-start carries on from
+        # here rather than re-fetching what it has already seen. Read after the
+        # thread finishes, cancelled or not.
+        self.reached: str | None = None
 
     def cancel(self) -> None:
         self._cancelled = True
 
     def _is_cancelled(self) -> bool:
         return self._cancelled or self.isInterruptionRequested()
+
+    def _note_item(self, item_id: str) -> None:
+        self.reached = item_id
 
     def run(self) -> None:
         from ..sweep import run_sweep
@@ -65,6 +73,8 @@ class SweepWorker(QThread):
                 progress=lambda i, n, what: self.progress.emit(i, n, what),
                 on_budget=self.budget.emit,
                 on_candidates=self.candidates.emit,
+                on_item=self._note_item,
+                resume_from=self._resume_from,
                 should_cancel=self._is_cancelled,
             )
         except ScanCancelled:

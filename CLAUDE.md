@@ -169,8 +169,9 @@ a sale realises" → "Four more pairs, 2026-08-02".
 
 `scout.snapshot()` → `sweep.select_sweep_items()` (liquidity-ranked, floored by the whole-unit
 settlement problem) → `client.GggExchangeClient.fetch_listings()` per item, paced →
-`listings.build_candidates()` → `listings.rank_candidates()` → `trade_queue` offers them one
-at a time → `hotkey` puts a whisper on the clipboard → `outcomes.jsonl` records what happened.
+`listings.build_candidates()` → `listings.rank_candidates()` → `trade_queue` holds them all,
+takeable, best first → `hotkey` puts a whisper on the clipboard → `outcomes.jsonl` records
+what happened.
 
 **Candidates are emitted per item, not per sweep** (`run_sweep(on_candidates=...)`). A sweep
 is ~15 minutes; batching to the end meant silence followed by every offer at once, and made
@@ -185,25 +186,38 @@ afterwards, and league names rotate.
 decisions were built on — the toast and alert-window model, the 30px buttons, "where someone
 mid-map is looking", and `risk_appetite` as a tolerance for interruption. **Density and
 throughput beat glanceability**; the scarce resource is whispers sent per minute of sitting
-there, not the user's patience. **The whole interruption model is being removed as a
-result** — decided 2026-08-02, **not yet built**, so read TODO before touching
-`trade_queue` or `queue_panel`:
+there, not the user's patience. **The whole interruption model was removed in 0.9.0 as a
+result** — do not reintroduce any of it:
 
-- *Ready to whisper* loses its one-per-`offer_window_s` drip; everything found lands in the
-  queue immediately.
-- It sorts by the hotkey's own ranking order, so **row 1 is always the trade the hotkey will
-  take**. The old rule — oldest-first so nothing on screen moves — is reversed, with its
-  cost recorded.
-- **The toast and the alert window go.** `offer_window_s` and `alert_until` are removed and
-  the config key retired; `OFFERED` stops gating visibility. The **● marker survives but
-  stops being a state** — it means "row 1", which is now the same thing as "what the hotkey
-  takes".
-- **`expires_at` starts when a candidate enters *Ready***, not at promotion, and the
-  floor-at-the-alert-window rule goes with the window. `available_ttl_s` and
-  `awaiting_timeout_s` are untouched — **rows still expire.**
+- **There is no QUEUED and no OFFERED.** `submit` puts a candidate straight into
+  `AVAILABLE` with its clock already running; `tick` only ever retires rows. The
+  one-per-`offer_window_s` drip is gone, and with it the toast, the alert window,
+  `alert_until` and the `offer_window_s` config key (retired through `RETIRED_KEYS`).
+- **`available` sorts by `_ranking_key`, so row 1 is what the hotkey takes.** The hotkey is
+  `take_next`; `take_offered` and `_next_to_offer` are gone. The old rule — oldest-first so
+  nothing on screen moves — is reversed, and its cost is paid in `queue_panel`: the panel
+  holds the reshuffle while the pointer is over the table (`_ready_order`), and **● marks
+  the trade the hotkey will take rather than the top row**, so it stays truthful while the
+  order is held.
+- **`expires_at` starts at `submit`.** `available_ttl_s` and `awaiting_timeout_s` are
+  untouched — **rows still expire.**
+- **`cancel_pending` is gone**: with no backlog, stopping *Find trades* stops adding and
+  leaves the visible rows alone. Stopping instead records where the sweep had reached
+  (`SweepWorker.reached` → `MainWindow._resume_from` → `run_sweep(resume_from=...)`), which
+  **rotates** the item list rather than truncating it, so a restart carries on instead of
+  re-reading what it just finished.
 
-Full spec and the superseded rules with their original reasoning are in
-[docs/FINDINGS.md](docs/FINDINGS.md), *The offer queue*.
+The superseded rules are kept with their original reasoning in
+[docs/FINDINGS.md](docs/FINDINGS.md), *The offer queue* — read them there rather than
+re-deriving them as arguments to restore the toast.
+
+**Verdict buttons: three, not five.** `Outcome.UNAVAILABLE` (0.9.0) replaced the AFK /
+Offline / Refused split on both fast surfaces after it was used properly for one session
+and then rejected — see FINDINGS, *The three-way verdict split*. It is a silence for
+`is_silence` and is deliberately **not** in `SETTLED_OUTCOMES`: it merged one member that
+was in the set with one that was not, so it takes the weaker claim. `AFK`, `OFFLINE` and
+`DECLINED` stay in the enum and in the Trades tab's Result drop-down, which is the
+considered-correction surface; only the fast path collapsed.
 
 Four results from field tests are load-bearing in `listings.py` and must not be re-derived
 (full evidence in [docs/FINDINGS.md](docs/FINDINGS.md), "Negative results"):
@@ -267,13 +281,22 @@ in 36, and the one that happened logged +38.00 divines while losing money). Both
 **amendment record**, appended, so `asked_units` / `asked_pay_units` / `asked_cost_divines`
 keep the original ask. Two entry points, because they reach different rows:
 `outcomes.record_amendment` takes a live candidate and serves the Opportunities queue's
-*Adjust…* dialog; `outcomes.plan_correction` + `record_correction` work from the logged
+in-row editors; `outcomes.plan_correction` + `record_correction` work from the logged
 `Attempt` alone and serve the Trades tab, which is the only route back to a trade whose
 listing is long gone. Do not "unify" them by making the Trades tab re-plan a candidate —
 there isn't one. Changing a **verdict** needs neither: `record_outcome` already appends and
-a later record already wins. Why one surface is a dialog and the other edits in place, and
-why the log keeps the *whispered* gap after a reprice, are in
+a later record already wins. Why the log keeps the *whispered* gap after a reprice is in
 [docs/FINDINGS.md](docs/FINDINGS.md), *Correcting a trade after the fact*.
+
+**Both surfaces edit in place; the *Adjust…* dialog went in 0.9.0.** Three spin boxes per
+whispered row (`queue_panel._MoneyEditors`), and they hold each other consistent — units ×
+price per = total, with a quantity change re-pricing at the listing's own rate. Two things
+that look incidental and are not: `TradeQueue.revise` re-applies both numbers to
+`QueuedTrade.asked` rather than to the last correction, because `replan_units` only ever
+shrinks and would otherwise ratchet a spin box that can never come back up; and the panel
+**holds a rebuild while an editor is busy** (`_editing`), because the table redraws every
+second for the countdowns and that was the whole reason the dialog existed. Commits are
+debounced, so holding an arrow down writes one amendment rather than one per click.
 
 The league is resolved by `sweep.resolve_league`, which auto-detects and **never falls back
 to a literal name**. It used to read `cfg.league or "Standard"`; Standard priced one measured

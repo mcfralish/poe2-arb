@@ -128,14 +128,9 @@ class Config:
     # elsewhere. Empty disables it.
     trade_hotkey: str = "ctrl+alt+d"
     trade_hotkey_enabled: bool = False
-    # How long a new trade stays "live": a toast fires and the hotkey is armed.
-    # Short on purpose — it gates how fast the queue drains, not how long the
-    # user has to decide, because an unclaimed offer is not lost, it just drops
-    # into the list below. Only one trade is ever live at a time.
-    offer_window_s: float = 20.0
-    # How long a lapsed offer stays takeable from the Opportunities tab before
-    # it is dropped. Generous relative to the alert window: an offer you didn't
-    # catch mid-pack is still perfectly good five minutes later.
+    # How long a trade stays takeable in Ready to whisper, counted from the
+    # moment it is found. Other people are buying these too, so an old listing
+    # has usually gone and whispering about it wastes the message.
     available_ttl_s: float = 300.0
     # How long a whispered trade waits for a verdict before recording itself as
     # Expired — which claims only that the deadline passed, not that the seller
@@ -153,7 +148,11 @@ class Config:
     # a sweep runs, and back-to-back sweeps would spend the whole rate-limit
     # budget re-reading listings that have not changed.
     sweep_interval_minutes: float = 10.0
-    alert_sound: bool = True            # GUI: play a sound with the toast notification
+    # Ping when a sweep puts new trades in Ready to whisper. The toast that
+    # used to accompany it went with the interruption model in 0.9.0; the sound
+    # stayed, because the user is looking at the game rather than at this
+    # window and it is the only signal that crosses.
+    alert_sound: bool = True
     skip_install_prompt: bool = False   # set once the user declines the install offer
     # Keep the window above other windows, including the game. Off by default
     # because it is only wanted during a heavy trading session — the rest of the
@@ -228,6 +227,10 @@ RETIRED_KEYS = frozenset({
     "liquidity_floor_divines", "max_currencies", "max_cycle_len",
     "max_currency_value_divines", "depth_divines", "bait_filter_ratio",
     "min_accounts", "have_chunk", "watch_interval_minutes", "history_path",
+    # The trade alert window (removed 0.9.0 with the toast and the OFFERED
+    # state). Every candidate is takeable the moment it is found, so there is
+    # no promotion for a window to gate.
+    "offer_window_s",
 })
 
 

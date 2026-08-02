@@ -17,6 +17,38 @@ buttons become legible on Windows.
 notes from the section matching the tag, so a tag with no matching heading fails the
 build on purpose.*
 
+### Changed
+
+- **Everything the app finds now appears the moment it finds it.** Trades used to be
+  released one at a time, twenty seconds apart, with a notification for each — so a
+  sweep's worth of them took minutes to appear and sat invisible in the meantime. There
+  is no queue behind the queue any more: an opportunity is on screen and takeable as
+  soon as it is priced.
+- **The top row is the trade the hotkey will copy.** *Ready to whisper* is now sorted
+  best-first instead of oldest-first, so what you can see is what the key will act on —
+  row 1 next, row 2 after that. The ● marks it. The cost is that a better trade arriving
+  pushes the others down, so the list holds still while your pointer is over it.
+- **The notification and its twenty-second window are gone**, along with the setting for
+  it. Nothing is "live" any more; everything is simply takeable until it expires. A sound
+  still plays when new trades arrive, if you have that switched on. Rows still drop off
+  after their five minutes — an old listing has usually gone.
+- **Correcting a trade no longer opens a dialog.** *Amount*, *Price per* and *Total* are
+  editable in the row itself on *Waiting on a reply*, with arrows on each. They move
+  together: change the amount and the total follows at the listed price; change either
+  price and the other one re-derives. What you originally asked for is still what the log
+  keeps alongside the correction, and you can walk a correction back up as well as down.
+- **One "Not Available" button in place of AFK, Offline and Refused.** You used them
+  properly for a session and then said they cost more than they were worth: opportunities
+  arrive faster than a three-way judgement can be made. One press now drops the row and
+  records that no trade happened, claiming nothing about why. *Refused* is still there in
+  the Trades tab's Result drop-down for when you actually know. Nothing already recorded
+  changed meaning.
+- **Switching *Find trades* off and on again carries on where it stopped**, instead of
+  re-reading the items it had just finished with. It is the pause button in practice —
+  used when replies pile up — and restarting no longer costs a quarter of an hour of
+  re-fetching or re-finds listings you have already dealt with. Rows already in the queue
+  are left alone when you stop.
+
 ## [0.8.0] — 2026-08-02
 
 The first half of the fourth session's defect list. The headline is that **the app was

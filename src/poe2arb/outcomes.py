@@ -59,6 +59,15 @@ class Outcome(Enum):
     the two reasons the maintainer ever actually pressed it. The member stays
     because `outcomes.jsonl` returns `no_reply` records forever; same constraint
     as `bands.symbol_for_name`.
+
+    **`AFK` and `OFFLINE` are the same story one version later.** 0.9.0 stopped
+    asking the user to choose between them: measured across four 0.8.0 sessions
+    (n=310), the split was used properly in one of them and then rejected, at
+    22% of that session's whispers — *"too many options to press during fast
+    paced trading"*. One button now writes `UNAVAILABLE`, which claims only
+    that the seller did not trade, and the `Client.txt` reader is where the
+    AFK/offline/silent classification belongs, because that is where the
+    evidence is. Both members stay: 11 real records are stored under them.
     """
 
     PENDING = "pending"      # whisper copied, nothing reported back yet
@@ -67,8 +76,12 @@ class Outcome(Enum):
     NO_REPLY = "no_reply"    # legacy: written by <=0.7.0, never written now
     DECLINED = "declined"    # seller replied and refused the listed price
     EXPIRED = "expired"      # the timer gave up; nothing is claimed about why
-    AFK = "afk"              # GGG's auto-reply came back, or they were away
-    OFFLINE = "offline"      # the game said the character is not online
+    AFK = "afk"              # legacy button: they were away. Never written now
+    OFFLINE = "offline"      # legacy button: not online. Never written now
+    # One press, no judgement: the seller did not trade and the row is done
+    # with. Deliberately says nothing about *why* — that is what the three-way
+    # split cost too much to answer by hand.
+    UNAVAILABLE = "unavailable"
 
     @property
     def is_resolved(self) -> bool:
@@ -84,10 +97,15 @@ class Outcome(Enum):
 
         The three-way split is for measuring *why* a whisper goes unanswered;
         anything asking "did they answer at all" wants this, and must keep
-        matching `NO_REPLY` for records written before the split.
+        matching `NO_REPLY` for records written before the split — and now
+        `UNAVAILABLE` for the ones written after it was collapsed again.
         """
         return self in (
-            Outcome.NO_REPLY, Outcome.EXPIRED, Outcome.AFK, Outcome.OFFLINE
+            Outcome.NO_REPLY,
+            Outcome.EXPIRED,
+            Outcome.AFK,
+            Outcome.OFFLINE,
+            Outcome.UNAVAILABLE,
         )
 
 
@@ -105,6 +123,7 @@ LABELS = {
     Outcome.EXPIRED: "Expired",
     Outcome.AFK: "AFK",
     Outcome.OFFLINE: "Offline",
+    Outcome.UNAVAILABLE: "Not Available",
 }
 
 # Why each is written, for the button and the cell that carries it.
@@ -117,8 +136,13 @@ TIPS = {
     Outcome.EXPIRED: "Nobody said what happened before the timer ran out. Not a "
                      "claim that the seller stayed silent — pin a row to stop "
                      "its clock.",
-    Outcome.AFK: "They were away — the game's auto-reply came back, or nothing did.",
-    Outcome.OFFLINE: "The game said that character isn't online.",
+    Outcome.AFK: "Recorded up to 0.8.0, when AFK and Offline were separate "
+                 "buttons.",
+    Outcome.OFFLINE: "Recorded up to 0.8.0, when AFK and Offline were separate "
+                     "buttons.",
+    Outcome.UNAVAILABLE: "No trade happened and the seller isn't there — away, "
+                         "offline, or simply silent. Drops the row without "
+                         "asking you which.",
 }
 
 

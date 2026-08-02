@@ -237,12 +237,27 @@ class ColumnLayout(QObject):
         item = self.table.horizontalHeaderItem(column)
         text = item.text() if item is not None else ""
         if not text:
-            return self.MIN_WIDTH
+            return max(self.MIN_WIDTH, self._widget_floor(column))
         metrics = self.table.horizontalHeader().fontMetrics()
         floor = metrics.horizontalAdvance(text) + self.HEADER_PADDING
         if text in self._roomy:
             floor = max(floor, self.ROOMY_MIN)
-        return floor
+        return max(floor, self._widget_floor(column))
+
+    def _widget_floor(self, column: int) -> int:
+        """What a control in this column needs, or 0 if there isn't one.
+
+        `resizeColumnsToContents` measures items and ignores cell widgets, so
+        a column holding a spin box was sized to the number and not to the
+        arrows beside it — which is the same failure as an action column sized
+        to a guess, one control smaller. Row 0 is enough: every row in a column
+        is built the same way, and asking each of fifty would put a loop inside
+        a resize event.
+        """
+        if not self.table.rowCount():
+            return 0
+        widget = self.table.cellWidget(0, column)
+        return widget.sizeHint().width() if widget is not None else 0
 
     def minimum_row_width(self) -> int:
         """The narrowest the whole row can be drawn without lying.

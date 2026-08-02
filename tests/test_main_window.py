@@ -19,6 +19,25 @@ from PySide6.QtGui import QAction  # noqa: E402
 from poe2arb.gui import main_window as mw  # noqa: E402
 
 
+class _NullWorker:
+    """A SweepWorker that never touches the network or a thread."""
+
+    def __init__(self):
+        self.progress = self.budget = self.candidates = _NullSignal()
+        self.finished_ok = self.failed = self.finished = _NullSignal()
+
+    def start(self):
+        pass
+
+    def isRunning(self):   # noqa: N802 (Qt naming)
+        return False
+
+
+class _NullSignal:
+    def connect(self, *_a, **_k):
+        pass
+
+
 @pytest.fixture(scope="module")
 def qapp():
     return QApplication.instance() or QApplication([])
@@ -253,6 +272,55 @@ def test_switching_it_off_stops_the_timer(window, monkeypatch):
     assert w._next_sweep_at is None
 
 
+def test_stopping_a_sweep_remembers_where_it_had_got_to(window, monkeypatch):
+    """The toggle is used as a pause, and a restart used to re-scan the same
+    items — half of the duplicate-whisper problem, the other half of which
+    (suppressing a resolved listing) shipped in 0.8.0."""
+    from types import SimpleNamespace
+
+    w = window()
+    w._sweep_worker = SimpleNamespace(
+        was_cancelled=True, reached="omen-of-light", isRunning=lambda: False
+    )
+    w._sweep_thread_finished()
+    assert w._resume_from == "omen-of-light"
+
+    started = {}
+
+    def fake_worker(cfg, parent, resume_from=None):
+        started["from"] = resume_from
+        return _NullWorker()
+
+    monkeypatch.setattr(mw, "SweepWorker", fake_worker)
+    w._sweep_worker = None
+    w.start_sweep()
+    assert started["from"] == "omen-of-light"
+    # And only once: the sweep after that is a fresh pass from the top.
+    assert w._resume_from is None
+
+
+def test_a_sweep_that_finished_starts_the_next_one_from_the_top(window):
+    from types import SimpleNamespace
+
+    w = window()
+    w._resume_from = "omen-of-light"
+    w._sweep_worker = SimpleNamespace(
+        was_cancelled=False, reached="omen-of-light", isRunning=lambda: False
+    )
+    w._sweep_thread_finished()
+    assert w._resume_from == "omen-of-light"   # untouched by a clean finish
+
+
+def test_stopping_leaves_the_ready_rows_alone(window, monkeypatch):
+    """There is no backlog to cancel any more, so stopping stops adding."""
+    w = window()
+    monkeypatch.setattr(w, "start_sweep", lambda: None)
+    _queued(w, chars=("A", "B", "C"))
+    w.sweep_action.setChecked(True)
+    w.sweep_action.setChecked(False)
+    assert len(w.trade_queue.available) == 3
+
+
 def test_a_finished_sweep_schedules_the_next_one(window):
     """That's what makes it continuous rather than a one-shot button."""
     w = window(sweep_interval_minutes=5.0)
@@ -393,29 +461,26 @@ def _queued(window, *, chars=("A",), stock=1.0):
     return t0
 
 
-def test_the_hotkey_takes_the_live_offer(window):
-    w = window()
-    _queued(w)
-    live = w.trade_queue.offered
-    w._hotkey_pressed()
-    assert live.attempt_id is not None
-    assert w.trade_queue.awaiting == [live]
+def test_the_hotkey_takes_row_one_of_ready(window):
+    """The rule the 0.9.0 queue rework exists to make true.
 
-
-def test_the_hotkey_falls_back_to_the_oldest_ready_trade(window):
-    """The alert window is seconds and the listed window is minutes.
-
-    Most of the time nothing is live, and the key used to do nothing at all
-    while the panel was full of perfectly takeable rows.
+    Up to 0.8.0 the key took whichever trade was OFFERED — picked by rank,
+    while the table was drawn by arrival — so it acted on a row the user could
+    not pick out of the list.
     """
-    from datetime import timedelta
-
     w = window()
-    t0 = _queued(w, chars=("A",))
-    w.trade_queue.tick(t0 + timedelta(seconds=w.cfg.offer_window_s + 1))
-    assert w.trade_queue.offered is None
-    [ready] = w.trade_queue.available
+    _queued(w, chars=("A", "B", "C"))
+    top = w.trade_queue.available[0]
+    w._hotkey_pressed()
+    assert top.attempt_id is not None
+    assert w.trade_queue.awaiting == [top]
 
+
+def test_the_hotkey_works_the_moment_a_trade_is_found(window):
+    """No promotion step to wait through: submitted is takeable."""
+    w = window()
+    _queued(w, chars=("A",))
+    [ready] = w.trade_queue.available
     w._hotkey_pressed()
     assert w.trade_queue.awaiting == [ready]
 
@@ -438,7 +503,7 @@ def test_a_whisper_taken_from_the_queue_shows_under_ones_i_messaged(window):
 
     w = window()
     _queued(w)
-    live = w.trade_queue.offered
+    live = w.trade_queue.next_up
     w._queue_take(live.id)
     assert live.candidate.key in w.sweep._attempt_ids
     assert w.sweep._matches_mode(live.candidate, SHOW_WHISPERED)
@@ -450,7 +515,7 @@ def test_a_trade_marked_as_bought_shows_under_ones_i_bought(window):
 
     w = window()
     _queued(w)
-    live = w.trade_queue.offered
+    live = w.trade_queue.next_up
     candidate = live.candidate
     w._queue_take(live.id)
     w._queue_outcome(live.id, Outcome.FILLED)
@@ -461,7 +526,7 @@ def test_a_trade_marked_as_bought_shows_under_ones_i_bought(window):
 def test_declining_stops_a_later_sweep_re_offering_it(window):
     w = window()
     t0 = _queued(w)
-    live = w.trade_queue.offered
+    live = w.trade_queue.next_up
     candidate = live.candidate
     w._queue_dismiss(live.id)
     assert w.trade_queue.submit([candidate], t0) == 0
@@ -499,7 +564,7 @@ def test_a_session_starts_with_find_trades_and_stamps_every_whisper(window, monk
     session_id = w.session.id
 
     _queued(w, chars=("A",))
-    w._queue_take(w.trade_queue.offered.id)
+    w._queue_take(w.trade_queue.next_up.id)
     [logged] = read_attempts(w.cfg.outcomes_path)
     assert logged.session_id == session_id
 
@@ -525,7 +590,7 @@ def test_it_ends_once_nothing_is_running_and_nothing_is_left(window, monkeypatch
     w._queue_tick()
     assert w.session.id == started        # a trade is still on offer
 
-    w._queue_dismiss(w.trade_queue.offered.id)
+    w._queue_dismiss(w.trade_queue.next_up.id)
     w._queue_tick()
     assert not w.session.active
 
@@ -583,7 +648,7 @@ def test_revising_a_trade_rewrites_the_logged_quantity(window):
 
     w = window()
     _queued(w, chars=("A",), stock=18.0)
-    live = w.trade_queue.offered
+    live = w.trade_queue.next_up
     w._queue_take(live.id)
     assert live.candidate.plan.units == 18.0
 
@@ -602,7 +667,7 @@ def test_a_counteroffered_price_reaches_the_log(window):
 
     w = window()
     _queued(w, chars=("A",), stock=18.0)
-    live = w.trade_queue.offered
+    live = w.trade_queue.next_up
     w._queue_take(live.id)
 
     w._queue_revise(live.id, 18.0, 260.0)
@@ -620,7 +685,7 @@ def test_the_trades_tab_corrects_a_verdict_the_timer_got_wrong(window):
 
     w = window()
     _queued(w, chars=("A",), stock=1.0)
-    live = w.trade_queue.offered
+    live = w.trade_queue.next_up
     w._queue_take(live.id)
     w._queue_outcome(live.id, Outcome.EXPIRED)
 
@@ -642,7 +707,7 @@ def test_the_trades_tab_amends_a_quantity_in_the_log(window):
 
     w = window()
     _queued(w, chars=("A",), stock=18.0)
-    live = w.trade_queue.offered
+    live = w.trade_queue.next_up
     w._queue_take(live.id)
     w._queue_outcome(live.id, Outcome.FILLED)
 

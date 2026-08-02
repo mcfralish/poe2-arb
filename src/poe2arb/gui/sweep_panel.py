@@ -117,9 +117,18 @@ EDITABLE_HISTORY_COLUMNS = (AMOUNT_COLUMN, TOTAL_COLUMN, SETTLE_COLUMN)
 # never written any more (see `outcomes.Outcome`), and correcting a row *away*
 # from it is most of what this exists for. `PENDING` is missing because putting
 # a resolved trade back on the clock is not a correction anyone means to make.
+#
+# `AFK` and `OFFLINE` stay even though 0.9.0 stopped offering them as buttons:
+# this is the surface that *corrects* records, 11 of them are stored under
+# those two, and a drop-down that cannot show a row's own value reads as a bug.
+# `DECLINED` stays for a different reason — the one button that replaced the
+# three deliberately claims nothing about why, and "they refused the price" is
+# a real answer the user sometimes has. It is a considered verdict rather than
+# a fast one, so this is where it belongs.
 EDITABLE_OUTCOMES = (
     Outcome.FILLED,
     Outcome.SOLD,
+    Outcome.UNAVAILABLE,
     Outcome.DECLINED,
     Outcome.EXPIRED,
     Outcome.AFK,
@@ -380,13 +389,12 @@ class SweepPanel(QWidget):
         # disabled until a whisper has actually been copied — there is nothing
         # to report a verdict on before that.
         self._outcome_btns: dict[Outcome, QPushButton] = {}
-        # The same four verdicts the Opportunities queue offers, from the same
-        # source. No Reply is gone from both: the timer writes Expired on its
-        # own, and by hand the two things ever actually meant were AFK and
-        # Offline.
+        # The same three verdicts the Opportunities queue offers, from the same
+        # source. AFK, Offline and Refused were buttons here until 0.9.0 and
+        # are now one *Not Available* press plus the Result drop-down on the
+        # row below, which is where a considered correction belongs.
         for outcome in (
-            Outcome.FILLED, Outcome.SOLD, Outcome.AFK, Outcome.OFFLINE,
-            Outcome.DECLINED,
+            Outcome.FILLED, Outcome.SOLD, Outcome.UNAVAILABLE,
         ):
             btn = QPushButton(label_for(outcome))
             btn.setToolTip(

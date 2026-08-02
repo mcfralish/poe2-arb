@@ -122,7 +122,7 @@ class SettingsDialog(QDialog):
         )
         form.addRow("Keep scan history for", self.retention)
 
-        self.sound = QCheckBox("Play sound with notifications")
+        self.sound = QCheckBox("Play a sound when new trades arrive")
         self.sound.setChecked(cfg.alert_sound)
         form.addRow("", self.sound)
 
@@ -207,17 +207,6 @@ class SettingsDialog(QDialog):
 
         self._section(form, "The trade queue")
 
-        self.offer_window = self._dspin(
-            cfg.offer_window_s, 5.0, 300.0, 5.0, " s", decimals=0
-        )
-        self.offer_window.setToolTip(
-            "How long a new trade stays the active one — a notification shows and\n"
-            "the hotkey will copy it.\n\n"
-            "Short is fine. Ignoring it costs you nothing; it just drops into\n"
-            "Ready to whisper and waits there."
-        )
-        form.addRow("Trade alert lasts", self.offer_window)
-
         # Minutes, not seconds. Both of these are set in multiples of a minute
         # in practice, and reading "600 s" off a spin box to work out whether it
         # is long enough is arithmetic the dialog should be doing (reported from
@@ -228,8 +217,7 @@ class SettingsDialog(QDialog):
         )
         self.available_ttl.setToolTip(
             "How long a trade stays in Ready to whisper before it's dropped.\n\n"
-            "Counted from when it first appears, so it gets the whole of this\n"
-            "however long its alert was up for.\n\n"
+            "Counted from the moment it's found.\n\n"
             "Other people are buying these too, so an old offer has usually gone\n"
             "already and messaging about it just wastes the whisper."
         )
@@ -327,7 +315,6 @@ class SettingsDialog(QDialog):
         self.retention.setValue(d.history_retention_days)
         self.sound.setChecked(d.alert_sound)
         self.always_on_top.setChecked(d.always_on_top)
-        self.offer_window.setValue(d.offer_window_s)
         self.available_ttl.setValue(d.available_ttl_s / 60.0)
         self.awaiting_timeout.setValue(d.awaiting_timeout_s / 60.0)
         self.hotkey_enabled.setChecked(d.trade_hotkey_enabled)
@@ -542,7 +529,6 @@ class SettingsDialog(QDialog):
             history_retention_days=self.retention.value(),
             alert_sound=self.sound.isChecked(),
             always_on_top=self.always_on_top.isChecked(),
-            offer_window_s=self.offer_window.value(),
             available_ttl_s=self.available_ttl.value() * 60.0,
             awaiting_timeout_s=self.awaiting_timeout.value() * 60.0,
             trade_hotkey=self.hotkey.binding(),

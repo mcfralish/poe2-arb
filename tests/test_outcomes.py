@@ -471,7 +471,11 @@ def test_every_verdict_has_a_word_for_it():
 def test_silence_covers_the_old_value_too():
     """Anything asking "did they answer" must keep matching pre-split records."""
     assert {o for o in Outcome if o.is_silence} == {
-        Outcome.NO_REPLY, Outcome.EXPIRED, Outcome.AFK, Outcome.OFFLINE
+        Outcome.NO_REPLY,
+        Outcome.EXPIRED,
+        Outcome.AFK,
+        Outcome.OFFLINE,
+        Outcome.UNAVAILABLE,
     }
 
 

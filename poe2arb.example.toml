@@ -57,9 +57,7 @@ exclude_currencies = []
 # --- the trade queue (desktop app) ---
 # Gap between sweeps while "Find trades" is switched on.
 sweep_interval_minutes = 10.0
-# How long a new trade stays live: notification shown, hotkey armed.
-offer_window_s = 20.0
-# How long it then stays in "Ready to whisper" before expiring.
+# How long a trade stays in "Ready to whisper", counted from when it is found.
 available_ttl_s = 300.0
 # How long a copied whisper waits for your verdict before recording itself as
 # "no reply" — which is almost always what happened. 0 to answer every one by hand.

@@ -102,6 +102,14 @@ def select_sweep_items(snapshot: CeSnapshot, cfg: Config) -> list[str]:
     return picked
 
 
+def _rotated(items: list[str], first: str | None) -> list[str]:
+    """The same items, starting at `first`. Unchanged if it isn't there."""
+    if first is None or first not in items:
+        return items
+    at = items.index(first)
+    return items[at:] + items[:at]
+
+
 def run_sweep(
     cfg: Config,
     *,
@@ -109,6 +117,8 @@ def run_sweep(
     should_cancel: Callable[[], bool] | None = None,
     on_budget: Callable[..., None] | None = None,
     on_candidates: Callable[[list[Candidate]], None] | None = None,
+    on_item: Callable[[str], None] | None = None,
+    resume_from: str | None = None,
     ggg: GggExchangeClient | None = None,
     snapshot: CeSnapshot | None = None,
 ) -> SweepResult:
@@ -125,6 +135,16 @@ def run_sweep(
     silent minutes followed by a flood of queued offers all at once — which is
     both overwhelming and wrong, since the first item's listings are already a
     quarter of an hour stale by the time the last one is fetched.
+
+    `resume_from` **rotates** the item list to start at that id rather than
+    truncating it, so a sweep stopped a third of the way through covers the
+    other two thirds first and then comes back round. The maintainer uses the
+    *Find trades* toggle as a pause when replies pile up, and a restart that
+    began at the top re-fetched the same items and re-offered listings that had
+    just been dealt with. `on_item` reports each id as it is reached, which is
+    how the caller knows where to resume; an id that is no longer in the list —
+    the universe shifts between sweeps — is ignored and the sweep starts at the
+    top.
     """
     started = datetime.now(timezone.utc)
     own_ggg = ggg is None
@@ -137,7 +157,7 @@ def run_sweep(
             scout = ScoutClient(cfg)
             snapshot = scout.snapshot(resolve_league(cfg))
         league = snapshot.league
-        items = select_sweep_items(snapshot, cfg)
+        items = _rotated(select_sweep_items(snapshot, cfg), resume_from)
         log.info(
             "cross-venue sweep: %d items in %s, ~%.0f min at %.0fs/request",
             len(items), league, len(items) * cfg.request_interval_s / 60, cfg.request_interval_s,
@@ -161,6 +181,8 @@ def run_sweep(
             # is being waited on, which is the whole point of watching it.
             if progress is not None:
                 progress(n, len(items), names.get(item_id, item_id))
+            if on_item is not None:
+                on_item(item_id)
             try:
                 fresh = ggg.fetch_listings(league, item_id)
             except ScanCancelled:

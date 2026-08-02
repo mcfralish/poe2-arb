@@ -19,8 +19,10 @@ published, release job green. **0.9.0 is open**: `__init__.py` and `pyproject.to
 `field-test-5` off `main`. Rename that heading to `## [0.9.0] — <date>` before tagging or
 the release job fails, which is the point of it.
 
-**Start with Batch 1** (decided 2026-08-02, over pulling Batch 6's `ce_age_s` analysis
-forward — that stays where it is).
+**Batch 1 is done** (2026-08-02) — the queue rework, the merged verdict button, the in-row
+editors and stop-and-resume all shipped to `field-test-5`. **Start with Batch 2**, which is
+small and was written to be folded in with Batch 1; then Batch 3, which now has one
+confirmed measurement waiting for it (see below).
 
 Two field-test sessions have landed since 0.7.0 and both are fully written up in FINDINGS:
 *Found in the fourth session of real use* (2026-08-01) and *The first real play session on
@@ -45,7 +47,9 @@ Each was a fork the work would otherwise have guessed at.
 1. **0.8.0 tags now; the FT5 UI batch is 0.9.0.** *Done — v0.8.0 shipped 2026-08-02.* One
    release branch per field-test cycle, merged into `main` at the tag: 0.9.0's is
    `field-test-5`.
-2. **The toast and the alert window are removed; the ● marker stays, re-defined.** ● stops
+2. **The toast and the alert window are removed; the ● marker stays, re-defined.** *Done —
+   shipped in Batch 1, 2026-08-02; ● ended up marking the hotkey's row rather than row 1
+   so that it stays truthful while the panel holds a reshuffle under the pointer.* ● stops
    being a state (`OFFERED`) and becomes a position — **row 1 of *Ready*, which after the
    re-sort is the trade the hotkey takes**. `offer_window_s` and `alert_until` go; retire
    the config key via `config.RETIRED_KEYS` and drop its Settings row. `expires_at` starts
@@ -60,7 +64,9 @@ Each was a fork the work would otherwise have guessed at.
    rather than adding a dependency, and **confirm QtSvg survives the PyInstaller bundle** —
    an SVG that renders in dev and not in the exe is the same failure as the dingbats, and
    only a Windows build proves it.
-5. **The merged verdict button writes `Outcome.UNAVAILABLE`.** Chosen over `NOT_AVAILABLE`,
+5. **The merged verdict button writes `Outcome.UNAVAILABLE`.** *Done — shipped in Batch 1,
+   2026-08-02, labelled *Not Available*, and deliberately kept out of `SETTLED_OUTCOMES`.*
+   Chosen over `NOT_AVAILABLE`,
    `NO_TRADE` and `SELLER_GONE`: it matches the button's wording and claims nothing about
    *why*, which is all a single press establishes. `NO_TRADE` was rejected as wide enough to
    swallow `DECLINED`. **This is permanent** — the log stores the enum value and `Outcome`
@@ -68,13 +74,13 @@ Each was a fork the work would otherwise have guessed at.
 
 ## The batches
 
-Ordered by dependency, not importance. **Batch 1 must come first** — the button count it
-settles drives every width decision in Batch 3. Batch 6 is desk work and does not compete
-with the UI batches for game time; do not let the UI list crowd it out entirely.
+Ordered by dependency, not importance. Batch 1 (the queue rework) is done; the button
+count it settled is **five** on a whispered row and **two** on a ready one, which is what
+Batch 3's width decisions are against. Batch 6 is desk work and does not compete with the
+UI batches for game time; do not let the UI list crowd it out entirely.
 
 | # | Batch | Main files |
 |---|---|---|
-| 1 | The queue rework | `trade_queue.py`, `queue_panel.py`, `main_window.py`, `config.py` |
 | 2 | Bankroll correctness | `main_window.py`, `sweep_panel.py`, `trade_queue.py` |
 | 3 | Table and window layout | `table_items.py`, `queue_panel.py`, `bankroll_bar.py` |
 | 4 | Icons and row polish | new assets, `queue_panel.py`, `settings_dialog.py` |
@@ -83,57 +89,10 @@ with the UI batches for game time; do not let the UI list crowd it out entirely.
 
 ---
 
-### Batch 1 — The queue rework
-
-The largest single change and the one the rest sits on. Decision 2 above is the spec.
-
-- [ ] **Replace AFK / Offline / Refused with one "Seller not available" button.** *(Decided
-      2026-08-02: zero presses in 789 whispers, because the queue arrives faster than a
-      three-way judgement can be made.)* Its only job is to drop the row; the
-      AFK/offline/silent split moves to the `Client.txt` reader, where the evidence already
-      is. **Keep `Outcome.AFK` and `Outcome.OFFLINE` in the enum** — the log holds records
-      under both and `Outcome` never renames members. The new member is
-      **`Outcome.UNAVAILABLE`** (decision 5 above; permanent). It is a silence for
-      `is_silence` purposes and belongs in `trade_queue.SETTLED_OUTCOMES` only if a press
-      should suppress the listing for the session — decide that against `AFK`, which is
-      deliberately *not* in the set because an away seller comes back. Evidence in
-      [docs/FINDINGS.md](docs/FINDINGS.md), *The three-way verdict split has never once been
-      used by hand*.
-- [ ] **Rework *Ready to whisper* into a visible FIFO.** Goal: **row 1 is always the trade
-      the hotkey will take, row 2 is the one after it.** The maintainer keeps the pane small
-      to give room to *Waiting on a reply* and cannot see what is next.
-      - *Stop the drip.* `tick` promotes one QUEUED trade per `offer_window_s`, so a sweep's
-        candidates trickle in over minutes and sit invisible meanwhile. **Put every candidate
-        into Ready as it is found.** Check `cancel_pending`, which exists to drop the QUEUED
-        backlog when *Find trades* stops — with no backlog, stopping simply stops adding,
-        which is the intended behaviour anyway.
-      - *Sort Ready by the hotkey's own order.* The hotkey takes `trade_queue.offered`,
-        picked by `_next_to_offer` **by rank**, while `available` sorts by
-        `offered_at or queued_at`. That mismatch is the whole complaint.
-      - *Drop the toast and the alert window with it* — decision 2.
-      - **The cost is real and was the reason for the old rule:** rank order reshuffles when
-        a better candidate arrives, so rows move under the cursor. **Mitigate rather than
-        revert** — row 1 is the hotkey's row so it is the least click-sensitive; consider
-        holding a reshuffle while the pointer is over the table.
-- [ ] **Rework the counteroffer editing to inline spin-arrow fields.** *(Maintainer
-      feedback 2026-08-02, after using the dialog.)* Inline up/down arrows rather than
-      *Adjust…*, with **Total and Price per both editable, each moving the other**. The
-      obstacle is real and was the reason for the dialog: the queue tables rebuild every
-      second for the countdowns and that kills an open editor. Solve it — suppress the
-      rebuild while an editor is open, or have the tick write only the countdown cells —
-      rather than reverting to a dialog.
-- [ ] **A restart of *Find trades* re-scans the same items immediately.** The remaining half
-      of the duplicate-whisper problem; suppressing a *resolved* listing shipped in 0.8.0.
-      The maintainer uses the toggle as a pause when replies pile up and gets a fresh sweep
-      of the same items for it. Either resume the sweep where it stopped or build an explicit
-      **Pause** that holds the queue without ending the session. `session.py` already treats
-      a mid-session toggle as *continue*, so the session boundary is not what needs changing.
-
----
-
 ### Batch 2 — Bankroll correctness
 
-Small, subtle, and it cost a real trade — fold into Batch 1 if it lands early.
+Small, subtle, and it cost a real trade. It was written to be folded into Batch 1 and was
+not — take it first.
 
 - [ ] **Changing the bankroll re-sizes nothing that already exists.** Root-caused from the
       code 2026-08-02, no game test needed. `_bankroll_changed` (`main_window.py:1124`)
@@ -144,8 +103,8 @@ Small, subtle, and it cost a real trade — fold into Batch 1 if it lands early.
       missed. Consequence measured 2026-08-02: a **599 div** row against a **260 div**
       bankroll, whispered, and the order could not be filled.
       - `cfg.bankroll()` is read **inside the per-item loop**, so the change lands
-        progressively — a stale row's exposure is up to a full ~15-minute cycle. **Removing
-        the drip does not fix this.**
+        progressively — a stale row's exposure is up to a full ~15-minute cycle. Removing
+        the drip (Batch 1, done) did not fix this, as predicted.
       - **Re-size, do not drop** (decision 3): re-plan to what the new bankroll affords, drop
         only if that falls below `min_profit_divines`. `smallest_lot` / `replan_units`
         already do it and a partial ask is already a supported class of whisper.
@@ -167,6 +126,13 @@ Small, subtle, and it cost a real trade — fold into Batch 1 if it lands early.
       of **Item** and **Seller**, which keep content-derived floors rather than their four-
       and six-letter heading floors. **This amends the 0.8.0 rule** that a table scrolls
       sideways below the sum of its floors: right for a name column, wrong for buttons.
+      **Measured 2026-08-02 by screenshot at the shipped 1000px default, before and after
+      Batch 1:** both tables clip the last button by about the width of the vertical
+      scrollbar, because growth fills the viewport exactly and *then* the vertical
+      scrollbar appears and takes ~15px back. 0.8.0 clips the same way, so this is the
+      real defect rather than anything the rework introduced. Batch 1 helped it — five
+      buttons instead of seven, and spin boxes sized to their value rather than to their
+      range — but did not fix it.
 - [ ] **Reduce the window's minimum width** from 960 (`main_window.py:119`). The driver was
       *Long shots* wrapping in the bankroll bar, and there is free margin to its left — move
       it rather than keeping the window wide. Defines the real floor together with the item
@@ -442,6 +408,16 @@ Real work, none of it blocking the batches above.
 
 Not session work; the queue of things only playing can answer.
 
+- **Play a session on the 0.9.0 queue and say whether the reshuffle bites.** The whole
+  rework rests on "row 1 is the trade the hotkey takes", bought at the price of rows moving
+  when something better arrives. The mitigation — the order holds while the pointer is over
+  the table — is verified only by a test and a Linux screenshot. Worth watching for: a row
+  clicked by mistake, and whether the ● ever visibly disagrees with row 1 for long enough
+  to confuse. Also worth one deliberate check: stop *Find trades* mid-sweep, start it
+  again, and confirm the log line says it resumed rather than starting over.
+- **Do the in-row editors work with a seller talking to you?** Three spin boxes per
+  whispered row replaced the *Adjust…* dialog. The rebuild is held while one is busy, which
+  is the part most likely to be wrong in real use — a row arriving or expiring mid-edit.
 - **Just play, so the instrumentation fills up.** `stock` and `ce_age_s` are recorded on every
   whisper since 0.8.0 and both are unanalysed. `ce_age_s` is the live hypothesis for the
   pricing error and needs volume rather than attention. The published v0.8.0 exe is the build

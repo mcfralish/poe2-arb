@@ -230,6 +230,46 @@ def test_progress_names_the_item_being_fetched(snapshot):
     assert seen and all(what in names for what in seen)
 
 
+# --- stopping and starting again -------------------------------------------
+# The maintainer uses the *Find trades* toggle as a pause when replies pile up,
+# and a restart used to begin at the top of the list — re-fetching items it had
+# just read and re-finding listings already dealt with.
+
+
+def test_the_item_reached_is_reported_so_a_restart_can_resume(snapshot):
+    seen = []
+    items = select_sweep_items(snapshot, cfg())
+    run_sweep(cfg(), ggg=FakeGgg(), snapshot=snapshot, on_item=seen.append)
+    assert seen == items
+
+
+def test_resuming_rotates_the_list_rather_than_truncating_it(snapshot):
+    """The rest of the pass first, then round to what it had already read.
+
+    Truncating would leave the top of the list permanently unswept by anyone
+    who pauses often, which is exactly the user this is for.
+    """
+    seen = []
+    items = select_sweep_items(snapshot, cfg())
+    assert len(items) > 1
+    run_sweep(
+        cfg(), ggg=FakeGgg(), snapshot=snapshot,
+        on_item=seen.append, resume_from=items[1],
+    )
+    assert seen == items[1:] + items[:1]
+
+
+def test_resuming_from_an_item_that_has_gone_starts_at_the_top(snapshot):
+    """The universe shifts between sweeps; that is not a reason to fetch none."""
+    seen = []
+    items = select_sweep_items(snapshot, cfg())
+    run_sweep(
+        cfg(), ggg=FakeGgg(), snapshot=snapshot,
+        on_item=seen.append, resume_from="no-such-item",
+    )
+    assert seen == items
+
+
 def test_candidates_are_reported_as_each_item_is_priced(snapshot):
     """A sweep is fifteen minutes long; holding the results to the end meant a
     long silence and then every offer at once (reported from the field

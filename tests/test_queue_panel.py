@@ -1,4 +1,4 @@
-"""The Opportunities tab: two sections, live offer, verdicts."""
+"""The Opportunities tab: two sections, in-row edits, verdicts."""
 
 from __future__ import annotations
 
@@ -49,8 +49,8 @@ def cand(*, char="Seller", pay=11.0, item="omen", stock=1.0, get=1.0):
 
 
 def loaded(qapp, *candidates, tick_at=T0):
-    # The shipped windows: 15s live, 60s listed, 5min before self-marking.
-    q = TradeQueue(offer_window_s=15.0, available_ttl_s=60.0, awaiting_timeout_s=300.0)
+    # The shipped windows: 60s listed, 5min before a whisper self-marks.
+    q = TradeQueue(available_ttl_s=60.0, awaiting_timeout_s=300.0)
     q.submit(list(candidates), T0)
     q.tick(tick_at)
     p = QueuePanel()
@@ -61,41 +61,54 @@ def loaded(qapp, *candidates, tick_at=T0):
 
 # --- the two sections ------------------------------------------------------
 
-def test_a_live_offer_appears_in_ready_with_a_marker(qapp):
+def test_a_found_trade_appears_in_ready_with_a_marker(qapp):
     p, q = loaded(qapp, cand())
     assert p.ready.rowCount() == 1
     assert p.awaiting.rowCount() == 0
     assert p.ready.item(0, 0).text() == "●"
 
 
-def test_the_headline_names_the_live_offer_and_its_countdown(qapp):
+def test_the_headline_counts_both_sections(qapp):
+    """It named the live offer until 0.9.0. There is no live offer any more —
+    the table itself says which trade is next, in the row order the hotkey
+    uses — so the headline went back to being a count.
+    """
     p, q = loaded(qapp, cand())
-    text = p.headline.text()
-    assert "Omen of Light" in text
-    assert "+" in text and "div" in text
-    # The listed deadline, not the alert window: "how long until this is gone"
-    # is the only one of the two clocks the user has a decision hanging on.
-    assert "1m" in text
+    assert p.headline.text() == "1 trade ready"
+    q.take_next(T0)
+    p.refresh(q, T0)
+    qapp.processEvents()
+    assert p.headline.text() == "1 waiting on a reply"
 
 
 def test_taking_moves_a_trade_between_the_sections(qapp):
     p, q = loaded(qapp, cand())
-    q.take_offered(T0)
+    q.take_next(T0)
     p.refresh(q, T0)
     qapp.processEvents()
     assert p.ready.rowCount() == 0
     assert p.awaiting.rowCount() == 1
 
 
-def test_a_lapsed_offer_stays_ready_without_the_marker(qapp):
-    """Still takeable — it just isn't worth interrupting a map for any more."""
-    p, q = loaded(qapp, cand())
-    later = T0 + timedelta(seconds=16)
-    q.tick(later)
-    p.refresh(q, later)
+def test_the_marker_follows_the_hotkey_not_the_top_row(qapp):
+    """● is a position, not a state, since 0.9.0 — and the position it marks
+    is whichever row `take_next` would take. Normally that is row 1; while the
+    panel is holding a reshuffle under the cursor it need not be, and the
+    marker has to stay truthful.
+    """
+    p, q = loaded(qapp, cand(char="Fair", pay=9.0))
+    p.ready.set_hover_row(0)                       # pointer parked on the table
+    q.submit([cand(char="Better", pay=8.0)], T0)
+    p.refresh(q, T0)
     qapp.processEvents()
-    assert p.ready.rowCount() == 1
-    assert p.ready.item(0, 0).text() == ""
+    assert [p.ready.item(r, 7).text() for r in range(2)] == ["Fair", "Better"]
+    assert [p.ready.item(r, 0).text() for r in range(2)] == ["", "●"]
+
+    p.ready.set_hover_row(-1)                      # pointer leaves; order snaps
+    p.refresh(q, T0)
+    qapp.processEvents()
+    assert [p.ready.item(r, 7).text() for r in range(2)] == ["Better", "Fair"]
+    assert [p.ready.item(r, 0).text() for r in range(2)] == ["●", ""]
 
 
 def test_an_expired_trade_leaves_the_panel(qapp):
@@ -123,7 +136,7 @@ def test_accept_takes_the_trade_in_a_single_click(qapp):
     p, q = loaded(qapp, cand())
     p.take_requested.connect(seen.append)
     assert p.click_action(p.ready, 0, "Accept")
-    assert seen == [q.offered.id]
+    assert seen == [q.next_up.id]
 
 
 def test_decline_drops_the_trade_in_a_single_click(qapp):
@@ -131,19 +144,19 @@ def test_decline_drops_the_trade_in_a_single_click(qapp):
     p, q = loaded(qapp, cand())
     p.dismiss_requested.connect(seen.append)
     assert p.click_action(p.ready, 0, "Decline")
-    assert seen == [q.offered.id]
+    assert seen == [q.next_up.id]
 
 
 @pytest.mark.parametrize(
     "label,outcome",
-    [("Traded", Outcome.FILLED), ("AFK", Outcome.AFK),
-     ("Offline", Outcome.OFFLINE), ("Already Sold", Outcome.SOLD)],
+    [("Traded", Outcome.FILLED), ("Not Available", Outcome.UNAVAILABLE),
+     ("Already Sold", Outcome.SOLD)],
 )
 def test_each_verdict_is_a_single_click(qapp, label, outcome):
     seen = []
     p, q = loaded(qapp, cand())
     p.outcome_reported.connect(lambda i, o: seen.append((i, o)))
-    taken = q.take_offered(T0)
+    taken = q.take_next(T0)
     p.refresh(q, T0)
     qapp.processEvents()
     assert p.click_action(p.awaiting, 0, label)
@@ -151,14 +164,17 @@ def test_each_verdict_is_a_single_click(qapp, label, outcome):
 
 
 def test_only_the_verdicts_asked_for_are_offered(qapp):
-    """No Reply is retired: the timer writes Expired, people press AFK/Offline."""
+    """Three, not five. AFK and Offline were used properly for one session and
+    then rejected — at this queue's rate a three-way judgement costs more than
+    the answer is worth, and `Client.txt` can tell them apart afterwards.
+    """
     p, q = loaded(qapp, cand())
-    q.take_offered(T0)
+    q.take_next(T0)
     p.refresh(q, T0)
     qapp.processEvents()
-    assert not p.click_action(p.awaiting, 0, "Refused")
-    assert not p.click_action(p.awaiting, 0, "No Reply")
-    for label in ("Traded", "AFK", "Offline", "Already Sold"):
+    for gone in ("Refused", "No Reply", "AFK", "Offline", "Adjust…"):
+        assert not p.click_action(p.awaiting, 0, gone), gone
+    for label in ("Traded", "Not Available", "Already Sold"):
         assert p.click_action(p.awaiting, 0, label)
 
 
@@ -209,7 +225,7 @@ def test_a_changed_row_set_does_rebuild(qapp):
 
 def test_awaiting_shows_its_auto_no_reply_countdown(qapp):
     p, q = loaded(qapp, cand())
-    q.take_offered(T0)
+    q.take_next(T0)
     p.refresh(q, T0)
     qapp.processEvents()
     assert p.awaiting.item(0, AWAITING_TIMER_COLUMN).text() == "5m"
@@ -220,7 +236,7 @@ def test_awaiting_shows_its_auto_no_reply_countdown(qapp):
 
 def test_an_auto_resolved_trade_leaves_the_lower_section(qapp):
     p, q = loaded(qapp, cand())
-    q.take_offered(T0)
+    q.take_next(T0)
     late = T0 + timedelta(seconds=301)
     tick = q.tick(late)
     assert len(tick.auto_resolved) == 1
@@ -245,7 +261,7 @@ def test_a_rebuild_leaves_no_stray_action_widgets(qapp):
 
 def test_shrinking_the_list_removes_its_widgets(qapp):
     p, q = loaded(qapp, cand(char="A"))
-    q.take_offered(T0)
+    q.take_next(T0)
     p.refresh(q, T0)
     qapp.processEvents()
     holders = [w for w in p.ready.findChildren(QWidget)
@@ -294,16 +310,18 @@ class TestCostColumns:
 
     def test_the_same_five_columns_appear_in_waiting(self, qapp):
         p, q = loaded(qapp, ex_cand())
-        q.take_offered(T0)
+        q.take_next(T0)
         p.refresh(q, T0)
         qapp.processEvents()
         assert p.awaiting.item(0, 2).text() == "2,412 ex"   # each
         assert p.awaiting.item(0, 3).text() == "21,708 ex"  # cost
         assert p.awaiting.item(0, 5).text() == "ex"         # settle
 
-    def test_the_headline_quotes_the_sellers_currency_too(self, qapp):
+    def test_the_row_is_the_only_place_the_price_appears(self, qapp):
+        """The headline quoted it while it named a live offer. It counts rows
+        now, so the seller's currency has to be right in the table."""
         p, q = loaded(qapp, ex_cand())
-        assert "21,708 ex" in p.headline.text()
+        assert "21,708 ex" == p.ready.item(0, 4).text()
 
 
 # --- the row lights up, but not under a button -----------------------------
@@ -349,10 +367,10 @@ class TestRowHover:
 
     def test_the_waiting_verdict_buttons_do_the_same(self, qapp):
         p, q = loaded(qapp, cand())
-        q.take_offered(T0)
+        q.take_next(T0)
         p.refresh(q, T0)
         qapp.processEvents()
-        for label in ("Traded", "AFK", "Offline", "Already Sold"):
+        for label in ("Traded", "Not Available", "Already Sold"):
             p.awaiting.set_hover_row(0)
             _enter(self._button(p, p.awaiting, 0, label))
             assert p.awaiting.hover_row == -1, label
@@ -371,7 +389,7 @@ class TestRowHover:
 def test_copy_again_asks_for_the_same_trade(qapp):
     """A seller who answers wants the offer repeated; retyping it loses trades."""
     p, q = loaded(qapp, cand())
-    taken = q.take_offered(T0)
+    taken = q.take_next(T0)
     p.refresh(q, T0)
     qapp.processEvents()
     seen = []
@@ -389,96 +407,12 @@ def test_the_two_sections_share_a_draggable_splitter(qapp):
     assert not p.split.childrenCollapsible()
 
 
-# --- correcting a trade after the fact --------------------------------------
-
-def test_adjust_asks_for_the_quantity_actually_traded(qapp, monkeypatch):
-    """Whispered for 18, the seller had 3 (reported from the field 2026-07-31)."""
-    from poe2arb.gui import queue_panel as qp
-
-    p, q = loaded(qapp, cand(pay=11.0, stock=18.0))
-    taken = q.take_offered(T0)
-    p.refresh(q, T0)
-    qapp.processEvents()
-    assert taken.candidate.plan.units == 18.0
-
-    monkeypatch.setattr(qp.AdjustDialog, "ask", staticmethod(lambda *_a: (3.0, 33.0)))
-    seen = []
-    p.revise_requested.connect(lambda *a: seen.append(a))
-    assert p.click_action(p.awaiting, 0, "Adjust…")
-    assert seen == [(taken.id, 3.0, 33.0)]
-
-
-def test_adjust_cancelled_changes_nothing(qapp, monkeypatch):
-    from poe2arb.gui import queue_panel as qp
-
-    p, q = loaded(qapp, cand(pay=11.0, stock=18.0))
-    q.take_offered(T0)
-    p.refresh(q, T0)
-    qapp.processEvents()
-    monkeypatch.setattr(qp.AdjustDialog, "ask", staticmethod(lambda *_a: None))
-    seen = []
-    p.revise_requested.connect(lambda *a: seen.append(a))
-    p.click_action(p.awaiting, 0, "Adjust…")
-    assert seen == []
-
-
-class TestAdjustDialog:
-    def _dialog(self, qapp, **kw):
-        from poe2arb.gui.queue_panel import AdjustDialog
-
-        return AdjustDialog(None, cand(**kw))
-
-    def test_it_cannot_ask_for_more_than_was_offered(self, qapp):
-        d = self._dialog(qapp, pay=11.0, stock=18.0)
-        assert d.units.maximum() == 18.0
-        assert d.units.value() == 18.0
-
-    def test_it_steps_in_whole_lots(self, qapp):
-        """Part of a lot would cost part of an orb, which cannot be traded."""
-        d = self._dialog(qapp, pay=11.0, stock=18.0, get=3.0)
-        assert d.units.singleStep() == 3.0
-        assert d.units.minimum() == 3.0
-
-    def test_the_preview_prices_the_correction(self, qapp):
-        d = self._dialog(qapp, pay=11.0, stock=18.0)
-        d.units.setValue(3.0)
-        qapp.processEvents()
-        assert "3 for 33 Divine Orbs" in d.summary.text() or "3 for" in d.summary.text()
-        assert "profit" in d.summary.text()
-
-    def test_the_total_follows_the_quantity_until_it_is_touched(self, qapp):
-        """"They only had three" does not change what three cost each."""
-        d = self._dialog(qapp, pay=11.0, stock=18.0)
-        assert d.total.value() == 198.0     # 18 at 11 each
-        d.units.setValue(3.0)
-        qapp.processEvents()
-        assert d.total.value() == 33.0
-
-    def test_a_counteroffered_price_survives_a_quantity_change(self, qapp):
-        """Once the user has named a price, nothing may quietly overwrite it."""
-        d = self._dialog(qapp, pay=11.0, stock=18.0)
-        d.total.setValue(150.0)
-        d.units.setValue(9.0)
-        qapp.processEvents()
-        assert d.total.value() == 150.0
-        assert d.chosen_units() == 9.0
-
-    def test_a_counteroffer_can_make_the_trade_a_loss_and_says_so(self, qapp):
-        """The field case: +38.00 logged on a trade that lost money."""
-        d = self._dialog(qapp, pay=11.0, stock=18.0)
-        d.total.setValue(100000.0)
-        qapp.processEvents()
-        assert d.revised().profit_divines < 0
-        assert "lost money" in d.summary.text()
-        assert "+-" not in d.summary.text()
-
-
 # --- pinning a row off the clock --------------------------------------------
 
 def test_pin_is_one_click_on_the_row(qapp):
     seen = []
     p, q = loaded(qapp, cand())
-    taken = q.take_offered(T0)
+    taken = q.take_next(T0)
     p.refresh(q, T0)
     qapp.processEvents()
     p.pin_requested.connect(lambda i, on: seen.append((i, on)))
@@ -488,7 +422,7 @@ def test_pin_is_one_click_on_the_row(qapp):
 
 def test_a_pinned_row_offers_unpin_and_stops_counting_down(qapp):
     p, q = loaded(qapp, cand())
-    taken = q.take_offered(T0)
+    taken = q.take_next(T0)
     p.refresh(q, T0)
     qapp.processEvents()
     assert p.awaiting.item(0, AWAITING_TIMER_COLUMN).text() == "5m"
@@ -508,7 +442,7 @@ def test_a_pinned_row_offers_unpin_and_stops_counting_down(qapp):
 def test_pinning_redraws_the_row(qapp):
     """Pin state changes the button and the cell, so identity alone is not enough."""
     p, q = loaded(qapp, cand())
-    taken = q.take_offered(T0)
+    taken = q.take_next(T0)
     p.refresh(q, T0)
     qapp.processEvents()
     before = p.awaiting.cellWidget(0, AWAITING_ACTION_COLUMN)
@@ -516,3 +450,129 @@ def test_pinning_redraws_the_row(qapp):
     p.refresh(q, T0)
     qapp.processEvents()
     assert p.awaiting.cellWidget(0, AWAITING_ACTION_COLUMN) is not before
+
+
+# --- correcting a trade in the row it is shown in ---------------------------
+# 0.8.0 did this in an *Adjust…* dialog. Replaced 2026-08-02 after the
+# maintainer used it: at this queue's rate, two clicks and a context switch to
+# change one number is too much. The obstacle the dialog dodged — a table that
+# rebuilds every second for the countdowns — is solved here instead.
+
+
+def edited(qapp, **kw):
+    """A whispered row with its three editors on screen."""
+    p, q = loaded(qapp, cand(**kw))
+    taken = q.take_next(T0)
+    p.refresh(q, T0)
+    qapp.processEvents()
+    return p, q, taken, p._editors[taken.id]
+
+
+def test_the_three_money_cells_are_editable_in_place(qapp):
+    from PySide6.QtWidgets import QDoubleSpinBox
+
+    from poe2arb.gui.queue_panel import (
+        AWAITING_PER_COLUMN, AWAITING_TOTAL_COLUMN, AWAITING_UNITS_COLUMN,
+    )
+
+    p, q, taken, _ = edited(qapp, pay=11.0, stock=18.0)
+    for column in (AWAITING_UNITS_COLUMN, AWAITING_PER_COLUMN, AWAITING_TOTAL_COLUMN):
+        assert isinstance(p.awaiting.cellWidget(0, column), QDoubleSpinBox)
+    # And only there: a Ready row is an ask, not a record of what happened.
+    assert p.ready.cellWidget(0, AWAITING_UNITS_COLUMN) is None
+
+
+def test_a_quantity_correction_re_prices_at_the_listed_rate(qapp):
+    """"They only had three" does not change what three cost each."""
+    p, q, taken, e = edited(qapp, pay=11.0, stock=18.0)
+    seen = []
+    p.revise_requested.connect(lambda *a: seen.append(a))
+    e.units.setValue(3.0)
+    e._send_now()
+    assert e.total.value() == 33.0
+    assert e.per.value() == 11.0
+    assert seen[-1] == (taken.id, 3.0, 33.0)
+
+
+def test_a_counteroffered_total_moves_the_price_per(qapp):
+    """1 fill in 36 was negotiated, and it logged +38.00 on a losing trade."""
+    p, q, taken, e = edited(qapp, pay=11.0, stock=18.0)
+    seen = []
+    p.revise_requested.connect(lambda *a: seen.append(a))
+    e.total.setValue(216.0)
+    e._send_now()
+    assert e.per.value() == 12.0
+    assert e.units.value() == 18.0
+    assert seen[-1] == (taken.id, 18.0, 216.0)
+
+
+def test_a_price_per_correction_moves_the_total(qapp):
+    p, q, taken, e = edited(qapp, pay=11.0, stock=18.0)
+    seen = []
+    p.revise_requested.connect(lambda *a: seen.append(a))
+    e.per.setValue(12.0)
+    e._send_now()
+    assert e.total.value() == 216.0
+    assert seen[-1] == (taken.id, 18.0, 216.0)
+
+
+def test_the_quantity_cannot_exceed_what_was_asked_for(qapp):
+    """The extra was never on offer — the ask was capped by the seller's stock."""
+    p, q, taken, e = edited(qapp, pay=11.0, stock=18.0)
+    assert e.units.maximum() == 18.0
+    assert e.units.value() == 18.0
+
+
+def test_the_quantity_steps_in_whole_lots(qapp):
+    """Part of a lot would cost part of an orb, which cannot be traded."""
+    p, q, taken, e = edited(qapp, pay=32.0, stock=18.0, get=3.0)
+    assert e.units.singleStep() == 3.0
+    assert e.units.minimum() == 3.0
+
+
+def test_the_price_per_steps_by_one_whole_unit_of_the_total(qapp):
+    """Partial currency cannot be traded, so that is the finest real change."""
+    p, q, taken, e = edited(qapp, pay=11.0, stock=18.0)
+    assert e.per.singleStep() == pytest.approx(1 / 18)
+    assert e.total.singleStep() == 1.0
+
+
+def test_an_open_editor_survives_the_once_a_second_redraw(qapp):
+    """The rebuild that would destroy it is held until the edit is finished."""
+    p, q, taken, e = edited(qapp, pay=11.0, stock=18.0)
+    e.units.setValue(15.0)          # arrows clicked; the commit is pending
+    assert p._editing()
+    q.submit([cand(char="Other", pay=9.0)], T0)
+    q.take(q.next_up.id, T0)
+    p.refresh(q, T0 + timedelta(seconds=1))
+    qapp.processEvents()
+    assert p.awaiting.rowCount() == 1               # the arrival waited
+    assert p._editors[taken.id] is e                # and the editor is untouched
+
+    e._send_now()                   # the edit lands, and the queue catches up
+    p.refresh(q, T0 + timedelta(seconds=2))
+    qapp.processEvents()
+    assert p.awaiting.rowCount() == 2
+
+
+def test_a_correction_made_elsewhere_is_written_into_the_row(qapp):
+    """The Trades tab and the timer both change rows this panel is showing."""
+    p, q, taken, e = edited(qapp, pay=11.0, stock=18.0)
+    q.revise(taken.id, 3.0)
+    p.refresh(q, T0 + timedelta(seconds=1))
+    qapp.processEvents()
+    assert e.units.value() == 3.0
+    assert p.awaiting.item(0, 1).text() == "3"
+    assert p.awaiting.item(0, 3).text() == "33 div"
+
+
+def test_writing_a_row_back_does_not_re_commit_it(qapp):
+    """A redraw that fired `valueChanged` would log an amendment a second."""
+    p, q, taken, e = edited(qapp, pay=11.0, stock=18.0)
+    q.revise(taken.id, 3.0)
+    seen = []
+    p.revise_requested.connect(lambda *a: seen.append(a))
+    for i in range(3):
+        p.refresh(q, T0 + timedelta(seconds=i))
+        qapp.processEvents()
+    assert seen == []

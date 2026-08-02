@@ -318,10 +318,10 @@ def test_settings_changes_reach_the_running_queue(qapp, monkeypatch):
     window = SimpleNamespace(
         cfg=Config(
             trade_hotkey="ctrl+shift+f9", trade_hotkey_enabled=True,
-            offer_window_s=30.0, available_ttl_s=120.0, awaiting_timeout_s=600.0,
+            available_ttl_s=120.0, awaiting_timeout_s=600.0,
         ),
         trade_queue=SimpleNamespace(
-            offer_window_s=15.0, available_ttl_s=60.0, awaiting_timeout_s=300.0,
+            available_ttl_s=60.0, awaiting_timeout_s=300.0,
             set_bankroll=lambda *_a: None,
         ),
         _hotkey=GlobalHotkey(),
@@ -334,7 +334,6 @@ def test_settings_changes_reach_the_running_queue(qapp, monkeypatch):
 
     mw.MainWindow._apply_queue_settings(window, before)
 
-    assert window.trade_queue.offer_window_s == 30.0
     assert window.trade_queue.available_ttl_s == 120.0
     assert window.trade_queue.awaiting_timeout_s == 600.0
 

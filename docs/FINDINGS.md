@@ -618,12 +618,29 @@ hand-written verdict**. The maintainer used them properly and *then* asked for t
 just be undiscovered; a feature used across 51 whispers and then rejected has been tried.
 The cost is interaction, not discoverability, and no relabelling fixes that.
 
-**Decided, and it replaces the three buttons:** one **"Seller not available"** button whose
-only job is to *remove the row from the queue*, plus the `Client.txt` reader to say
-afterwards whether it was AFK, offline or genuinely silent. Same data, one click instead of
-a three-way judgement, and the classification moves to where the evidence already is.
-`Outcome.AFK` and `Outcome.OFFLINE` stay in the enum forever — `outcomes.jsonl` now holds
-11 real records under them — but stop being things a human is asked to choose between.
+**Decided, and it replaced the three buttons — shipped in 0.9.0 as `Outcome.UNAVAILABLE`,
+labelled *Not Available*.** Its only job is to remove the row from the queue, plus the
+`Client.txt` reader to say afterwards whether it was AFK, offline or genuinely silent.
+Same data, one click instead of a three-way judgement, and the classification moves to
+where the evidence already is. `Outcome.AFK` and `Outcome.OFFLINE` stay in the enum
+forever — `outcomes.jsonl` now holds 11 real records under them — but stop being things a
+human is asked to choose between.
+
+Three decisions inside that one, each of which would read as an oversight later:
+
+- **The name.** `UNAVAILABLE` over `NOT_AVAILABLE`, `NO_TRADE` and `SELLER_GONE`: it
+  matches the button's wording and claims nothing about *why*, which is all a single
+  press establishes. `NO_TRADE` was rejected as wide enough to swallow `DECLINED`.
+  Permanent — the log stores the enum value and `Outcome` never renames members.
+- **It is not in `SETTLED_OUTCOMES`.** The button replaced one member that was in the set
+  (`OFFLINE`) and one that deliberately was not (`AFK`), so the merged verdict takes the
+  weaker claim: a seller who was away when the sweep found them is worth re-finding
+  fifteen minutes later, and a press that says nothing about why cannot be read as a
+  judgement on the listing.
+- **`DECLINED` survives on the Trades tab, not on the fast path.** "They refused the
+  price" is a real answer the user sometimes has, and it is a considered verdict rather
+  than a fast one — so it lives in the Result drop-down, which is the correction surface,
+  alongside `AFK` and `OFFLINE` for the records already written under them.
 
 **And the maintainer asked the right question back: what are these metrics *for*?** The
 honest answer, so it can be judged rather than assumed: 22% of `NO_REPLY` is GGG's AFK
@@ -1316,28 +1333,34 @@ Also worth not rediscovering:
 
 ### The offer queue
 
-> **DECIDED 2026-08-02, NOT YET BUILT: the interruption model is being removed.** The
-> premise under everything in the next four bullets is that the user is busy in a map and
-> an offer must interrupt them. That premise is **false** — the app is used sitting in
-> town with full attention (see *The first real play session on 0.8.0*). The maintainer's
-> call: **drop the toast and the alert window; keep the ● marker, re-defined as "row 1,
-> the one the hotkey will take".** Concretely, and read this before touching
-> `trade_queue`:
+> **BUILT IN 0.9.0 (2026-08-02): the interruption model is gone.** The premise under
+> everything in the next four bullets is that the user is busy in a map and an offer must
+> interrupt them. That premise is **false** — the app is used sitting in town with full
+> attention (see *The first real play session on 0.8.0*). What shipped:
 >
-> - **`offer_window_s` and `alert_until` go**, along with the toast and the OFFERED
->   state's gate on visibility. Retire the config key through `config.RETIRED_KEYS` and
->   drop its Settings row.
-> - **The ● stops being a state and becomes a position.** It marks row 1 of *Ready to
->   whisper*, which after the re-sort **is** the trade the hotkey takes. Nothing is
->   "offered" any more; everything found is simply takeable.
-> - **`expires_at` starts when the candidate enters Ready**, not at promotion, and the
->   floor-at-the-alert-window rule goes with the alert window. `available_ttl_s` (5 min)
->   still governs the lifetime and `awaiting_timeout_s` still governs the whisper.
+> - **`offer_window_s` and `alert_until` are gone**, along with the toast and the QUEUED
+>   and OFFERED states. The config key is retired through `config.RETIRED_KEYS` and its
+>   Settings row is gone. `submit` puts a candidate straight into AVAILABLE; `tick` only
+>   retires rows. A sound still plays per *batch* of arrivals if `alert_sound` is on —
+>   the user is looking at the game, so it is the only signal that crosses.
+> - **`available` sorts by rank, and ● is a position rather than a state.** It marks
+>   whichever row `take_next` would take, which is row 1 except while the panel is
+>   holding a reshuffle under the pointer. Nothing is "offered" any more.
+> - **`expires_at` starts at `submit`**, and the floor-at-the-alert-window rule went with
+>   the alert window. `available_ttl_s` (5 min) still governs the lifetime and
+>   `awaiting_timeout_s` still governs the whisper.
 > - **Rows still expire.** Removing the interruption is not removing the clock — a stale
 >   Ready row is still a listing that has probably gone.
 >
+> **`cancel_pending` went with the backlog it existed to drop.** Stopping *Find trades*
+> now stops adding and leaves the visible rows alone, which is what the toggle is used
+> for — it is the pause button when replies pile up. Stopping also records the item the
+> sweep had reached, and the next start **rotates** the list to begin there rather than
+> truncating it: truncating would leave the top of the list permanently unswept for
+> anyone who pauses often, which is exactly this user.
+>
 > The four bullets below are kept because they record *why* each piece existed; do not
-> re-derive them as reasons to keep it.
+> re-derive them as reasons to restore it.
 
 - **Exactly one trade is OFFERED at a time.** A second toast arriving while the first is
   unread makes both of them noise.
@@ -1415,8 +1438,8 @@ Also worth not rediscovering:
   the list every alert window) — it carries the ● marker and is named in the headline,
   which is where someone mid-map is looking.
 
-  > **REVERSED for *Ready to whisper* by maintainer decision, 2026-08-02 — not yet
-  > built.** Two premises under this bullet failed in the first real play session. The
+  > **REVERSED for *Ready to whisper*, and shipped in 0.9.0.** Two premises under this
+  > bullet failed in the first real play session. The
   > app is **not** used mid-map (see *The first real play session on 0.8.0*), so
   > "where someone mid-map is looking" is not a reason for anything; and the maintainer
   > routinely **shrinks the Ready pane to a few rows** to give the splitter's real estate
@@ -1427,23 +1450,24 @@ Also worth not rediscovering:
   > — while `available` sorts by `offered_at or queued_at`, satisfying this means sorting
   > *Ready* by the ranking key. **The cost is real and was the reason for the old rule:**
   > rank order reshuffles when a better candidate arrives, so rows move under the cursor.
-  > Mitigate rather than revert (row 1 is the hotkey's row, so it is the least
-  > click-sensitive; consider holding a reshuffle while the pointer is over the table).
-  > Spec in TODO, *Both queue sections*.
+  > Mitigated rather than reverted, both in `queue_panel` rather than in the queue:
+  > `_ready_order` holds the order while the pointer is over the table (asking both
+  > `hover_row` **and** `underMouse()`, because a rebuild deliberately clears the first
+  > and one held rebuild would otherwise release every later one), and ● marks the
+  > hotkey's row rather than row 1, so the held order never lies about what the key will
+  > do.
 
 - **The hotkey falls through to the top of Ready when nothing is live.** The alert window
   is seconds and the listed window is minutes, so most of the time there is no OFFERED
   trade and the key did nothing while the panel was full of takeable rows. *Note this is
   already half of the reversal above: when nothing is OFFERED the key does take row 1, and
   the complaint is precisely that when something **is** OFFERED it does not.*
-- **The QUEUED drip is being removed** (decided 2026-08-02, not yet built). `tick` promotes
-  one trade per `offer_window_s`, so found candidates sit invisible in QUEUED for 20s each
-  and a sweep's worth of them takes minutes to appear. The maintainer's instruction is to
-  **put every candidate into Ready as it is found**. This does not delete the OFFERED
-  state — the ● marker, the toast and the alert window are a separate concern — it stops
-  `available` being gated on promotion. Note the interaction with `cancel_pending`, which
-  drops the QUEUED backlog when *Find trades* is switched off: with no backlog to drop,
-  stopping stops adding rather than retracting, which is the intended behaviour anyway.
+- **The QUEUED drip was removed in 0.9.0.** `tick` used to promote one trade per
+  `offer_window_s`, so found candidates sat invisible in QUEUED for 20s each and a
+  sweep's worth of them took minutes to appear. Every candidate now enters Ready as it is
+  found. The OFFERED state went at the same time rather than separately, since with
+  nothing gating visibility the only thing it still did was decide what the hotkey took —
+  which is now simply row 1.
 - **Submissions are deduplicated against everything unfinished**, including already-
   whispered trades. Sweeps overlap, and re-offering would have the user message the same
   seller twice.
@@ -1545,21 +1569,35 @@ Also worth not rediscovering:
   re-apply the rounding floor that decided the original profit. Records written before this
   fall back to a whole divine in `outcomes.plan_correction` — the pessimistic reading, and
   the same default `plan_trade` takes.
-- **The Trades tab edits in place; the Opportunities queue uses a dialog — and the dialog
-  is now overruled.** The original reasoning still describes a real constraint: the queue
-  tables rebuild on a one-second timer for the countdowns, which destroys an open editor
-  mid-keystroke. **The maintainer tried it and wants inline editing with spin arrows
-  anyway** (2026-08-02), which makes the rebuild a problem to solve rather than a reason to
-  avoid inline editing — suppress the rebuild while an editor is open, or make the tick
-  update only the countdown cells it owns. Also decided: **Total and Price per must both be
-  editable and each must move the other.** Editing stays confined to **history rows** on
-  the Trades tab — a live sweep row is a listing nobody has acted on, there is nothing to
-  correct about it, and the same double-click has to keep copying its whisper.
+- **Both surfaces edit in place. The queue's *Adjust…* dialog went in 0.9.0.** The
+  dialog's original reasoning described a real constraint — the queue tables rebuild on a
+  one-second timer for the countdowns, which destroys an open editor mid-keystroke — but
+  the maintainer used it and rejected it (2026-08-02), which made the rebuild a problem
+  to solve rather than a reason to avoid inline editing. What shipped, and the four
+  things that were not obvious until it was built:
+  - **The rebuild is held, not made cheaper.** `QueuePanel._editing()` blocks the rebuild
+    while any spin box is focused *or* holding an uncommitted change; the countdown cells
+    it would have rewritten are a second stale, which nobody can see. Focus alone was not
+    enough: the gap between an arrow click and its debounced commit is exactly when a new
+    whisper arrives.
+  - **Commits are debounced (500ms) and also fire on `editingFinished`**, so holding an
+    arrow down writes one amendment rather than one per click.
+  - **Corrections re-apply to the ask, not to the last correction.** `replan_units` only
+    ever shrinks what it is given, so compounding would ratchet: one nudge too far down
+    and the row could never come back up. `QueuedTrade.asked` is captured at `take` for
+    this. The dialog never hit it because it was opened fresh each time.
+  - **Writing a value back must not re-commit it.** The row is redrawn every second, and
+    `setValue` fires `valueChanged`; `_MoneyEditors.show` is silent and skips a busy row
+    entirely, or a redraw would log an amendment a second.
+
+  Editing stays confined to **history rows** on the Trades tab — a live sweep row is a
+  listing nobody has acted on, there is nothing to correct about it, and the same
+  double-click has to keep copying its whisper.
 - **A whispered row is editable in the queue while it is live, and on the Trades tab
   afterwards — not on the live sweep table.** Decided 2026-08-01. A listing you whispered
   this session is *carried* on the live Trades table so a verdict has a row to land on, and
-  those rows are deliberately **not** editable there: the queue's *Adjust…* covers a trade
-  in flight, and Trades → *All time* covers it once the session has moved on. The
+  those rows are deliberately **not** editable there: the queue's own in-row editors cover
+  a trade in flight, and Trades → *All time* covers it once the session has moved on. The
   alternative — a live table holding two kinds of row with two sets of edit rules, one of
   which also has to keep double-click-to-copy — is the shape of a bug rather than a feature.
 - **A verdict change goes through `record_outcome`, not through the amendment record.**
@@ -1606,6 +1644,12 @@ Also worth not rediscovering:
   Seller (which keep floors of their own, from content rather than from their headings).
   The minimum width itself should come **down**, not up: the 960 was driven by *Long shots*
   wrapping in the bankroll bar, which has free margin to its left.
+  **Confirmed still open after the 0.9.0 queue rework, by screenshot at the shipped 1000px
+  default:** both queue tables draw a horizontal scrollbar and clip the last action button
+  by roughly the width of the vertical scrollbar. The sequence is growth-to-fill followed
+  by a vertical scrollbar appearing, which takes ~15px back out of a viewport the columns
+  have just been grown to exactly fill. The same screenshot against 0.8.0 clips the same
+  way, so this is the open Batch 3 item rather than anything the rework introduced.
   Three things this uncovered, all measured by screenshot and all easy to reintroduce:
   - **`resizeColumnsToContents` measures the cells and ignores the heading.** "Buy" came
     back at 30px against a 49px title, so the floors have to be applied *after* it or the
@@ -1613,7 +1657,18 @@ Also worth not rediscovering:
   - **It does not measure a cell widget at all**, so an action column's width is a guess —
     314px for a row of buttons whose `sizeHint` is 226. That 88px of nothing came straight
     off the columns that do hold something, because the action column is exempt from the
-    squeeze. `_fit_protected` asks the widget instead.
+    squeeze. `_fit_protected` asks the widget instead. **Extended 2026-08-02**: any
+    column can hold a widget now that *Waiting on a reply* edits in place, so `min_width`
+    asks row 0's cell widget as well. Row 0 rather than all of them, because that floor is
+    read inside every resize event and every row in a column is built the same way.
+  - **A spin box in a table cell must be sized to its value, not to its range** (0.9.0,
+    by screenshot). Qt sizes one from the widest number the range allows, which is right
+    for a form and wrong for a cell: a counteroffer's nine-figure ceiling made every
+    *Total* column 152px wide to hold "35,100 ex", and the width came out of Seller and
+    Sent, which truncated to "just n…". `queue_panel._CellSpin` overrides `sizeHint` to
+    measure the text actually in it. With that and two fewer verdict buttons, the
+    whispered row's floor came out *narrower* than 0.8.0's — 899px against 897, at 906
+    drawn against 916.
   - **Growth must hand out the space the row does not fill, not the space the window
     gained.** A row can already be wider than the window — the squeeze stops at the floors,
     and the first sizing runs against a pre-show viewport narrower than the real one.

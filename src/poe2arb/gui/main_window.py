@@ -124,6 +124,11 @@ class MainWindow(QMainWindow):
         self.cfg = self._load_cfg()
         self._sweep_worker: SweepWorker | None = None
         self._next_sweep_at: float | None = None
+        # Where a stopped sweep had got to, so switching Find trades back on
+        # carries on rather than re-fetching the items it has just read. The
+        # toggle is used as a pause when replies pile up, and restarting from
+        # the top re-found listings the user had already dealt with.
+        self._resume_from: str | None = None
         # id -> display name from the last scan, so Settings can accept
         # in-game currency names and flag typos.
         self._known_currencies: dict[str, str] = {}
@@ -141,7 +146,6 @@ class MainWindow(QMainWindow):
         self.session = SessionTracker()
 
         self.trade_queue = TradeQueue(
-            offer_window_s=self.cfg.offer_window_s,
             available_ttl_s=self.cfg.available_ttl_s,
             awaiting_timeout_s=self.cfg.awaiting_timeout_s,
             # Any appetite above zero means the user asked to see long shots,
@@ -586,14 +590,24 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ scanning
 
     def start_sweep(self) -> None:
-        """Run one cross-venue sweep. A second request while one runs is ignored."""
+        """Run one cross-venue sweep. A second request while one runs is ignored.
+
+        A sweep the user stopped part-way resumes at the item it had reached —
+        see `_resume_from`. Every other start is a fresh pass from the top.
+        """
         if self._sweep_worker is not None and self._sweep_worker.isRunning():
             return
         self.sweep_timer.stop()
         self.sweep.set_running(True)
         self.sweep.set_status("Checking Currency Exchange prices…")
-        self._log("cross-venue sweep started")
-        self._sweep_worker = SweepWorker(self.cfg, self)
+        if self._resume_from is not None:
+            self._log(f"cross-venue sweep resumed at {self._resume_from}")
+        else:
+            self._log("cross-venue sweep started")
+        self._sweep_worker = SweepWorker(
+            self.cfg, self, resume_from=self._resume_from
+        )
+        self._resume_from = None
         self._sweep_worker.progress.connect(self._sweep_progress)
         self._sweep_worker.budget.connect(self._show_budget)
         self._sweep_worker.candidates.connect(self._candidates_found)
@@ -619,13 +633,11 @@ class MainWindow(QMainWindow):
             return
         self.sweep_timer.stop()
         self._next_sweep_at = None
-        # Stop means stop. The backlog would otherwise keep surfacing offers for
-        # minutes, since `tick` promotes one every offer window regardless of
-        # whether anything is still sweeping. Already-offered and awaiting rows
-        # survive — see TradeQueue.cancel_pending.
-        dropped = self.trade_queue.cancel_pending()
-        if dropped:
-            self._log(f"dropped {dropped} queued trade(s) not yet offered")
+        # Nothing to retract: since 0.9.0 there is no backlog to drip out, so
+        # stopping simply stops adding. Rows already found stay takeable and
+        # expire on their own clocks — the toggle is used as a pause when
+        # replies pile up, and dropping the visible queue was never what it was
+        # meant to do.
         self.queue_panel.refresh(self.trade_queue)
         if self._sweep_worker is not None and self._sweep_worker.isRunning():
             self._sweep_worker.cancel()
@@ -674,8 +686,16 @@ class MainWindow(QMainWindow):
         """Runs on every exit path, including cancellation, which emits no result."""
         self.sweep.set_running(False)
         if self._sweep_worker is not None and self._sweep_worker.was_cancelled:
+            # Remembered here rather than in `_sweep_toggled`, which runs while
+            # the thread is still winding down and would record an item the
+            # sweep went on to finish.
+            self._resume_from = self._sweep_worker.reached
             self.sweep.set_status("Sweep stopped.")
-            self._log("sweep stopped")
+            self._log(
+                "sweep stopped — the next one carries on from here"
+                if self._resume_from
+                else "sweep stopped"
+            )
             self.statusBar().showMessage("Stopped")
             return
         self._schedule_next_sweep()
@@ -687,12 +707,16 @@ class MainWindow(QMainWindow):
         finished meant a long silence followed by every offer at once (reported
         from the field 2026-07-31). The Trades tab still waits for the full
         result, because it describes the pass as a whole.
+
+        Since 0.9.0 these land takeable rather than in a backlog to be dripped
+        out, so this path *is* the queue filling up.
         """
         if not candidates or not self.sweep_action.isChecked():
             return
         added = self.trade_queue.submit(candidates)
         if added:
-            self._log(f"{added} new trade(s) queued")
+            self._log(f"{added} new trade(s) ready to whisper")
+            self._announce_arrivals(added)
             self._queue_tick()
 
     def _sweep_done(self, result) -> None:
@@ -717,7 +741,8 @@ class MainWindow(QMainWindow):
         # emitted while the toggle was briefly off, say.
         added = self.trade_queue.submit(result.candidates)
         if added:
-            self._log(f"{added} new trade(s) queued")
+            self._log(f"{added} new trade(s) ready to whisper")
+            self._announce_arrivals(added)
         self._queue_tick()
         plausible = sum(1 for c in result.candidates if c.band.name == "PLAUSIBLE")
         self._log(
@@ -735,14 +760,13 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ trade queue
 
     def _queue_tick(self) -> None:
-        """Advance the queue's clocks, announce a new offer, redraw.
+        """Advance the queue's clocks and redraw.
 
-        Runs once a second: the panel shows live countdowns, and an offer that
-        silently outlives its window would leave the hotkey pointing at nothing.
+        Runs once a second: the panel shows live countdowns, and a row that
+        silently outlived its window would leave the hotkey pointing at a
+        listing that has gone.
         """
         tick = self.trade_queue.tick()
-        if tick.newly_offered is not None:
-            self._announce_offer(tick.newly_offered)
         for t in tick.expired:
             log.debug("trade offer expired: %s", t.candidate.item_name)
         for t in tick.auto_resolved:
@@ -799,47 +823,16 @@ class MainWindow(QMainWindow):
             )
         self.queue_panel.refresh(self.trade_queue)
 
-    def _announce_offer(self, trade) -> None:
-        """One toast per offer, and only while no other offer is live.
-
-        The queue guarantees the second part — it never promotes a trade while
-        one is already offered — so this can simply fire whenever it's called.
-        """
-        c = trade.candidate
-        seller = c.listing.character or c.listing.account
-        key_hint = (
-            f"  ·  {format_hotkey(self.cfg.trade_hotkey)}"
-            if self.cfg.trade_hotkey_enabled and self._hotkey.active
-            else ""
-        )
-        # Priced in what the seller asked for, matching the whisper and the
-        # table — a toast quoting divines for an exalted listing is a number
-        # that appears nowhere else in the trade.
-        price = fmt_amount(c.pay_total, c.listing.pay_currency)
-        self._notify(
-            f"Trade: +{c.profit_divines:.2f} div{key_hint}",
-            f"{c.plan.units:g} × {c.item_name} from {seller} for {price}",
-        )
-        self._log(
-            f"offered: {c.plan.units:g} × {c.item_name} from {seller} "
-            f"for {price} (+{c.profit_divines:.2f} div)"
-        )
-
     def _hotkey_pressed(self) -> None:
-        """Take the live offer — or, if none is live, the oldest ready trade.
+        """Take row 1 of *Ready to whisper*.
 
-        The fallback matters more than it looks. The alert window is seconds and
-        the listed window is minutes, so most of the time there is no live offer
-        and the key did nothing at all while the panel was full of perfectly
-        takeable rows. Falling through to the top of Ready to whisper — the one
-        nearest expiry, which is the row the user would have clicked — makes the
-        key mean "take the next trade" at every moment rather than only during
-        the toast.
+        The one rule the whole 0.9.0 queue rework exists to make true: the key
+        takes the best trade, and the best trade is the row at the top of the
+        table. Up to 0.8.0 it took whichever trade was OFFERED — chosen by rank,
+        while the table was drawn by arrival — so the key acted on a row the
+        user could not pick out.
         """
-        trade = self.trade_queue.offered
-        if trade is None:
-            ready = self.trade_queue.available
-            trade = ready[0] if ready else None
+        trade = self.trade_queue.next_up
         if trade is None:
             self.statusBar().showMessage("No trade is ready to whisper right now", 4000)
             return
@@ -1265,7 +1258,6 @@ class MainWindow(QMainWindow):
         for a countdown the user just shortened is confusing enough to look
         broken.
         """
-        self.trade_queue.offer_window_s = self.cfg.offer_window_s
         self.trade_queue.available_ttl_s = self.cfg.available_ttl_s
         self.trade_queue.awaiting_timeout_s = self.cfg.awaiting_timeout_s
         self.trade_queue.queue_ghosts = self.cfg.risk_appetite > 0.0
@@ -1308,10 +1300,17 @@ class MainWindow(QMainWindow):
         """Re-render the Market tab after a settings or icon change."""
         self._render_market()
 
-    def _notify(self, title: str, message: str) -> None:
-        if self.tray is not None and self.tray.isVisible():
-            self.tray.showMessage(title, message, make_app_icon(), 10_000)
-        if self.cfg.alert_sound:
+    def _announce_arrivals(self, added: int) -> None:
+        """Ping once when a batch of new trades lands in Ready to whisper.
+
+        All that is left of the toast, which went with the interruption model
+        in 0.9.0: the tray balloon described one promoted offer at a time, and
+        there are no promotions any more — a sweep drops everything it finds
+        into the table at once. The sound stays because the user is looking at
+        the game rather than at this window, so it is the only signal that
+        crosses, and it fires per batch rather than per trade.
+        """
+        if added and self.cfg.alert_sound:
             _play_alert_sound()
 
     def _show_update_banner(self, tag: str, url: str) -> None:

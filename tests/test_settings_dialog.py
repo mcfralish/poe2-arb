@@ -187,9 +187,9 @@ class TestTheQueueTimersAreInMinutes:
         assert dialog.awaiting_timeout.specialValueText() == "never"
         assert dialog.result_config().awaiting_timeout_s == 0.0
 
-    def test_the_alert_window_stays_in_seconds(self, dialog):
-        """Twenty seconds expressed in minutes is a third of a decimal place."""
-        assert dialog.offer_window.suffix().strip() == "s"
+    def test_the_alert_window_is_gone(self, dialog):
+        """0.9.0 removed the toast, so there is no window to set."""
+        assert not hasattr(dialog, "offer_window")
 
 
 class TestAlwaysOnTop:
