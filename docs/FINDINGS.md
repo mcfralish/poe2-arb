@@ -199,9 +199,16 @@ items actually being traded. A 1.2× gap on a thin item is not a 20% edge; it is
 noise, and the app presented two such trades as profitable. `MIN_PAIR_VALUE = 1000` is also
 far too low — Astrid's cleared it by 67× and was still 65% wrong.
 
-#### Resolved 2026-08-01: the book is tight, and the error is movement — not spread
+#### Resolved 2026-08-01: on liquid pairs the book is tight, and the error is movement
 
-**The fork above is settled, and it is not the branch this section assumed.** The maintainer
+> **Scope, added 2026-08-02:** everything in this subsection was measured at 1.6M and 10.0M
+> `ValueTraded` and holds only there. At 110k the book is 22.2% wide and the error is
+> one-directional — see the banner at the top of this section. The heading used to read
+> "the book is tight … not spread" without qualification, which is how the liquidity
+> haircut came to be killed on evidence that did not cover the case it was for.
+
+**The fork above is settled for liquid pairs, and it is not the branch this section
+assumed.** The maintainer
 read both sides of the in-game Currency Exchange book while the app's own snapshot was
 pulled minutes later. In-game quotes are "I want : I have"; the first row of each pair is
 what you **pay** to buy, the second what you **receive** to sell.

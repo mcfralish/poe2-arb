@@ -114,8 +114,10 @@ where `min_gap_ratio = 1.05` came from, and **that figure does not generalise.**
 in-game book were read against the app's own snapshot minutes later: the book is **~2%
 wide** (Faded Crisis Fragment, Omen of Whittling) against a 1.7% liquid control, and the
 app's error on those two was **−5.9% and +6.5% — opposite signs**. Omen of Whittling was
-+37% on 07-30 and +6.5% today. So the reference price is **noisy (~±6%), not biased**, the
-**spread explanation is disproved**, and the cause is price *movement*. Consequences for
++37% on 07-30 and +6.5% today. So **on liquid pairs** the reference price is **noisy
+(~±6%), not biased**, the spread explanation is disproved *there*, and the cause is price
+*movement*. (Below ~1M `ValueTraded` none of that holds — see the next paragraph, which
+was measured after this one and reverses it.) Consequences for
 anyone touching this: build freshness, and `min_gap_ratio = 1.05` is still known-wrong but
 now because 5% is *inside the noise*, not because of a 26% bias.
 

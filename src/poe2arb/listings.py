@@ -7,11 +7,13 @@ sell into the in-game Currency Exchange. Two field tests (docs/FINDINGS.md,
 1. **Deep discounts fill rarely, not never.** Fitted 2026-08-01 from 789 logged
    whispers, after two under-sampled readings said first that they never fill
    (n=14) and then that they are worth about a quarter of a plausible whisper
-   (n=156). Measured: plausible 12.4% (n=178), ghost **2.0%** (n=601), and the
+   (n=156). Measured: plausible 12.4% (n=178), ghost **2.16%** (n=601), and the
    fills at 3.92x and 10.94x that overturned the first reading are confirmed to
    have gone through **at the listed price**, not as counteroffers. Ghosts are
-   worth 0.66 of a plausible whisper in divines, not 0.28, so they are demoted
-   rather than buried — see `FILL_PRIOR`, now 0.16 for ghosts rather than 0.0.
+   worth **1.25** plausible whispers in divines — more, not less — having read
+   0.28 and then 0.66, so they are demoted rather than buried. See `FILL_PRIOR`,
+   now 0.17 for ghosts rather than 0.0, and note it carries the *fill-rate*
+   ratio rather than that value ratio.
 
 2. **A listing that has sat three days does not sell.** 0 fills in 102 whispers;
    the oldest that ever filled was 62.9 hours old. It holds in every band, so it
@@ -31,8 +33,10 @@ precisely than before: fills run 9%-15% below 1.5x and 1%-3% above it, so 1.50
 sits on the edge. `min_gap_ratio` is no longer unmeasured — 56 whispers below
 1.10x fill at 14%, as well as any bucket under the cliff — but it is still not
 *settled*, because at a 1.05 gap the whole edge is inside the reference price's
-own ~6% error. That is a pricing question, not a fill question, and the two
-still have to be fitted together.
+own ~6% error on a liquid pair — and on a thin one the error is far larger and
+one-directional (measured 2026-08-02: +53% above the bid at 110k ValueTraded).
+That is a pricing question, not a fill question, and the two still have to be
+fitted together.
 """
 
 from __future__ import annotations
